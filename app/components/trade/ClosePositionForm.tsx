@@ -196,17 +196,20 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? (Number(pnlNative) / 10 ** decimals) * priceUsd
         : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter, spread };
+    // r8 Council: Est. PnL is mark-to-market from the fill entry and gross of the closing fee + spread, so a trade that loses when closed
+    // could read green. The headline is the NET result: that PnL less the same closing-fee estimate shown below (spread included).
+    // While the spread-inclusive estimate is still loading (a quoter is wired but has not answered) there is no honest net: null.
+    const feeLoading = spreadEstimateFor != null && spread === null;
+    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee : null;
+
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, netResult, feeLoading, feeEstimated, balanceAfter, spread };
   }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
-  const pnlColor =
-    preview.pnl === 0n
-      ? "text-[var(--text-muted)]"
-      : preview.pnl > 0n
-        ? "text-[var(--long)]"
-        : "text-[var(--short)]";
+  const net = preview.netResult;
+  const netColor =
+    net === null || net === 0n ? "text-[var(--text-muted)]" : net > 0n ? "text-[var(--long)]" : "text-[var(--short)]";
 
   const closeBlocked = loading || oracleStale || engineCatchingUp || submitDisabled;
 
@@ -317,13 +320,30 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           </span>
         </div>
         <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">
-          <span className="text-[var(--text-dim)]">Est. PnL:</span>
+          <span className="font-medium text-[var(--text)]">Est. result if closed now:</span>
+          {!entryKnown ? (
+            <span className="font-mono font-medium text-[var(--text-muted)]" title={UNKNOWN_ENTRY_TOOLTIP} data-testid="close-net-unknown">
+              --
+            </span>
+          ) : net === null ? (
+            <span className="font-mono font-medium text-[var(--text-muted)]" title="Waiting for the closing fee and spread estimate" data-testid="close-net-loading">
+              --
+            </span>
+          ) : (
+            <span className={`font-mono font-medium ${netColor}`} data-testid="close-net-result" data-sign={net > 0n ? "positive" : net < 0n ? "negative" : "zero"}>
+              {net > 0n ? "+" : net < 0n ? "-" : ""}
+              {formatTokenAmount(abs(net), decimals)} {colSym}
+            </span>
+          )}
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[var(--text-dim)]">Est. PnL (before closing fees):</span>
           {!entryKnown ? (
             <span className="font-mono font-medium text-[var(--text-muted)]" title={UNKNOWN_ENTRY_TOOLTIP} data-testid="close-pnl-unknown">
               --
             </span>
           ) : (
-          <span className={`font-mono font-medium ${pnlColor}`}>
+          <span className="font-mono font-medium text-[var(--text-secondary)]" data-testid="close-gross-pnl">
             {preview.pnl > 0n ? "+" : preview.pnl < 0n ? "-" : ""}
             {formatTokenAmount(abs(preview.pnl), decimals)} {colSym}
             {preview.pnlUsd !== null && (
@@ -367,7 +387,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           ? "Your freed balance moves back to your wallet after one more approval."
           : "Closing keeps the funds in your trading account. Withdraw to move them to your wallet."}
       </p>
-      {percent >= 100 && entryKnown && preview.pnl > 0n && (
+      {percent >= 100 && entryKnown && net !== null && net > 0n && (
         <p className="mb-4 -mt-3 text-[9px] text-[var(--text-dim)] leading-relaxed" data-testid="close-profit-settles">
           Profit becomes withdrawable once it settles.
         </p>

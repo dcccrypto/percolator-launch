@@ -36,7 +36,7 @@
  */
 
 import { errorText } from "@/lib/error-text";
-import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { FC, memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { balanceKey, NO_BALANCE_KNOWN, resolveTokenBalance, type KnownBalance, type TokenRead } from "@/lib/token-balance";
 import { useWalletBalanceRefreshKey } from "@/lib/wallet-balance-invalidation";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -100,7 +100,7 @@ import { checkSignatureLanded, timedOutSignature } from "@/lib/tx";
 import { watchPendingSignature } from "@/lib/pending-signature";
 import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
-import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, shrinkSizeInput, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
+import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, maxFillWithHeadroomQ, shrinkSizeInput, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
 import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
 import { balanceMaxQ, buyingPowerAtoms, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
@@ -782,6 +782,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   );
 
   /** Set the size WITHOUT clearing the status slot (the ticket's own clamp). */
+  /** True while the size box holds what the Max chip filled: it is then re-pinned to the live Max on every tick (r8). */
+  const maxPinned = useRef(false);
   const applySize = useCallback(
     (val: string) => {
       const cleaned = sanitizeDecimalInput(val);
@@ -796,6 +798,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setRefusal(null);
       setResult(null);
       setClampedToQ(null);
+      maxPinned.current = false; // a typed size is the trader's own: Max no longer owns it
       // A finished timeout outcome was about the old size; a running watch stays on screen.
       setPendingTx((p) => (p?.state === "watching" ? p : null));
       applySize(val);
@@ -1265,7 +1268,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // ticket blocked ("Over the max fillable size") with nothing to clear it. Keyed on the size and the price too, never loops: each pass
   // lowers the string or ends.
   const clampPasses = useRef(0);
-  useEffect(() => {
+  // Layout effect: the corrected size lands before the browser paints, so a tick never shows the over-fillable state for a frame.
+  useLayoutEffect(() => {
     if (clampTarget === null) {
       clampPasses.current = 0;
       return;
@@ -1283,6 +1287,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setClampedToQ(clampTarget);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new clamp is required when the room, the size or the price moves
   }, [clampTarget, sizeInput, livePriceE6, sizeUnit]);
+  // A size chosen by Max follows the live Max (less the headroom) on each mark / room tick, both ways, so drift can neither push it over
+  // the room nor leave it stranded far under. Submit still checks the room (overFillable) on whatever the box holds.
+  // Only when the MARKET ROOM is what binds Max (a balance-bound Max does not drift over the room, and keeps filling the whole balance).
+  const maxIsRoomBound = !roomUnknownRaw && marketMaxQ !== null && displayMaxQ !== null && displayMaxQ >= marketMaxQ;
+  const pinTargetQ = maxPinned.current && maxIsRoomBound && displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n && !sidePaused[direction]
+    ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6) : null;
+  useLayoutEffect(() => {
+    if (pinTargetQ === null || !livePriceE6 || livePriceE6 <= 0n) return;
+    const next = sizeQToInput(pinTargetQ, sizeUnit, livePriceE6, lotExp);
+    if (next !== sizeInput) applySize(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-pin when the target, the price or the unit moves
+  }, [pinTargetQ, livePriceE6, sizeUnit]);
   useEffect(() => {
     if (clampedToQ === null) return;
     const t = setTimeout(() => setClampedToQ(null), 4000);
@@ -2179,7 +2195,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const fillFraction = (pct: number) => {
     if (roomUnknownRaw && !(displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n)) return;
     if (displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n) {
-      handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6, lotExp));
+      const roomBound = !roomUnknownRaw && marketMaxQ !== null && displayMaxQ >= marketMaxQ;
+      const q = pct === 100 ? (roomBound ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6) : displayMaxQ) : (displayMaxQ * BigInt(pct)) / 100n;
+      handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6, lotExp));
+      maxPinned.current = pct === 100 && roomBound;
       return;
     }
     setSizePercent(pct);

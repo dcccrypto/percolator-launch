@@ -187,3 +187,35 @@ describe("r8: the mark keeps moving between the clamp and the next render (a liv
     }
   }
 });
+
+describe("r8: Max keeps headroom while the room and the mark tick down ~0.05% a time", () => {
+  for (const unit of ["usd", "token"] as const) {
+    it(`${unit} units: the ticket never shows the over-fillable state and the size stays within the room`, async () => {
+      let room = ROOM_Q;
+      mocks.useMarketFillCap.mockImplementation(() => ({ maxFillAbs: room, sideRoomQ: () => room }));
+      const { rerender } = render(<OrderTicket slabAddress={SLAB} />);
+      await waitFor(() => expect(screen.queryByTestId("limits-max-size-inline")).not.toBeNull(), { timeout: 8000 });
+      if (unit === "token") fireEvent.click(screen.getByTitle(/Switch size unit/));
+      await waitFor(() => expect(screen.getByTestId("limits-max-size-inline").getAttribute("data-unit")).toBe(unit));
+      fireEvent.click(screen.getByTestId("limits-max-size-inline"));
+      await waitFor(() => expect(Number(sizeBox().value)).toBeGreaterThan(0));
+      const seen: string[] = [];
+      probe.commits.length = 0;
+      for (let i = 0; i < 30; i++) {
+        room = (room * 9995n) / 10_000n; // the room falls 0.05% a tick
+        px.e6 = (px.e6 * 9995n) / 10_000n; // and so does the mark
+        await act(async () => { rerender(<OrderTicket slabAddress={SLAB} {...tickProp(100 + i)} />); });
+        seen.push(submit().textContent ?? "");
+        expect(submit().textContent, `tick ${i}`).not.toContain("Over the max fillable size");
+        expect(submit().disabled, `tick ${i}: ${submit().textContent}`).toBe(false);
+        expect(orderQ(unit), `tick ${i} box ${sizeBox().value}`).toBeLessThanOrEqual(room);
+      }
+      expect(seen.length).toBe(30);
+      // Every COMMIT, including the one before the clamp effect ran (what a paint could show), was free of the over-fillable state:
+      // the headroom absorbs a 0.05% tick, so the clamp is not what keeps the button enabled.
+      expect(probe.commits.length).toBeGreaterThan(0);
+      expect(probe.commits.filter((c) => /over the max fillable/i.test(c.label) || c.disabled)).toEqual([]);
+      mocks.useMarketFillCap.mockReturnValue(null);
+    });
+  }
+});

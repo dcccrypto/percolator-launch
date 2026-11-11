@@ -187,7 +187,7 @@ describe("WP-3 AC1/AC2: live ticket", () => {
   it("the Max figure fills the size; Max chip = the same one max", async () => {
     render(<OrderTicket slabAddress={SLAB} />);
     fireEvent.click(screen.getByTestId("limits-max-size-inline"));
-    expect((screen.getByTestId("trade-size-input") as HTMLInputElement).value).toBe("83.76");
+    expect((screen.getByTestId("trade-size-input") as HTMLInputElement).value).toBe("83.54"); // r8: a room-bound Max fills with headroom (0.25% + one cent) under the live room
     await snap("live-order");
     fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "" } });
     fireEvent.click(screen.getAllByTestId("trade-size-preset").find((b) => b.dataset.percent === "50")!);
