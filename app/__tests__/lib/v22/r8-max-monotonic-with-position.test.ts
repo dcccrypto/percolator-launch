@@ -161,3 +161,23 @@ describe("r8 MED-1: a submit at Max passes the growth gate at every leverage (wi
   });
 });
 
+describe("r8 (review of #3804, LOW-B / LOW-C): the bundled deposit is exactly the gate's need and never overshoots the wallet at Max", () => {
+  it("floor + the ticket fee = the gate's extraEquityNeeded, whatever the ticket fee is (so a deposit at Max fits capital + wallet)", () => {
+    const s = { capital: 12_000_000n, takerPosQ: -610_000n };
+    for (const fundFee of [0n, 50_000n, 400_000n, 5_000_000n]) {
+      for (const quoteFeeBps of [0n, 25n]) {
+        const askQ = 20n * LOT;
+        const g = growthGate({ view: view(), direction: "short", takerEffQ: s.takerPosQ, askQ, takerEquity: s.capital, quoteFeeBps });
+        const floor = growthDepositFloorAtoms({ view: view(), direction: "short", takerEffQ: s.takerPosQ, askQ, equityNow: s.capital, fundFee, quoteFeeBps });
+        expect(g.extraEquityNeeded > 0n).toBe(true);
+        expect(floor + (g.extraEquityNeeded > fundFee ? fundFee : g.extraEquityNeeded)).toBe(g.extraEquityNeeded);
+      }
+    }
+  });
+  it("the matcher's quote fee raises the need (so the deposit gate must use the same quote fee as the Max cap)", () => {
+    const a = growthGate({ view: view(), direction: "short", takerEffQ: -610_000n, askQ: 20n * LOT, takerEquity: 12_000_000n, quoteFeeBps: 0n });
+    const b = growthGate({ view: view(), direction: "short", takerEffQ: -610_000n, askQ: 20n * LOT, takerEquity: 12_000_000n, quoteFeeBps: 50n });
+    expect(b.extraEquityNeeded > a.extraEquityNeeded).toBe(true);
+  });
+});
+

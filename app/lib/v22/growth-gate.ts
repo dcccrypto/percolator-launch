@@ -135,15 +135,14 @@ export function growthFillCapQ(p: Omit<GrowthGateParams, "askQ">): bigint | null
 }
 
 /**
- * The part of a bundled deposit that exists only for the growth gate: the equity the account still needs for `askQ` to pass (0 when it
- * passes or the side is closed), net of the fee both the gate and the deposit's own fee line count (review of #3778, Low-1). The ticket
- * deposits `max(this, the order's margin shortfall) + fee`, so an order the Max offers (bounded at the equity the wallet could add)
- * passes the gate with the deposit the ticket bundles.
+ * The part of a bundled deposit that exists only for the growth gate: the margin-like amount that, with the fee the ticket adds on top
+ * (`fundFee`), brings the account's equity to what the gate needs for `askQ` (0 when it passes or the side is closed). The deposit is then
+ * `floor + fundFee` = exactly the gate's `extraEquityNeeded` (which already contains the gate's own fee). Netting the WHOLE ticket fee, not
+ * the gate's share of it, keeps the bundled deposit from overshooting what the Max (bounded at equity + the wallet) assumed, so a submit at
+ * Max stays within the wallet. The order's own margin shortfall is the other side of the max in the ticket.
  */
 export function growthDepositFloorAtoms(p: Omit<GrowthGateParams, "takerEquity"> & { equityNow: bigint; fundFee: bigint }): bigint {
   const g = growthGate({ view: p.view, direction: p.direction, takerEffQ: p.takerEffQ, askQ: p.askQ, takerEquity: p.equityNow, quoteFeeBps: p.quoteFeeBps, otherLegsImReq: p.otherLegsImReq });
   if (g.closed) return 0n;
-  const gateFee = p.equityNow > g.equityAtClip ? p.equityNow - g.equityAtClip : 0n;
-  const shared = gateFee < p.fundFee ? gateFee : p.fundFee;
-  return g.extraEquityNeeded > shared ? g.extraEquityNeeded - shared : 0n;
+  return g.extraEquityNeeded > p.fundFee ? g.extraEquityNeeded - p.fundFee : 0n;
 }

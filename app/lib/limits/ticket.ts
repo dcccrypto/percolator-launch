@@ -453,6 +453,24 @@ export function sizeQToInput(q: bigint, unit: "token" | "usd", priceE6: bigint, 
   return `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`;
 }
 
+/**
+ * `size` (a ticket size string in `unit`) lowered by `steps` display steps: one cent in USD, one millionth of a token. Never below 0.
+ * The ticket's clamp uses it when re-applying the room did not bring the order under it (the size box is re-divided by the ticking
+ * price and rounds), so the next pass lands lower instead of leaving the order stuck over the room.
+ */
+export function shrinkSizeInput(size: string, unit: "token" | "usd", steps: number): string {
+  if (steps <= 0) return size;
+  const dp = unit === "usd" ? 2 : 6;
+  const m = /^(\d*)(?:\.(\d*))?$/.exec(size);
+  if (!m) return size;
+  const frac = (m[2] ?? "").padEnd(dp, "0").slice(0, dp);
+  const units = BigInt(`${m[1] || "0"}${frac}`) - BigInt(steps);
+  if (units <= 0n) return unit === "usd" ? "0.00" : "0";
+  const t = units.toString().padStart(dp + 1, "0");
+  const out = `${t.slice(0, t.length - dp)}.${t.slice(t.length - dp)}`;
+  return unit === "usd" ? out : out.replace(/\.?0+$/, "");
+}
+
 const ceilDiv = (a: bigint, b: bigint): bigint => (a <= 0n ? a / b : (a + b - 1n) / b);
 
 /**
