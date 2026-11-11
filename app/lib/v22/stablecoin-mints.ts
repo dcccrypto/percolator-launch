@@ -11,6 +11,9 @@
  *   JUP    = Jupiter tokens v2 (lite-api.jup.ag/tokens/v2/search) tag verified / strict / stable
  *   SLTL   = solana-labs/token-list `solana.tokenlist.json` (the legacy list; covers the Wormhole/Portal and Allbridge mints)
  *
+ * No Solana mint was found for GHO, BOLD, TUSD, BUSD, USDT0, RLUSD or USDtb (Jupiter token search returns only unverified look-alike
+ * launches for them, which are deliberately NOT listed): those are covered by the ticker / name rule in ./stablecoin-perps.
+ *
  * Policy: USD only. EURC and other non-USD fiat stables are NOT blocked. Yield-bearing / NAV-accruing USD tokens (sUSDe, USDY)
  * ARE blocked: their price is a deterministic accrual on a dollar, so a perp on them has no independent underlying.
  * Devnet: the app's USDC-like devnet mints (Sim-USDC, Circle devnet USDC) are collateral, never a perp underlying
@@ -57,4 +60,12 @@ export const STABLECOIN_MINT_LIST: readonly StablecoinMint[] = [
   { address: "DNhZkUaxHXYvpxZ7LNnHtss8sQgdAfd1ZYS1fB7LKWUZ", symbol: "apUSDT", name: "Wrapped USDT (Allbridge from Polygon)", source: "SLTL; JUP strict; CHAIN (mint)" },
   { address: "E77cpQ4VncGmcAXX16LHFFzNBEBb2U7Ar7LBmZNfCgwL", symbol: "abUSDT", name: "Wrapped USDT (Allbridge from BSC)", source: "SLTL; CHAIN (mint)" },
   { address: "FwEHs3kJEdMa2qZHv7SgzCiFXUQPEycEXksfBkwmS8gj", symbol: "aaUSDT", name: "Wrapped USDT (Allbridge from Avalanche)", source: "SLTL; JUP strict; CHAIN (mint)" },
+  // Added 2026-11-11 (r7). Each: getAccountInfo on the Solana public RPC (SPL / Token-2022 mint) + on-chain metadata name/symbol + an independent source.
+  { address: "usdsfJbX78ktZUnoRC7dwvvQz7xH3WdkpGne76gdUia", symbol: "USD+", name: "USD+ (Overnight)", source: "CG usd-2; JUP verified; CHAIN mint + Metaplex USD+ / USD+" },
+  { address: "CASHx9KJUStyftLFWGvEVf59SGeG9sh5FfcnZMVPCASH", symbol: "CASH", name: "CASH", source: "CG cash-4; JUP stable (verified); CHAIN Token-2022 metadata CASH / CASH" },
+  { address: "6FrrzDk5mQARGc1TDYoyVnSyRdds1t4PbtohCD6p3tgG", symbol: "USX", name: "USX (Solstice)", source: "CG usx; JUP stable (verified); CHAIN mint + Metaplex USX / USX" },
+  { address: "3ThdFZQKM6kRyVGLG48kaPg5TRMhYMKY1iCRa9xop1WC", symbol: "eUSX", name: "eUSX (Solstice, yield-bearing USD)", source: "CG solstice-eusx; JUP verified yb; CHAIN mint + Metaplex eUSX / eUSX" },
+  { address: "JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD", symbol: "JupUSD", name: "Jupiter USD", source: "CG jupusd; JUP stable (verified); CHAIN mint + Metaplex Jupiter USD / JupUSD" },
+  { address: "EwxNF8g9UfmsJVcZFTpL9Hx5MCkoQFoJi6XNWzKf1j8e", symbol: "acUSD", name: "Wrapped CUSD (Allbridge from Celo)", source: "SLTL acUSD; CHAIN mint (no Metaplex account)" },
+  { address: "FR87nWEUxVgerFGhZM8Y4AggKGLnaXswr1Pd8wZ4kZcp", symbol: "FRAX", name: "Frax (Portal / Wormhole)", source: "SLTL FRAX (Frax (Portal)); CHAIN mint + Metaplex Frax (Wormhole) / FRAX" },
 ];

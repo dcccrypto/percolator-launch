@@ -38,7 +38,8 @@ import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 const PLAYGROUND_CURATED_ONLY = process.env.PLAYGROUND_SHOW_ALL_MARKETS !== "true";
 
 /** Path to the local JSON file that persists playground-created slab addresses. */
-const PLAYGROUND_REGISTRY_PATH = path.join(process.cwd(), "lib", "playground-created-markets.json");
+// PLAYGROUND_REGISTRY_PATH overrides the file (the test setup points it at a temp file so test runs never write the tracked JSON).
+const PLAYGROUND_REGISTRY_PATH = process.env.PLAYGROUND_REGISTRY_PATH || path.join(process.cwd(), "lib", "playground-created-markets.json");
 
 /**
  * Process-local registry of playground-created slab addresses.

@@ -117,6 +117,8 @@ function token2022Mint(name: string, symbol: string): Acct {
   const tlvValue = Buffer.concat([Buffer.alloc(64), bstr(name), bstr(symbol), bstr("")]);
   const hdr = Buffer.alloc(4); hdr.writeUInt16LE(19, 0); hdr.writeUInt16LE(tlvValue.length, 2);
   const base = Buffer.alloc(166); // 82-byte mint + padding to 165 + account-type byte
+  base[45] = 1; // is_initialized
+  base[165] = 1; // AccountType::Mint
   return { owner: new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"), data: Buffer.concat([base, hdr, tlvValue]) };
 }
 function pumpPool(base: string, quote: string): Acct {
@@ -131,11 +133,24 @@ function dlmmPool(base: string, quote: string): Acct {
   new PublicKey(quote).toBuffer().copy(d, 120);
   return { owner: new PublicKey(METEORA), data: d };
 }
-function fakeConn(accounts: Map<string, Acct>, opts: { fail?: boolean } = {}) {
+const SPL_TOKEN = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const T22 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+/** An initialized 82-byte mint. */
+const mintBytes = () => { const b = Buffer.alloc(82); b[45] = 1; return b; };
+/**
+ * Fake mainnet. Mint accounts the check reads (a key followed by its Metaplex PDA) are synthesised as SPL mints when the map has none,
+ * unless `missingMints` is set (then an absent mint account stays absent).
+ */
+function fakeConn(accounts: Map<string, Acct>, opts: { fail?: boolean; missingMints?: boolean } = {}) {
   return {
     getMultipleAccountsInfo: async (keys: PublicKey[]) => {
       if (opts.fail) throw new Error("rpc down");
-      return keys.map((k) => accounts.get(k.toBase58()) ?? null);
+      return keys.map((k, i) => {
+        const a = accounts.get(k.toBase58());
+        if (a) return a;
+        const isMintSlot = i + 1 < keys.length && keys[i + 1].equals(pda(k));
+        return isMintSlot && !opts.missingMints ? ({ owner: SPL_TOKEN, data: mintBytes() } as Acct) : null;
+      });
     },
   } as unknown as Parameters<typeof checkStablecoinUnderlying>[0]["conn"];
 }
@@ -238,7 +253,43 @@ describe("checkStablecoinUnderlying", () => {
     expect((warn as { suspect?: string }).suspect).toMatch(/USDUC/);
   });
 
-  it("an unreadable metadata account does not block a clean mint (defence in depth only)", async () => {
-    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map(), { fail: true }) })).toEqual({ ok: true });
+  it("a failed metadata READ (RPC error) fails closed as retryable; an absent metadata account does not block a clean mint", async () => {
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map(), { fail: true }) })).toEqual({ ok: false, kind: "unverifiable", retryable: true });
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map()) })).toEqual({ ok: true });
   });
+
+  it("r7: a mainnet_ca whose account is missing, or is not an initialized SPL Token / Token-2022 MINT, is refused (not retryable)", async () => {
+    const refused = { ok: false, kind: "unverifiable", retryable: false };
+    expect(await checkStablecoinUnderlying({ mainnetCa: Keypair.generate().publicKey.toBase58(), conn: fakeConn(new Map(), { missingMints: true }) })).toEqual(refused);
+    const sys = new PublicKey("11111111111111111111111111111111");
+    const t22Acct = Buffer.alloc(166); t22Acct[45] = 1; t22Acct[165] = 2; // Token-2022 token ACCOUNT (AccountType::Account)
+    const uninit = Buffer.alloc(82); // 82 bytes but is_initialized = 0
+    const cases: Array<[string, Acct]> = [
+      ["wallet", { owner: sys, data: Buffer.alloc(0) }],
+      ["system program", { owner: new PublicKey("NativeLoader1111111111111111111111111111111"), data: Buffer.alloc(0) }],
+      ["SPL token account (165 B)", { owner: SPL_TOKEN, data: Buffer.alloc(165) }],
+      ["Token-2022 token account (165 B)", { owner: T22, data: Buffer.alloc(165) }],
+      ["Token-2022 token account (extended, type 2)", { owner: T22, data: t22Acct }],
+      ["multisig (355 B)", { owner: SPL_TOKEN, data: Buffer.alloc(355) }],
+      ["crafted Token-2022 multisig (355 B, bytes 45 and 165 set)", { owner: T22, data: (() => { const b = Buffer.alloc(355); b[45] = 1; b[165] = 1; return b; })() }],
+      ["crafted Token-2022 multisig (355 B, signer keys in the padding)", { owner: T22, data: (() => { const b = Buffer.alloc(355, 7); b[45] = 1; b[165] = 1; return b; })() }],
+      ["Token-2022 extended account with non-zero padding (not 355 B)", { owner: T22, data: (() => { const b = Buffer.alloc(200); b[45] = 1; b[165] = 1; b[100] = 9; return b; })() }],
+      ["empty token-program account", { owner: SPL_TOKEN, data: Buffer.alloc(0) }],
+      ["uninitialized mint", { owner: SPL_TOKEN, data: uninit }],
+    ];
+    for (const [label, acct] of cases) {
+      const k = Keypair.generate().publicKey.toBase58();
+      expect(await checkStablecoinUnderlying({ mainnetCa: k, conn: fakeConn(new Map<string, Acct>([[k, acct]])) }), label).toEqual(refused);
+    }
+    // Real mints are fine: SPL (82 B), Token-2022 base (82 B) and Token-2022 extended (type 1)
+    const t22Mint = Keypair.generate().publicKey.toBase58(), t22Base = Keypair.generate().publicKey.toBase58();
+    expect(await checkStablecoinUnderlying({ mainnetCa: t22Mint, conn: fakeConn(new Map<string, Acct>([[t22Mint, token2022Mint("Okay", "OKAY")]])) })).toEqual({ ok: true });
+    const t22Ext = Keypair.generate().publicKey.toBase58();
+    const ext = Buffer.alloc(200); ext[45] = 1; ext[165] = 1; // extended mint with extension data after the type byte
+    ext.fill(5, 170);
+    expect(await checkStablecoinUnderlying({ mainnetCa: t22Ext, conn: fakeConn(new Map<string, Acct>([[t22Ext, { owner: T22, data: ext }]])) })).toEqual({ ok: true });
+    expect(await checkStablecoinUnderlying({ mainnetCa: t22Base, conn: fakeConn(new Map<string, Acct>([[t22Base, { owner: T22, data: mintBytes() }]])) })).toEqual({ ok: true });
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map()) })).toEqual({ ok: true });
+  });
+
 });
