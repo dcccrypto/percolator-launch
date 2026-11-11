@@ -151,6 +151,32 @@ export function balanceMaxQ(balanceAtoms: bigint, leverage: number, priceE6: big
   return (balanceAtoms * lev100 * 1_000_000n) / (100n * priceE6);
 }
 
+/**
+ * Display-only "Buying power": the notional the Max button would fill at the SELECTED leverage, i.e. the smaller of
+ *   - what the balance can margin at that leverage (`tradableAtoms x leverage`, the same figure `balanceMaxQ` turns into a size), and
+ *   - the market's own cap on this side (`marketMaxQ`: growth cap, matcher fill cap, side room), valued at `priceE6`.
+ * Never above what can be opened, and it does not fall as leverage rises unless a market cap binds (then it is flat and
+ * `capped` is true so the label can say so). `null` = nothing known to offer (no price, or no balance and no cap).
+ */
+export function buyingPowerAtoms(p: {
+  tradableAtoms: bigint;
+  leverage: number;
+  /** Tightest market cap on the selected side in base q, or null when none applies. */
+  marketMaxQ: bigint | null;
+  priceE6: bigint | null | undefined;
+  decimals: number;
+}): { atoms: bigint; capped: boolean } | null {
+  const { tradableAtoms, leverage, marketMaxQ, priceE6, decimals } = p;
+  if (!(leverage > 0) || tradableAtoms < 0n) return null;
+  const lev100 = BigInt(Math.max(100, Math.floor(leverage * 100)));
+  const byBalance = (tradableAtoms * lev100) / 100n;
+  if (marketMaxQ === null || !priceE6 || priceE6 <= 0n) return { atoms: byBalance, capped: false };
+  // q x price is USD atoms at 6 dp (as the Max label); rescale to the collateral's own decimals.
+  const usd6 = (marketMaxQ * priceE6) / 1_000_000n;
+  const byMarket = decimals >= 6 ? usd6 * 10n ** BigInt(decimals - 6) : usd6 / 10n ** BigInt(6 - decimals);
+  return byMarket < byBalance ? { atoms: byMarket < 0n ? 0n : byMarket, capped: true } : { atoms: byBalance, capped: false };
+}
+
 /** One cent in USD atoms (6 dp): the smallest step the ticket's USD size and Max can show. */
 export const MIN_SIDE_ROOM_USD_ATOMS = 10_000n;
 

@@ -253,8 +253,6 @@ function PositionCard({
   // must not be shown as the entry, nor feed the live PnL (live mark − polled
   // mark is drift, not PnL) — `displayEntryE6` returns 0n there, which
   // computeLivePositionPnl already treats as "no entry".
-  const entryDisplay = describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource, formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0) });
-  const posEntry = displayEntryE6(pos.effectiveEntryPrice, pos.entryPriceSource);
   const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
   const sizeAbs = posSize < 0n ? -posSize : posSize;
   const { liquidationPriceE6 } = pos;
@@ -281,6 +279,10 @@ function PositionCard({
   // margin chain. Shared verbatim with PositionsBar's PositionChip and the
   // portfolio hero's live totals below.
   const livePnl = portfolioPositionPnl(pos, livePriceE6);
+  // Entry from the same resolution as the PnL (cache read live), not the poll-time snapshot, so the row, the close dialog and
+  // the trade page's dock show one entry.
+  const entryDisplay = describeEntryPrice({ entryE6: livePnl.entry, source: livePnl.entrySource, formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0) });
+  const posEntry = displayEntryE6(livePnl.entry, livePnl.entrySource);
   const pnlTokens = livePnl.unrealizedPnl ?? 0n;
   const pnlPct = livePnl.roe ?? 0;
   const liquidationDistancePct = liveLiquidationDistancePct(pos, livePriceE6);
@@ -422,7 +424,7 @@ function PositionCard({
                 // that gets shared as a fact.
                 liveSlabCapacity
                 data={
-                  hasPosition && livePnl.pnlKnown && isExactEntrySource(pos.entryPriceSource) && posEntry > 0n && markE6 > 0n
+                  hasPosition && livePnl.pnlKnown && isExactEntrySource(livePnl.entrySource) && posEntry > 0n && markE6 > 0n
                     ? {
                         slab: pos.slabAddress,
                         symbol: baseSymbol,

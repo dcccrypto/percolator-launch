@@ -324,6 +324,24 @@ export interface PortfolioPnlSource {
   initialMarginBps: bigint;
   maintenanceMarginBps?: bigint;
   oraclePriceE6: bigint;
+  /** Portfolio slab + account idx + connected wallet key the open-time entry was saved under (lib/entry-price.ts). */
+  slabAddress?: string;
+  idx?: number;
+  entryCacheWallet?: string;
+}
+
+/**
+ * The open-time entry cached on this device, read NOW. A portfolio row is a snapshot (up to minutes old, shared across
+ * hook instances) and the entry is written a moment AFTER the open lands, so a snapshot polled in between froze a
+ * back-solved `derived` entry (from the portfolio-wide `pnl`, leftovers included) while the trade page, which reads
+ * the cache on every render, showed the recorded one. Re-reading here makes every surface resolve the same entry.
+ */
+function liveCachedEntryE6(pos: PortfolioPnlSource): bigint {
+  if (pos.entryCacheWallet && pos.slabAddress !== undefined && pos.idx !== undefined) {
+    const live = getEntryPrice(pos.slabAddress, pos.idx, pos.entryCacheWallet);
+    if (live > 0n) return live;
+  }
+  return pos.entryPriceSource === "cache" ? pos.effectiveEntryPrice : 0n;
 }
 
 /** Live-mark PnL for a polled `PortfolioPosition` - what the bar, card, hero totals and metrics all call. */
@@ -338,7 +356,7 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
     markE6,
     anchorMarkE6: pos.oraclePriceE6,
     serverEntryE6: pos.entryPriceSource === "server" ? pos.effectiveEntryPrice : null,
-    cachedEntryE6: pos.entryPriceSource === "cache" ? pos.effectiveEntryPrice : 0n,
+    cachedEntryE6: liveCachedEntryE6(pos),
     onChainPnl: pos.account?.pnl ?? 0n,
     initialMarginBps: pos.initialMarginBps,
     maintenanceMarginBps: pos.maintenanceMarginBps,

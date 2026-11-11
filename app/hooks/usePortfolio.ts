@@ -211,6 +211,8 @@ export interface PortfolioPosition {
    * else `effectiveEntryPrice`. Absent on legacy v12 rows (= effectiveEntryPrice). Never displayed.
    */
   riskEntryPrice?: bigint;
+  /** Wallet key the device's open-time entry cache is read under (v17 rows); see portfolioPositionPnl. */
+  entryCacheWallet?: string;
   /** Last effective oracle price in e6 format */
   oraclePriceE6: bigint;
   /** Liquidation price in e6 format */
@@ -637,6 +639,7 @@ export function buildV17Position(
     collateralMint,
     effectiveEntryPrice,
     riskEntryPrice: pnlResult.riskEntry,
+    entryCacheWallet: walletStr,
     oraclePriceE6,
     liquidationPriceE6,
     liquidationDistancePct,
