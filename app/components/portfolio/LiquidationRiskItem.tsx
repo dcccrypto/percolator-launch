@@ -16,7 +16,8 @@ import {
 } from "@/hooks/usePortfolio";
 import { formatMarkPrice } from "@/lib/format";
 import { describeLiqPrice } from "@/lib/liq-price-display";
-import { describeEntryPrice, isExactEntrySource } from "@/lib/entry-price-display";
+import { isExactEntrySource } from "@/lib/entry-price-display";
+import { portfolioPositionPnl } from "@/lib/position-pnl";
 import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
 
 export interface LiquidationRisk {
@@ -65,17 +66,19 @@ export function LiquidationRiskItem({
   onDismiss?: () => void;
 }) {
   const { pos, distancePct, cushion, severity, markE6, decimals } = risk;
+  // The same live resolution (device entry cache read now) as the row and the close dialog, not the poll-time snapshot.
+  const live = portfolioPositionPnl(pos, markE6);
   // The shared liquidation-price display, as on the position card (margin-health-surfaces guard).
   const liqDisplay = describeLiqPrice({
     liqPriceE6: pos.liquidationPriceE6,
     positionSize: pos.account?.positionSize ?? 0n,
     capital: pos.account?.capital ?? 0n,
     // #3534: risk math uses the risk entry (the settled back-solve when nothing is pending), never the display entry.
-    entryPriceE6: pos.riskEntryPrice ?? pos.effectiveEntryPrice,
+    entryPriceE6: live.riskEntry,
     effectiveSize: pos.adlKnown ? pos.effectiveSize : null,
     markPriceE6: markE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
-    hasResolvedEntry: describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource }).known,
+    hasResolvedEntry: live.riskKnown,
     formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
     unknownText: "—",
   });

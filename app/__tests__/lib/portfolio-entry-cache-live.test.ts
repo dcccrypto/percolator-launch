@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import { portfolioPositionPnl, terminalPositionPnl, type PortfolioPnlSource } from "@/lib/position-pnl";
 import { saveEntryPrice } from "@/lib/entry-price";
+import { classifyLiquidation } from "@/lib/liquidation-state";
 
 const ADL_ONE = 1_000_000_000_000_000n;
 const SLAB = "SLAB1111111111111111111111111111111111111111";
@@ -109,5 +110,48 @@ describe("no saved entry on this device: never a profit on a loss, on any surfac
     expect(d.known).toBe(false);
     expect(d.text).toBe("—");
     expect(d.title).toMatch(/Entry unknown on this device/);
+  });
+});
+
+describe("withholding the entry/PnL does not withhold risk or value", () => {
+  const ONCHAIN = 1_100_000n;
+  const params = { slabAddress: SLAB, accountIdx: 0, adlFactors: factors, adlApplicable: true, markE6: MARK, anchorMarkE6: MARK, initialMarginBps: 1000n, maintenanceMarginBps: 500n };
+
+  it("riskKnown stays true with a derived entry (liquidation / covered status), pnlKnown is false", () => {
+    const p = portfolioPositionPnl(snapshot(SIZE, ONCHAIN), MARK);
+    expect(p.pnlKnown).toBe(false);
+    expect(p.riskKnown).toBe(true);
+    expect(p.liquidationPriceE6).not.toBeNull();
+    const t = terminalPositionPnl({ ...params, account: { positionSize: SIZE, adlABasis: ADL_ONE, pnl: ONCHAIN, capital: 10_000_000n, owner: OWNER } });
+    expect(t.riskKnown).toBe(true);
+    expect(t.liquidationPriceE6).toBe(p.liquidationPriceE6);
+  });
+
+  it("riskKnown is false only when nothing resolves (unknown entry) or the ADL state is unknown", () => {
+    expect(portfolioPositionPnl(snapshot(SIZE, 0n), MARK).riskKnown).toBe(false);
+    expect(portfolioPositionPnl({ ...snapshot(SIZE, ONCHAIN), adlFactors: null }, MARK).riskKnown).toBe(false);
+  });
+
+  it("value side keeps the on-chain equity: capital + riskUnrealizedPnl == capital + pnl at the anchor mark", () => {
+    const p = portfolioPositionPnl(snapshot(SIZE, ONCHAIN), MARK);
+    expect(p.unrealizedPnl).toBeNull();
+    // the back-solve is exact up to one e6 tick of integer flooring
+    const diff = p.riskUnrealizedPnl! - ONCHAIN;
+    expect(diff >= -1n && diff <= 1n).toBe(true);
+  });
+});
+
+describe("covered / unliquidatable status survives an unknown entry", () => {
+  it("a well-collateralised long from another device reads unliquidatable, not unknown", () => {
+    const pos = { ...snapshot(SIZE, 1_100_000n), account: { positionSize: SIZE, adlABasis: ADL_ONE, pnl: 1_100_000n, capital: 1_000_000_000_000n } as never };
+    const p = portfolioPositionPnl(pos, MARK);
+    expect(p.pnlKnown).toBe(false);
+    expect(p.liquidationPriceE6).toBe(0n);
+    expect(classifyLiquidation(SIZE, MARK, p.liquidationPriceE6!, p.riskKnown).kind).toBe("unliquidatable");
+  });
+  it("control: with nothing resolvable the status stays unknown", () => {
+    const pos = { ...snapshot(SIZE, 0n), account: { positionSize: SIZE, adlABasis: ADL_ONE, pnl: 0n, capital: 1_000_000_000_000n } as never };
+    const p = portfolioPositionPnl(pos, MARK);
+    expect(classifyLiquidation(SIZE, MARK, p.liquidationPriceE6 ?? 0n, p.riskKnown).kind).toBe("unknown");
   });
 });

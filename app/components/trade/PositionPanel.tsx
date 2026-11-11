@@ -279,7 +279,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     markPriceE6: currentPriceE6,
     maintenanceMarginBps: maintenanceBps,
     // #2660: `entryPriceE6 > 0n` is always true — on "unknown" it is the mark.
-    hasResolvedEntry: pnlIsKnown,
+    hasResolvedEntry: pnlResult.riskKnown,
   });
   // The row reads the same equity-based figure as the liq cell (lib/margin-health.ts), so
   // the two cannot disagree. Nominal notional, not ADL-reduced exposure.

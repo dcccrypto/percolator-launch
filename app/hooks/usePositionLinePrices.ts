@@ -22,9 +22,9 @@ const NONE: PositionLinePrices = { liq: null, entry: null, entryIsEstimate: fals
  *
  * Both come from the SAME shared resolution as every PnL surface (`computePositionPnl` through
  * `terminalPositionPnl`, lib/position-pnl.ts, #3077): entry priority server > cache > back-solve over
- * the ADL-EFFECTIVE size, valued at the on-chain mark. A line is drawn ONLY when `pnlKnown` is true
- * (ADL state known and a real entry resolved); an unknown entry or unknown ADL factors draw nothing,
- * never a fallback to the mark. A back-solved entry is flagged `entryIsEstimate`.
+ * the ADL-EFFECTIVE size, valued at the on-chain mark. The liquidation line needs `riskKnown` (ADL state known and some
+ * entry resolved); the ENTRY line needs `pnlKnown` (a RECORDED entry), so a position opened on another device draws its
+ * liquidation line but no entry line. Never a fallback to the mark.
  */
 export function usePositionLinePrices(slabAddress: string): PositionLinePrices {
   const ua = useUserAccount();
@@ -49,12 +49,13 @@ export function usePositionLinePrices(slabAddress: string): PositionLinePrices {
     return r;
   }, [ua, config, params, adlFactors, wrapperConfigV17, slabAddress]);
 
-  if (!pnl || !pnl.pnlKnown || pnl.entrySource === "unknown" || pnl.entry <= 0n) return NONE;
-  // The engine liquidation price on EFFECTIVE size, straight from the shared result (0n = none, null = unknown).
+  if (!pnl || !pnl.riskKnown) return NONE;
+  // The engine liquidation price on EFFECTIVE size, straight from the shared result (0n = none, null = unknown). It is equity-based, so
+  // it is drawn for a position opened on another device too; only the ENTRY line needs a recorded entry.
   const liq = pnl.liquidationPriceE6;
   return {
-    entry: tokenUsdOfLotUsd(Number(pnl.entry) / 1e6, lotExp),
-    entryIsEstimate: pnl.isEstimate,
+    entry: pnl.pnlKnown && pnl.entry > 0n ? tokenUsdOfLotUsd(Number(pnl.entry) / 1e6, lotExp) : null,
+    entryIsEstimate: false,
     liq: liq != null && liq > 0n ? tokenUsdOfLotUsd(Number(liq) / 1e6, lotExp) : null,
   };
 }

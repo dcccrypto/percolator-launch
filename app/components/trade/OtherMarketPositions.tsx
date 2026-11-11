@@ -191,7 +191,7 @@ const OtherMarketRow: FC<{
     markPriceE6: markE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
     // #2660: `entryE6 > 0n` is always true — on "unknown" it is the mark.
-    hasResolvedEntry: pnlIsKnown,
+    hasResolvedEntry: live.riskKnown,
   });
   // "5.3% to liq" under a real price only, like the current market's row.
   const liqDistance = describeLiqDistance(liqDisplay, posSize, markE6, liqPriceE6);

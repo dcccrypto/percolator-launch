@@ -115,8 +115,14 @@ export interface PositionPnl {
   riskEntry: bigint;
   /** True when `riskEntry` is the settled back-solve rather than `entry`. */
   riskEntrySettled: boolean;
-  /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed. */
+  /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed (needs a RECORDED entry: server or cache). */
   pnlKnown: boolean;
+  /**
+   * True when the risk math (liquidation price, covered / unliquidatable status) stands on known inputs: the ADL-effective size is
+   * known and an entry (recorded OR back-solved) and a mark exist. Liquidation is equity-based, so it does not need the recorded
+   * entry; only `pnlKnown` (display of entry and PnL) does.
+   */
+  riskKnown: boolean;
   /** Coin-margined native PnL (same scale as size), or null when unknown. */
   pnlNative: bigint | null;
   /** Collateral-scale PnL at the mark, or null when unknown. */
@@ -261,6 +267,8 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     isEstimate: resolved.source === "derived",
     riskEntry,
     riskEntrySettled: settledEntry !== null,
+    riskKnown:
+      flat || (effectiveSize !== null && !resetObligation && resolved.source !== "unknown" && resolved.entry > 0n && markE6 > 0n),
     liquidationPriceE6:
       effectiveSize === null || input.maintenanceMarginBps === undefined
         ? null
@@ -280,7 +288,20 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
   if (resolved.source === "unknown" || resolved.entry <= 0n || markE6 <= 0n) return unknown;
   // A back-solved entry is built from the portfolio-wide `pnl` (claimable / earlier settled value included), so a long that lost
   // can read a profit. No recorded entry on this device = entry and PnL unavailable, never an estimate. Risk math keeps `entry`.
-  if (resolved.source === "derived") return unknown;
+  if (resolved.source === "derived") {
+    // The VALUE side stays chain-faithful: the back-solve makes capital + this PnL the account's on-chain equity (capital + pnl at
+    // the anchor mark, moved to the live mark), so totals keep it. It is never displayed as this position's PnL.
+    const v = valueAtMark({
+      effectiveSize,
+      entryE6: resolved.entry,
+      markE6,
+      initialMarginBps: input.initialMarginBps,
+      capital: input.capital,
+      capitalIsPositionMargin: (input.activeLegCount ?? 1) <= 1,
+    });
+    const valuePnl = settledEntry !== null && riskEntry > 0n ? computeMarkPnlLinear(effectiveSize, riskEntry, markE6) : v.unrealizedPnl;
+    return { ...unknown, riskUnrealizedPnl: valuePnl };
+  }
 
   const valued = valueAtMark({
     effectiveSize,

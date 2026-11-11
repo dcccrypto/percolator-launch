@@ -1209,7 +1209,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Buying power (display only): the notional the Max above would fill at the SELECTED leverage: the balance's margin x leverage, or
   // the market's cap when that is smaller (then `capped` says so). It used to be tradable margin x the MAX leverage, which fell as
   // leverage rose (the fee scales with leverage) and ignored the caps, so it read far above any size that could be opened.
-  const buyingPowerInfo = roomUnknownRaw ? null : buyingPowerAtoms({ tradableAtoms: tradableBalance, leverage, marketMaxQ, priceE6: livePriceE6, decimals });
+  const buyingPowerInfo = roomUnknownRaw ? null : buyingPowerAtoms({ tradableAtoms: tradableBalance, leverage, marketMaxQ, priceE6: livePriceE6 });
   const buyingPower = buyingPowerInfo?.atoms ?? 0n;
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.

@@ -66,10 +66,10 @@ const maxUsd = () => {
   return Number(el.getAttribute("data-max-q")) * 150 / 1e6; // $150 per SOL, q = 1e-6 SOL
 };
 
-function setup(opts: { capital: bigint; feeBps: bigint }) {
+function setup(opts: { capital: bigint; feeBps: bigint; decimals?: number }) {
   mocks.engineView = {};
   mocks.useConnectionCompat.mockReturnValue({
-    connection: { getTokenAccountBalance: vi.fn(async () => ({ value: { amount: "0", decimals: 6 } })), getAccountInfo: vi.fn(async () => null) },
+    connection: { getTokenAccountBalance: vi.fn(async () => ({ value: { amount: "0", decimals: opts.decimals ?? 6 } })), getAccountInfo: vi.fn(async () => null) },
   });
   mocks.useUserAccount.mockReturnValue({ account: { capital: opts.capital, positionSize: 0n, entryPrice: 0n, pnl: 0n }, idx: 0 });
   mocks.useEngineState.mockReturnValue({
@@ -125,4 +125,22 @@ describe("Buying power follows the Max button at the selected leverage", () => {
     expect(rows[3].bp).toBeGreaterThanOrEqual(rows[0].bp);
     expect(screen.getByTestId("buying-power-capped").textContent).toMatch(/market/i);
   });
+});
+
+describe("Buying power uses Max's units at any collateral decimals", () => {
+  for (const decimals of [2, 6, 9]) {
+    it(`${decimals}-decimal collateral, market cap binding: equals Max in Max's own units`, async () => {
+      const unit = 10n ** BigInt(decimals);
+      setup({ capital: 10_000n * unit, feeBps: 30n, decimals });
+      mocks.fillCaps = { maxFillAbs: 1_000_000_000n }; // 1e9 q = 150e9 atoms (9 dp: 150 tokens; 2/6 dp: above the balance, so the balance binds)
+      const rows = await readAt([5]);
+      // the same figure Max shows, read from the Max chip: q x price / 1e6 collateral atoms
+      const maxQ = Number(screen.getByTestId("limits-max-size-inline").getAttribute("data-max-q"));
+      const expected = (maxQ * 150) / Number(unit); // collateral units
+      expect(Math.abs(rows[0].bp - expected)).toBeLessThan(Math.max(0.05, expected * 1e-6));
+      expect(rows[0].bp).toBeLessThan(10_000 * 5 + 1);
+      if (expected < 45_000) expect(screen.getByTestId("buying-power-capped")).toBeTruthy();
+      else expect(screen.queryByTestId("buying-power-capped")).toBeNull();
+    });
+  }
 });

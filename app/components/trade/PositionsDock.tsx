@@ -357,7 +357,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
     markPriceE6: currentPriceE6,
     maintenanceMarginBps: maintenanceBps,
     // #2660: `entryPriceE6 > 0n` is always true — on "unknown" it is the mark.
-    hasResolvedEntry: pnlIsKnown,
+    hasResolvedEntry: pnlResult.riskKnown,
     ...(lotExp > 0 ? { formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp) } : {}),
   });
   // "5.3% to liq" under a real price only; the "% mgn" / unknown cells stay as they are.

@@ -164,17 +164,15 @@ export function buyingPowerAtoms(p: {
   /** Tightest market cap on the selected side in base q, or null when none applies. */
   marketMaxQ: bigint | null;
   priceE6: bigint | null | undefined;
-  decimals: number;
 }): { atoms: bigint; capped: boolean } | null {
-  const { tradableAtoms, leverage, marketMaxQ, priceE6, decimals } = p;
-  if (!(leverage > 0) || tradableAtoms < 0n) return null;
-  const lev100 = BigInt(Math.max(100, Math.floor(leverage * 100)));
-  const byBalance = (tradableAtoms * lev100) / 100n;
-  if (marketMaxQ === null || !priceE6 || priceE6 <= 0n) return { atoms: byBalance, capped: false };
-  // q x price is USD atoms at 6 dp (as the Max label); rescale to the collateral's own decimals.
-  const usd6 = (marketMaxQ * priceE6) / 1_000_000n;
-  const byMarket = decimals >= 6 ? usd6 * 10n ** BigInt(decimals - 6) : usd6 / 10n ** BigInt(6 - decimals);
-  return byMarket < byBalance ? { atoms: byMarket < 0n ? 0n : byMarket, capped: true } : { atoms: byBalance, capped: false };
+  const { tradableAtoms, leverage, marketMaxQ, priceE6 } = p;
+  if (!priceE6 || priceE6 <= 0n || !(leverage > 0) || tradableAtoms < 0n) return null;
+  // EXACTLY Max's own sizing (OrderTicket displayMaxQ = oneMaxQ([marketMaxQ, balanceMaxQ(...)])), then valued the way the ticket values
+  // any size: q x priceE6 / 1e6 is already collateral atoms (no decimals factor), so the two cannot diverge on any collateral decimals.
+  const byBalanceQ = balanceMaxQ(tradableAtoms, leverage, priceE6);
+  if (byBalanceQ === null) return { atoms: 0n, capped: false };
+  const maxQ = oneMaxQ([marketMaxQ, byBalanceQ]) as bigint;
+  return { atoms: (maxQ * priceE6) / 1_000_000n, capped: marketMaxQ !== null && marketMaxQ < byBalanceQ };
 }
 
 /** One cent in USD atoms (6 dp): the smallest step the ticket's USD size and Max can show. */

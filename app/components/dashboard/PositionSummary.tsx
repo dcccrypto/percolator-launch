@@ -6,7 +6,7 @@ import { usePortfolio, liveLiquidationSeverity, liveLiquidationDistancePct, type
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { describeLiqPrice } from "@/lib/liq-price-display";
-import { describeEntryPrice, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
+import { describeEntryPrice, isRiskEntryKnown, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { useLivePortfolioMetrics, type LivePositionMetric } from "@/hooks/useLivePortfolioMetrics";
 import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
@@ -84,8 +84,8 @@ function PositionCard({
     effectiveSize: pos.adlKnown ? pos.effectiveSize : null,
     markPriceE6: pos.oraclePriceE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
-    // Same verdict as the Entry cell, so the two cannot contradict (#2671).
-    hasResolvedEntry: entryDisplay.known,
+    // Liquidation is equity-based: a back-solved entry is enough for the risk figure (the Entry cell itself shows only a recorded one).
+    hasResolvedEntry: isRiskEntryKnown(pos.effectiveEntryPrice, pos.entryPriceSource),
     formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
     unknownText: "—",
   });

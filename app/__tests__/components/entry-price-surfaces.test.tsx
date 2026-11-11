@@ -68,6 +68,7 @@ import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { saveEntryPrice } from "@/lib/entry-price";
 import { estimateEntryFromPnl } from "@/lib/trading";
 import { describeEntryPrice, displayEntryE6 } from "@/lib/entry-price-display";
+import { positionValuePnl } from "@/hooks/usePortfolio";
 
 function loadPortfolio(name: string) {
   const f = JSON.parse(fs.readFileSync(path.resolve(__dirname, `../fixtures/${name}.portfolio.json`), "utf8")) as {
@@ -229,7 +230,7 @@ describe("trade-terminal surfaces feed describeLiqPrice the entry SOURCE, not `e
   const read = (f: string) => fs.readFileSync(path.resolve(__dirname, `../../components/trade/${f}`), "utf8");
   it.each(["PositionsDock.tsx", "PositionPanel.tsx", "OtherMarketPositions.tsx"])("%s", (f) => {
     const src = read(f);
-    expect(src).toMatch(/hasResolvedEntry: pnlIsKnown,/);
+    expect(src).toMatch(/hasResolvedEntry: (pnlResult|live)\.riskKnown,/);
     expect(src).not.toMatch(/hasResolvedEntry: (entryPriceE6|entryE6) > 0n/);
   });
   it("OrderTicket tracks the existing entry's source", () => {
@@ -260,5 +261,21 @@ describe("hero / aggregate totals never silently sum an unknown PnL as 0 (#3077 
     render(<PortfolioPositionsView />);
     expect(screen.queryByTestId("hero-pnl-unknown")).toBeNull();
     expect(screen.queryByTestId("hero-pnl-caveat")).toBeNull();
+  });
+});
+
+describe("Portfolio Value keeps the on-chain value of a position whose entry is unknown", () => {
+  const valueText = () => Number((screen.getByText("Portfolio Value").nextElementSibling?.textContent ?? "").replace(/[^\d.-]/g, ""));
+
+  it("capital + on-chain pnl, not capital alone (only the per-position PnL is withheld)", () => {
+    const pos = build("2SewEcvf");
+    expect(pos.pnlKnown).toBe(false);
+    const valuePnl = Number(positionValuePnl(pos)) / 1e6;
+    const capital = Number(pos.account.capital) / 1e6;
+    expect(Math.abs(valuePnl)).toBeGreaterThan(0.01); // the control is only meaningful when the on-chain pnl is real
+    state.positions = [pos];
+    render(<PortfolioPositionsView />);
+    expect(valueText()).toBeCloseTo(capital + valuePnl, 1);
+    expect(Math.abs(valueText() - capital)).toBeGreaterThan(Math.abs(valuePnl) / 2);
   });
 });
