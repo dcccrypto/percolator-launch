@@ -12,6 +12,12 @@ const state = vi.hoisted(() => ({
   positions: [] as any[],
   priceE6: null as bigint | null,
   listeners: new Set<() => void>(),
+  cachedEntryE6: 0n,
+}));
+
+vi.mock("@/lib/entry-price", async (orig) => ({
+  ...(await orig<object>()),
+  getEntryPrice: () => state.cachedEntryE6,
 }));
 
 vi.mock("next/link", () => ({
@@ -156,6 +162,7 @@ function publishLivePrice(priceE6: bigint) {
 beforeEach(() => {
   state.positions = [];
   state.priceE6 = null;
+  state.cachedEntryE6 = 0n;
   state.listeners.clear();
 });
 
@@ -300,5 +307,27 @@ describe("PositionSummary — leverage follows the same live mark as PnL", () =>
 
     expect(screen.getByText(`Lev ${at(LIVE)}`)).toBeInTheDocument();
     expect(screen.queryByText(`Lev ${at(STALE)}`)).toBeNull();
+  });
+});
+
+describe("PositionSummary Entry matches the live PnL source", () => {
+  it("shows the entry just recorded on this device, not a dash, while the poll snapshot still holds a back-solved one", () => {
+    // The open landed after the last poll: the snapshot froze `derived`, the device cache now holds the recorded entry.
+    state.cachedEntryE6 = 100_000_000n;
+    state.positions = [pos({ entryPriceSource: "derived", entryCacheWallet: "Wallet1111", idx: 3 })];
+
+    render(<PositionSummary />);
+
+    const entry = screen.getByText("Entry:").parentElement!;
+    expect(entry.textContent).not.toMatch(/—/);
+    expect(entry.textContent).toMatch(/100/);
+  });
+
+  it("CONTROL: with nothing recorded anywhere the Entry stays a dash", () => {
+    state.positions = [pos({ entryPriceSource: "derived", entryCacheWallet: "Wallet1111", idx: 3 })];
+
+    render(<PositionSummary />);
+
+    expect(screen.getByText("Entry:").parentElement!.textContent).toMatch(/—/);
   });
 });

@@ -726,6 +726,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   useEffect(() => {
     setDirection("long");
     setSizeInput("");
+    resetSizeText(); // forget a refused "-5"/"abc" too, or it comes back in the cleared box
     setMarginInput("");
     // A typed deposit belongs to this market's first trade, not the next market's.
     setFundInput("");
@@ -785,7 +786,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Shows the typed text ("1,", "1,000") while sizeInput holds the dot value (N27 follow-up).
   // Council r4 R3-13: the size box refuses what is not exactly one amount ("-5" was read as 5, "1e3" as 13, "abc12" as 12, all quoted and
   // submittable). The text stays as typed, the size is empty, and the reason shows under the box (same grammar as the Earn amount fields).
-  const { field: sizeField, rejection: sizeRejection } = useStrictDecimalInput(sizeInput, handleSizeChange);
+  const { field: sizeField, rejection: sizeRejection, reset: resetSizeText } = useStrictDecimalInput(sizeInput, handleSizeChange);
 
   /**
    * "Use 1 lot" (v22-mediums 1107, live 5e54bab7d): fill exactly ONE lot, in TOKEN units. A dollar fill ($64.33) is
@@ -1356,7 +1357,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
     if (mockMode) {
       setTradePhase("submitting");
-      setTimeout(() => { setTradePhase("confirming"); setMarginInput(""); setSizeInput(""); setFundInput(""); }, 800);
+      setTimeout(() => { setTradePhase("confirming"); setMarginInput(""); setSizeInput(""); resetSizeText(); setFundInput(""); }, 800);
       setTimeout(() => setTradePhase("idle"), 2000);
       return;
     }
@@ -1542,6 +1543,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setEngineLockError(null);
       setMarginInput("");
       setSizeInput("");
+      resetSizeText();
       setFundInput("");
       // A first fund-and-trade runs with no account in this closure (fundingMode allows it), and the
       // portfolio it just created is a v17 one: idx 0, like every v17 account (lib/userAccountScan.ts).
@@ -1698,6 +1700,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           if (outcome === "landed") {
             setMarginInput("");
             setSizeInput("");
+            resetSizeText();
             setFundInput("");
             // The fill price is unknown here, so don't leave a cached entry for the position.
             if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, wallet);
@@ -2466,15 +2469,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <SummaryCell
             label="Est. fill"
             value={formatLotPriceE6(estEntry, lotExp)}
-            tooltip="The price this order is expected to fill at: the live mark price plus the fee and spread. The real fill, shown in the confirmation after you trade, can differ slightly; your position's Entry is set from it."
+            tooltip="The price this order is expected to fill at: the live mark price adjusted for the base trading fee (spread is not included). The real fill, shown in the confirmation after you trade, can differ slightly; your position's Entry is set from it."
           />
           <SummaryCell
             label="Liq. price"
-            value={beforeLiqDisplay.text !== "—" && beforeLiqDisplay.text !== afterLiqDisplay.text ? `${liqPricePlainText(beforeLiqDisplay)} → ${liqPricePlainText(afterLiqDisplay)}` : liqPricePlainText(afterLiqDisplay)}
+            value={beforeLiqDisplay.text !== "—" && liqPricePlainText(beforeLiqDisplay) !== liqPricePlainText(afterLiqDisplay) ? `${liqPricePlainText(beforeLiqDisplay)} → ${liqPricePlainText(afterLiqDisplay)}` : liqPricePlainText(afterLiqDisplay)}
             // Neutral, like the dock/panel for a safe position: a new order always opens at tier
             // "safe" (#3019), and green/red here read as profit/loss, not risk.
             valueClass="text-[var(--text-secondary)]"
-            tooltip={`Estimated liquidation price if this order fills at the estimated entry.${afterLiqDisplay.title ? ` ${afterLiqDisplay.title}` : ""}`}
+            tooltip={`Estimated liquidation price if this order fills at the est. fill price.${afterLiqDisplay.title ? ` ${afterLiqDisplay.title}` : ""}`}
           />
           <SummaryCell
             label={estFeeHasExtras ? "Fee (est.)" : "Fee"}
@@ -2524,7 +2527,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </div>
           {!fundOverWallet && !fundTooSmall && (
             <p data-testid="fund-explain" className="mt-1 text-[11px] leading-snug text-[var(--text-secondary)]">
-              {`${belowImFloor ? `New positions on this market need at least $${usd2(imFloor, decimals).replace(/\.00$/, "")} of margin. ` : ""}Covers ${formatTokenAmount(marginShort, decimals, 2)} ${collateralSymbol} margin + ${formatTokenAmount(fundFee, decimals, 2)} ${collateralSymbol} fee${fundAtoms > marginShort + fundFee ? `, plus a ${formatTokenAmount(fundAtoms - marginShort - fundFee, decimals, 2)} ${collateralSymbol} cushion for price moves before the fill` : ""}, for this ${formatTokenAmount(notionalNative, decimals, 2)} ${collateralSymbol} position${!needsAccount && !vsPosition && availableBalance > 0n ? `; ${formatTokenAmount(availableBalance, decimals, 2)} ${collateralSymbol} already on this market` : ""}. Anything unused stays in your account.`}
+              {`${belowImFloor ? `New positions on this market need at least $${usd2(imFloor, decimals).replace(/\.00$/, "")} of margin. ` : ""}Covers ${formatTokenAmount(marginShort, decimals, 2)} ${collateralSymbol} margin + ${formatTokenAmount(fundFee, decimals, 2)} ${collateralSymbol} fee${fundAtoms > marginShort + fundFee ? `, plus ${fundEnteredAtoms > 0n ? `${formatTokenAmount(fundAtoms - marginShort - fundFee, decimals, 2)} ${collateralSymbol} extra that stays available in your account` : `a ${formatTokenAmount(fundAtoms - marginShort - fundFee, decimals, 2)} ${collateralSymbol} cushion for price moves before the fill`}` : ""}, for this ${formatTokenAmount(notionalNative, decimals, 2)} ${collateralSymbol} position${!needsAccount && !vsPosition && availableBalance > 0n ? `; ${formatTokenAmount(availableBalance, decimals, 2)} ${collateralSymbol} already on this market` : ""}. Anything unused stays in your account.`}
             </p>
           )}
           {fundOverWallet && (
