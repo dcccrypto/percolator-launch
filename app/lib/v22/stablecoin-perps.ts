@@ -72,7 +72,7 @@ const STABLE_NAME_RE = new RegExp(`^(?:wrapped )?(?:${NAME_PHRASES.map((p) => p.
 /** Invisible / formatting characters that do not render but change the string: zero-width, bidi controls, soft hyphen, fillers, variation selectors, tags. */
 const INVISIBLE_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\u{E0000}-\u{E007F}]/gu;
 
-/** Cyrillic / Greek lookalikes of Latin letters (NFKC, applied first, already folds fullwidth and mathematical forms). */
+/** Cyrillic / Greek / Armenian / Cherokee lookalikes of Latin letters (NFKC, applied first, already folds fullwidth and mathematical forms). */
 const CONFUSABLES: Readonly<Record<string, string>> = {
   // Cyrillic upper
   "\u0410": "A", "\u0412": "B", "\u0415": "E", "\u041A": "K", "\u041C": "M", "\u041D": "H", "\u041E": "O", "\u0420": "P", "\u0421": "C",
@@ -85,6 +85,8 @@ const CONFUSABLES: Readonly<Record<string, string>> = {
   "\u03A1": "P", "\u03A4": "T", "\u03A5": "Y", "\u03A7": "X",
   // Greek lower
   "\u03BF": "o", "\u03BD": "v", "\u03B9": "i", "\u03C1": "p", "\u03C5": "u", "\u03B1": "a", "\u03BA": "k",
+  // Armenian / Cherokee lookalikes (single-letter ASCII targets from Unicode confusables.txt)
+  "\u0545": "3", "\uAB9E": "4", "\u13CE": "4", "\uABBE": "6", "\u13EE": "6", "\u13AA": "A", "\u13CF": "b", "\u13F4": "B", "\uABAF": "c", "\u13DF": "C", "\u13E7": "d", "\u13A0": "D", "\u13AC": "E", "\u0584": "f", "\u0581": "g", "\u13C0": "G", "\u13F3": "G", "\u0570": "h", "\u13C2": "h", "\u13BB": "H", "\u0582": "i", "\uAB75": "i", "\u13A5": "i", "\u0575": "j", "\u13AB": "J", "\u13E6": "K", "\u13DE": "L", "\u13B7": "M", "\u0578": "n", "\u057C": "n", "\u0585": "o", "\u0555": "O", "\u13E2": "P", "\u0563": "q", "\u0566": "q", "\uAB81": "r", "\u13A1": "R", "\u13D2": "R", "\uABAA": "s", "\u054F": "S", "\u13D5": "S", "\u13DA": "S", "\u13A2": "T", "\u057D": "u", "\u054D": "U", "\uABA9": "v", "\u13D9": "V", "\u0561": "w", "\uAB83": "w", "\uABA4": "w", "\u13B3": "W", "\u13D4": "W", "\u13A9": "Y", "\u13BD": "Y", "\uAB93": "z", "\u13C3": "Z",
   // Latin lookalikes outside ASCII
   "\u0131": "i", "\u0269": "i", "\u0251": "a", "\u0261": "g", "\u1D00": "A", "\u1D04": "C", "\u1D05": "D", "\u1D07": "E", "\u1D1C": "U",
 };

@@ -11,7 +11,7 @@ import { PUMPSWAP, METEORA, USDC, WSOL } from "../lib/pool-quote-gate-fixtures";
 // The first import of the markets route is heavy, and the "v2.2 off" case runs into the route's own slab-read retries.
 vi.setConfig({ testTimeout: 60_000 });
 
-const h = vi.hoisted(() => ({ accounts: new Map<string, { owner: string; data: Uint8Array }>(), rpcDown: false, rowWrites: 0, blobWrites: 0, dbUpdates: 0, keeperFetches: 0 }));
+const h = vi.hoisted(() => ({ claims: 0, accounts: new Map<string, { owner: string; data: Uint8Array }>(), rpcDown: false, rowWrites: 0, blobWrites: 0, dbUpdates: 0, keeperFetches: 0 }));
 
 process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
 process.env.ADMIN_API_SECRET = "stable-class-secret";
@@ -24,6 +24,7 @@ vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn(), captureMessage: vi
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({ rpcUrl: "https://api.devnet.solana.com", network: "devnet", programId: "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ", vaultProgramId: "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3", matcherProgramId: "11111111111111111111111111111111" }),
 }));
+vi.mock("@/lib/playground-nonce-store", () => ({ claimPlaygroundChallenge: async () => { h.claims++; return true; }, createPlaygroundChallenge: async () => ({ nonce: "n", expiresAt: 0 }) }));
 vi.mock("@/lib/upstash-rate-limit", () => ({ createUpstashRateLimiter: () => ({ check: async () => ({ allowed: true }) }) }));
 vi.mock("@/lib/market-registry", () => ({ loadMergedMarketRows: async () => [], MARKET_SELECT_FIELDS: "" }));
 vi.mock("@/lib/playground-registered-markets", () => ({ readRegisteredMarkets: async () => [], upsertRegisteredMarket: vi.fn(async () => { h.blobWrites++; }) }));
@@ -67,7 +68,12 @@ const NEW_CLASS: Array<[string, string]> = [["USDS", USDS], ["FDUSD", FDUSD], ["
 
 const setV22 = (on: boolean | null) => { if (on === null) delete process.env.NEXT_PUBLIC_V22; else process.env.NEXT_PUBLIC_V22 = on ? "1" : "0"; };
 const kp = () => Keypair.generate().publicKey.toBase58();
+const SPL = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const SYSTEM = "11111111111111111111111111111111";
+/** An SPL mint account on the fake mainnet (the check refuses a mainnet_ca that is not one). */
+const mintAcct = (addr: string) => h.accounts.set(addr, { owner: SPL, data: new Uint8Array(82) });
 function pool(owner: string, base: string, quote: string): string {
+  mintAcct(base);
   const addr = kp();
   const d = Buffer.alloc(owner === PUMPSWAP ? 301 : 904);
   const [bo, qo] = owner === PUMPSWAP ? [43, 75] : [88, 120];
@@ -82,7 +88,7 @@ const postMarkets = (body: Record<string, unknown>) =>
   new Request("http://localhost/api/markets", { method: "POST", headers: { "Content-Type": "application/json", "x-markets-bypass": BYPASS }, body: JSON.stringify({ slab_address: kp(), mint_address: kp(), deployer: DEPLOYER, ...body }) }) as unknown as NextRequest;
 const errOf = async (res: Response) => String(((await res.json()) as { error?: string }).error ?? "");
 
-beforeEach(() => { vi.resetModules(); setV22(true); h.accounts.clear(); h.rpcDown = false; h.rowWrites = h.blobWrites = h.dbUpdates = 0; });
+beforeEach(() => { vi.resetModules(); setV22(true); h.accounts.clear(); mintAcct(CONTROL); h.claims = 0; h.rpcDown = false; h.rowWrites = h.blobWrites = h.dbUpdates = 0; });
 afterEach(() => setV22(null));
 
 describe("POST /api/markets", () => {
@@ -142,6 +148,37 @@ describe("POST /api/markets", () => {
     const res = await POST(postMarkets({ mainnet_ca: ca }));
     expect(res.status).toBe(400);
     expect(await errOf(res)).toMatch(/dollar stablecoin/i);
+  });
+
+  it("r7: a mainnet_ca that is not a mint on mainnet (missing account, System Program, a wallet) is refused, 400 not retryable", async () => {
+    const { POST } = await import("@/app/api/markets/route");
+    const wallet = kp();
+    h.accounts.set(wallet, { owner: SYSTEM, data: new Uint8Array(0) });
+    for (const ca of [kp(), SYSTEM, wallet]) {
+      const res = await POST(postMarkets({ mainnet_ca: ca, symbol: "ZZZ" }));
+      expect(res.status, ca).toBe(400);
+      expect(await errOf(res)).toMatch(/couldn't read this market's token/i);
+    }
+      });
+
+  it("r7: the 503 for an unreachable mainnet does not consume the challenge nonce (signed request, retry is possible)", async () => {
+    const { default: nacl } = await import("tweetnacl");
+    const { buildMarketRegistrationMessage } = await import("@/lib/market-registration-auth");
+    const k = nacl.sign.keyPair();
+    const deployer = new PublicKey(k.publicKey).toBase58();
+    const nonce = "550e8400-e29b-41d4-a716-446655440000";
+    const payload = { slab_address: kp(), mint_address: kp(), deployer, mainnet_ca: CONTROL, nonce };
+    const signature = Buffer.from(nacl.sign.detached(buildMarketRegistrationMessage({ nonce, deployer, payload } as never), k.secretKey)).toString("base64");
+    const send = () => new Request("http://localhost/api/markets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, signature }) }) as unknown as NextRequest;
+    const { POST } = await import("@/app/api/markets/route");
+    h.rpcDown = true;
+    const down = await POST(send());
+    expect(down.status).toBe(503);
+    expect(h.claims).toBe(0);
+    h.rpcDown = false;
+    const retry = await POST(send());
+    expect(retry.status).not.toBe(401);
+    expect(h.claims).toBe(1);
   });
 
   it("POOL-ONLY: an unreadable pool is refused (400), an RPC failure is a retryable 503; neither reaches the slab check", async () => {
@@ -255,6 +292,11 @@ describe("POST /api/oracle-keeper/register (hot-registers with the keeper)", () 
     expect(r.status).toBe(503);
     expect(h.dbUpdates).toBe(0);
   });
+  it("r7: a mainnetCA that is not a mint on mainnet is refused before any DB write", async () => {
+    const r = await hit({ slabAddress: kp(), mainnetCA: kp(), symbol: "OK" });
+    expect(r.status).toBe(400);
+    expect(h.dbUpdates).toBe(0);
+  });
   it("a client symbol that is a stable ticker is refused; a normal token reaches the DB write", async () => {
     expect((await hit({ slabAddress: kp(), mainnetCA: CONTROL, symbol: "USDC" })).status).toBe(400);
     const ok = await hit({ slabAddress: kp(), mainnetCA: CONTROL, symbol: "OK" });
@@ -283,6 +325,11 @@ describe("POST /api/mobile/create-market (checks the UNDERLYING, not the collate
   it("a stable COLLATERAL mint is not what is refused (it is the normal collateral); the underlying is", async () => {
     const r = await mobile({ mint: USDS, mainnet_ca: CONTROL });
     expect(r.error).not.toMatch(/dollar stablecoin/i);
+  });
+  it("r7: an underlying mainnet_ca that is not a mint on mainnet is refused (400)", async () => {
+    const r = await mobile({ mainnet_ca: kp() });
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/couldn't read this market's token/i);
   });
   it("no underlying identity at all is refused; a metadata RPC failure is a retryable 503", async () => {
     const none = await mobile({});

@@ -19,6 +19,7 @@ import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { isStablecoinMintAddress, stablecoinIdentityVerdict, type StablecoinTokenMeta } from "@/lib/v22/stablecoin-perps";
 
 const METAPLEX_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const SPL_TOKEN_PROGRAMS: ReadonlySet<string> = new Set(["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]);
 const WSOL = "So11111111111111111111111111111111111111112";
 
 export type StablecoinCheck =
@@ -74,7 +75,10 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-/** On-chain name/symbol per mint (base58). A mint whose metadata is absent / unreadable is simply left out. Throws on RPC failure. */
+/** Thrown when a given mint account does not exist on mainnet or is not an SPL Token / Token-2022 mint. */
+class NotAMintError extends Error {}
+
+/** On-chain name/symbol per mint (base58). A mint whose metadata is absent / unreadable is simply left out. Throws on RPC failure, and NotAMintError when a mint account is missing or not owned by SPL Token / Token-2022. */
 async function readMintMetas(mints: string[], conn: Conn, timeoutMs: number): Promise<Record<string, StablecoinTokenMeta>> {
   const keys: PublicKey[] = [];
   for (const m of mints) {
@@ -88,6 +92,7 @@ async function readMintMetas(mints: string[], conn: Conn, timeoutMs: number): Pr
     // Metaplex first; when that account is absent OR does not parse, fall back to the Token-2022 metadata extension on the mint.
     const mpl = infos[2 * i + 1];
     const t22 = infos[2 * i];
+    if (!t22 || !SPL_TOKEN_PROGRAMS.has(t22.owner.toBase58())) throw new NotAMintError(m);
     const meta = (mpl ? parseMetaplexNameSymbol(new Uint8Array(mpl.data)) : null) ?? (t22 ? parseToken2022NameSymbol(new Uint8Array(t22.data)) : null);
     if (meta) out[m] = meta;
   });
@@ -169,7 +174,9 @@ export async function checkStablecoinUnderlying(input: StablecoinCheckInput): Pr
         if (v === "suspect") suspect = `${mint} ${meta.symbol ?? ""} / ${meta.name ?? ""}`;
       }
       return suspect ? { ok: true, suspect } : { ok: true };
-    } catch {
+    } catch (e) {
+      // A given mainnet_ca that is not an SPL Token / Token-2022 mint (missing account, wallet, program, random key) is no token identity: refused, not retryable.
+      if (e instanceof NotAMintError) return { ok: false, kind: "unverifiable", retryable: false };
       // Fail closed: the metadata RPC read failed, so the token's on-chain symbol / name is unknown. Refuse, retryable.
       return { ok: false, kind: "unverifiable", retryable: true };
     }

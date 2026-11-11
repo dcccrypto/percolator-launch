@@ -58,6 +58,9 @@ describe("homoglyph / invisible-character tickers", () => {
     ["soft hyphen inside PYUSD", "PY­USD"],
     ["combining mark on USDC", "USDĆ"],
     ["Cyrillic О in USDe-style RLUSD (R L U S D) with Greek Ο in GHO", "GHΟ"],
+    ["Armenian Ս (U+054D) in USDC", "\u054DSDC"],
+    ["Cherokee Ꮪ (U+13DA) in USDC", "U\u13DADC"],
+    ["Cherokee Ꮯ (U+13DF) in USDC", "USD\u13DF"],
     ["fullwidth plus USD+", "USD＋"],
   ])("%s is refused", (_n, symbol) => {
     expect(stablecoinIdentityVerdict({ symbol })).toBe("block");

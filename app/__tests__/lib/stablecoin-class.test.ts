@@ -131,11 +131,21 @@ function dlmmPool(base: string, quote: string): Acct {
   new PublicKey(quote).toBuffer().copy(d, 120);
   return { owner: new PublicKey(METEORA), data: d };
 }
-function fakeConn(accounts: Map<string, Acct>, opts: { fail?: boolean } = {}) {
+const SPL_TOKEN = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+/**
+ * Fake mainnet. Mint accounts the check reads (a key followed by its Metaplex PDA) are synthesised as SPL mints when the map has none,
+ * unless `missingMints` is set (then an absent mint account stays absent).
+ */
+function fakeConn(accounts: Map<string, Acct>, opts: { fail?: boolean; missingMints?: boolean } = {}) {
   return {
     getMultipleAccountsInfo: async (keys: PublicKey[]) => {
       if (opts.fail) throw new Error("rpc down");
-      return keys.map((k) => accounts.get(k.toBase58()) ?? null);
+      return keys.map((k, i) => {
+        const a = accounts.get(k.toBase58());
+        if (a) return a;
+        const isMintSlot = i + 1 < keys.length && keys[i + 1].equals(pda(k));
+        return isMintSlot && !opts.missingMints ? ({ owner: SPL_TOKEN, data: Buffer.alloc(82) } as Acct) : null;
+      });
     },
   } as unknown as Parameters<typeof checkStablecoinUnderlying>[0]["conn"];
 }
@@ -241,5 +251,18 @@ describe("checkStablecoinUnderlying", () => {
   it("a failed metadata READ (RPC error) fails closed as retryable; an absent metadata account does not block a clean mint", async () => {
     expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map(), { fail: true }) })).toEqual({ ok: false, kind: "unverifiable", retryable: true });
     expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map()) })).toEqual({ ok: true });
+  });
+
+  it("r7: a mainnet_ca whose mint account is missing, or not owned by SPL Token / Token-2022, is refused (not retryable)", async () => {
+    const refused = { ok: false, kind: "unverifiable", retryable: false };
+    expect(await checkStablecoinUnderlying({ mainnetCa: Keypair.generate().publicKey.toBase58(), conn: fakeConn(new Map(), { missingMints: true }) })).toEqual(refused);
+    const sys = new PublicKey("11111111111111111111111111111111");
+    const wallet = Keypair.generate().publicKey;
+    const conn = fakeConn(new Map<string, Acct>([[wallet.toBase58(), { owner: sys, data: Buffer.alloc(0) }], [sys.toBase58(), { owner: new PublicKey("NativeLoader1111111111111111111111111111111"), data: Buffer.alloc(0) }]]));
+    expect(await checkStablecoinUnderlying({ mainnetCa: wallet.toBase58(), conn })).toEqual(refused);
+    expect(await checkStablecoinUnderlying({ mainnetCa: sys.toBase58(), conn })).toEqual(refused);
+    // Token-2022 mints are fine
+    const t22 = Keypair.generate().publicKey;
+    expect(await checkStablecoinUnderlying({ mainnetCa: t22.toBase58(), conn: fakeConn(new Map<string, Acct>([[t22.toBase58(), token2022Mint("Okay", "OKAY")]])) })).toEqual({ ok: true });
   });
 });

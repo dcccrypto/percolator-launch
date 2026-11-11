@@ -1015,6 +1015,8 @@ export async function POST(req: NextRequest) {
     );
   }
   const isBypass = !isProd && bypassEnabled && bypassSecret && bypassHeader === bypassSecret;
+  // v2.2: result of the mainnet token-identity check when it was run before the nonce was claimed (reused below, never read twice).
+  let preStable: Awaited<ReturnType<typeof checkStablecoinUnderlying>> | null = null;
 
   if (!isBypass) {
     if (!nonce || !signature) {
@@ -1108,6 +1110,24 @@ export async function POST(req: NextRequest) {
         { error: "Signature verification failed. Ensure you signed the exact market-registration payload with the deployer keypair." },
         { status: 401 }
       );
+    }
+
+    // v2.2: the mainnet token-identity check runs HERE, after the signature is verified (no unauthenticated RPC) and BEFORE the nonce is
+    // claimed, so a retryable 503 (mainnet RPC down) does not burn the nonce: the client retries the same signed request. Any other
+    // verdict is applied at the usual place below. Unparseable keys are left to the 400s below.
+    if (isDevnetV22Enabled()) {
+      let ca: string | null = null;
+      let poolAddr: string | null = null;
+      try {
+        if (mainnet_ca) ca = new PublicKey(mainnet_ca).toBase58();
+        if (dex_pool_address) poolAddr = new PublicKey(dex_pool_address).toBase58();
+        preStable = await checkStablecoinUnderlying({ mainnetCa: ca, pool: poolAddr, symbol, name });
+      } catch {
+        preStable = null;
+      }
+      if (preStable && !preStable.ok && preStable.kind === "unverifiable" && preStable.retryable) {
+        return NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } });
+      }
     }
 
     // Atomically-enough claim the nonce (see lib/playground-nonce-store.ts header for
@@ -1275,7 +1295,7 @@ export async function POST(req: NextRequest) {
   // refused rather than waved through.
   // A registration with neither a pool nor a mainnet_ca is refused (no token identity to check).
   if (isDevnetV22Enabled()) {
-    const stable = await checkStablecoinUnderlying({ mainnetCa: canonicalMainnetCa, pool: canonicalDexPool, symbol, name });
+    const stable = preStable ?? (await checkStablecoinUnderlying({ mainnetCa: canonicalMainnetCa, pool: canonicalDexPool, symbol, name }));
     if (!stable.ok) {
       if (stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
       if (stable.kind === "mismatch") return NextResponse.json({ error: STABLECOIN_MISMATCH_REASON }, { status: 400 });
