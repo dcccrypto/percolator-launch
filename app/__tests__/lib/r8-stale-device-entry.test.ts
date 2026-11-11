@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { entryRecordCurrent, getSavedEntry, PENDING_ENTRY_WINDOW_MS, saveEntryPrice } from "@/lib/entry-price";
+import { entryRecordCurrent, getCurrentEntry, getSavedEntry, PENDING_ENTRY_WINDOW_MS, saveEntryPrice } from "@/lib/entry-price";
 import { portfolioPositionPnl, terminalPositionPnl, type PortfolioPnlSource } from "@/lib/position-pnl";
 
 const ADL_ONE = 1_000_000_000_000_000n;
@@ -94,5 +94,20 @@ describe("the opening device does not flicker to unknown before the size is meas
   it("a sized save is never pending", () => {
     saveEntryPrice(SLAB, 0, 100_000_000n, 2, WALLET, 1_000_000n, { pending: true });
     expect(getSavedEntry(SLAB, 0, WALLET)!.pending).toBe(false);
+  });
+});
+
+describe("every consumer of the cached entry checks the size (withdraw pre-check, snapshot fallback)", () => {
+  it("getCurrentEntry: the booked basis for the matching size, zeros for another size or none", () => {
+    saveEntryPrice(SLAB, 0, 100_400_000n, 2, WALLET, 1_000_000n, { bookedPriceE6: 100_000_000n });
+    expect(getCurrentEntry(SLAB, 0, WALLET, 1_000_000n)).toEqual({ entryE6: 100_400_000n, riskEntryE6: 100_000_000n });
+    expect(getCurrentEntry(SLAB, 0, WALLET, 1_800_000n)).toEqual({ entryE6: 0n, riskEntryE6: 0n });
+    expect(getCurrentEntry(SLAB, 1, WALLET, 1_000_000n)).toEqual({ entryE6: 0n, riskEntryE6: 0n });
+  });
+  it("a snapshot that says 'cache' does not stand in for a record this device no longer holds", () => {
+    const row = { ...snap(1_000_000n), entryPriceSource: "cache" as const, effectiveEntryPrice: 100_000_000n };
+    const p = portfolioPositionPnl(row, MARK);
+    expect(p.entrySource).toBe("unknown");
+    expect(p.pnlKnown).toBe(false);
   });
 });

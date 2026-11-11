@@ -394,7 +394,9 @@ function liveCachedEntry(pos: PortfolioPnlSource): { entryE6: bigint; riskEntryE
     const live = getSavedEntry(pos.slabAddress, pos.idx, pos.entryCacheWallet);
     if (live) return { entryE6: live.entryPriceE6, riskEntryE6: live.bookedPriceE6, check: { sizeQ: live.sizeQ, pending: live.pending } };
   }
-  // No record on this device now: the snapshot's own cache hit (already validated when it was polled) stands.
+  // This device holds no record for the position (it was cleared by a trade here): a snapshot's older cache hit must not stand in for
+  // it, or the size check would be skipped. Only a row with no cache key to read (no slab / idx / wallet) keeps its own resolved entry.
+  if (pos.entryCacheWallet && pos.slabAddress !== undefined && pos.idx !== undefined) return { entryE6: 0n, riskEntryE6: 0n, check: null };
   return { entryE6: pos.entryPriceSource === "cache" ? pos.effectiveEntryPrice : 0n, riskEntryE6: 0n, check: null };
 }
 

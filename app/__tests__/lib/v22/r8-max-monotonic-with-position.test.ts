@@ -12,7 +12,8 @@
 import { describe, expect, it } from "vitest";
 import { deriveTicketLimits, type TicketLimitsInput } from "@/lib/limits/ticket";
 import { balanceMaxQ, buyingPowerAtoms, oneMaxQ } from "@/lib/limits/ticket-state";
-import { maxWalletDepositAtoms, tradableMarginAtoms } from "@/lib/first-trade";
+import { fundDepositAtoms, maxWalletDepositAtoms, tradableMarginAtoms } from "@/lib/first-trade";
+import { growthDepositFloorAtoms, growthGate } from "@/lib/v22/growth-gate";
 import { growthMarketView } from "@/lib/v21/growth-market";
 import { marketLimits, OWNER_A } from "../limits/fixtures";
 import { marketRaw } from "../v21/fixtures";
@@ -110,3 +111,53 @@ describe("r8 BUG B: Buying power and Max never fall as leverage rises", () => {
     expect(eq(1_000_000n, 5n * LOT, 5n * LOT).capped).toBe(false);
   });
 });
+
+describe("r8 MED-1: a submit at Max passes the growth gate at every leverage (with the deposit the ticket bundles)", () => {
+  const FEE_BPS = 30n;
+  /** The ticket's bundled deposit for an order of `askQ`: max(gate shortfall, margin shortfall) + fee, as OrderTicket computes it (fundDepositAtoms). */
+  function submitAt(s: Scenario, lev: number, askQ: bigint) {
+    const equityNow = s.capital;
+    const notional = (askQ * PRICE) / 1_000_000n;
+    const fundFee = (notional * FEE_BPS) / 10_000n;
+    const marginNeed = notional / BigInt(lev);
+    const marginShortEngine = marginNeed > s.capital ? marginNeed - s.capital : 0n;
+    const floor = growthDepositFloorAtoms({ view: view(), direction: "short", takerEffQ: s.takerPosQ, askQ, equityNow, fundFee });
+    const gateNeedsDeposit = !growthGate({ view: view(), direction: "short", takerEffQ: s.takerPosQ, askQ, takerEquity: equityNow }).passes;
+    const fundingMode = s.wallet > 0n && (marginShortEngine > 0n || gateNeedsDeposit);
+    const marginShort = floor > marginShortEngine ? floor : marginShortEngine;
+    const deposit = fundingMode ? fundDepositAtoms(marginShort, fundFee, s.wallet, 6) : 0n;
+    const gate = growthGate({ view: view(), direction: "short", takerEffQ: s.takerPosQ, askQ, takerEquity: equityNow + deposit, quoteFeeBps: 0n });
+    return { deposit, fundingMode, gate };
+  }
+  const walletScenarios: Array<[string, Scenario]> = [
+    ["wallet 10,000", { capital: 12_000_000n, takerPosQ: -610_000n, sizeQ: 0n, wallet: WALLET }],
+    ["wallet 300", { capital: 12_000_000n, takerPosQ: -610_000n, sizeQ: 0n, wallet: 300_000_000n }],
+    ["wallet 50", { capital: 12_000_000n, takerPosQ: -610_000n, sizeQ: 0n, wallet: 50_000_000n }],
+    ["no position, wallet 300", { capital: 12_000_000n, takerPosQ: 0n, sizeQ: 0n, wallet: 300_000_000n }],
+  ];
+  for (const [name, s] of walletScenarios) {
+    it(`${name}: Max passes the gate with its own deposit at 1x..10x, the deposit fits the wallet, and Max stays monotonic`, () => {
+      let prev = 0n;
+      let sawDeposit = false;
+      for (const l of LEVS) {
+        const maxQ = pipeline(s, l, true).maxQ ?? 0n;
+        expect(maxQ >= prev, `max at ${l}x`).toBe(true);
+        prev = maxQ;
+        if (maxQ === 0n) continue;
+        const r = submitAt(s, l, maxQ);
+        sawDeposit ||= r.fundingMode;
+        expect(r.deposit <= s.wallet, `deposit fits the wallet at ${l}x`).toBe(true);
+        expect(r.gate.passes, `gate at Max ${maxQ} / ${l}x (deposit ${r.deposit})`).toBe(true);
+      }
+      expect(sawDeposit).toBe(true);
+    });
+  }
+  it("without the gate-shortfall deposit the same Max is refused at high leverage (the reviewer's repro)", () => {
+    const s = walletScenarios[0][1];
+    const maxQ = pipeline(s, 10, true).maxQ!;
+    const notional = (maxQ * PRICE) / 1_000_000n;
+    const marginOnly = notional / 10n + (notional * FEE_BPS) / 10_000n;
+    expect(growthGate({ view: view(), direction: "short", takerEffQ: s.takerPosQ, askQ: maxQ, takerEquity: s.capital + marginOnly }).passes).toBe(false);
+  });
+});
+

@@ -175,6 +175,22 @@ export function getSavedEntry(slab: string, accountIdx: number, wallet?: string)
   }
 }
 
+/**
+ * The device-cached entry for the position measured NOW, or zeros when there is none or it no longer describes that position
+ * (`entryRecordCurrent`). `entryE6` is the price paid (display), `riskEntryE6` the engine's basis (risk math). The reader for any
+ * consumer that has an effective size and does not go through `computePositionPnl`.
+ */
+export function getCurrentEntry(
+  slab: string,
+  accountIdx: number,
+  wallet: string | undefined,
+  effectiveSizeQ: bigint | null,
+): { entryE6: bigint; riskEntryE6: bigint } {
+  const saved = getSavedEntry(slab, accountIdx, wallet);
+  if (!saved || !entryRecordCurrent(saved, effectiveSizeQ)) return { entryE6: 0n, riskEntryE6: 0n };
+  return { entryE6: saved.entryPriceE6, riskEntryE6: saved.bookedPriceE6 };
+}
+
 const absQ = (q: bigint): bigint => (q < 0n ? -q : q);
 
 /**

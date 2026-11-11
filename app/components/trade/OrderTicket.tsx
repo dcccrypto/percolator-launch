@@ -108,7 +108,7 @@ import { fmtQ as fmtQLots } from "@/lib/limits/format";
 import { takeFillResult } from "@/lib/limits/fill-check";
 import { feeRaiseCopy, takeFeeRaise } from "@/lib/v22/fee-raise-note";
 import { sizeWithLots } from "@/lib/v22/growth-room";
-import { growthGate } from "@/lib/v22/growth-gate";
+import { growthDepositFloorAtoms, growthGate } from "@/lib/v22/growth-gate";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { feeBpsWithSpread } from "@/lib/v22/spread-estimate";
 import { effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
@@ -963,7 +963,23 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const walletHasTokens = (walletAtaBalance ?? 0n) > 0n;
   // UX WP-6 (§3.2): with sim-USDC in the wallet, "fund and trade" is ONE approval — no account
   // yet: [InitUser] + [Deposit, Trade] signed together; account short of margin: [Deposit, Trade].
-  const fundingMode = !mockMode && connected && !accountPending && walletHasTokens && (needsAccount || needsDeposit || exceedsBalance);
+  // Growth market: the deployed wrapper's gate compares the account's equity AFTER the order's deposit with the post-fill requirement, which
+  // can exceed the order's own margin (a higher leverage needs LESS margin but the same gate equity). An order the in-market balance
+  // backs but the gate does not is a deposit order too: the ticket bundles the gate's shortfall, so the Max it offers (bounded at the equity
+  // the wallet could add) is achievable at every leverage. Independent of fundingMode (which it feeds).
+  const growthEquityNow = userAccount && !needsAccount
+    ? capital +
+      (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
+      (!isSentinelValue(userAccount.account.feeCredits) && userAccount.account.feeCredits < 0n ? userAccount.account.feeCredits : 0n)
+    : 0n;
+  const needsGrowthDeposit =
+    !mockMode && !!marketLimits.growth && !!userAccount && marginNative > 0n && positionSize > 0n &&
+    !isReducingOrder(existingPositionSize, direction, positionSize) &&
+    (() => {
+      const g = growthGate({ view: marketLimits.growth as NonNullable<typeof marketLimits.growth>, direction, takerEffQ: existingPositionSize, askQ: positionSize, takerEquity: growthEquityNow });
+      return !g.closed && g.extraEquityNeeded > 0n;
+    })();
+  const fundingMode = !mockMode && connected && !accountPending && walletHasTokens && (needsAccount || needsDeposit || exceedsBalance || needsGrowthDeposit);
 
   // ── Receipt (before -> after) ──
   const oracleE6 = priceUsd ? toE6(priceUsd) : 0n;
@@ -984,22 +1000,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // short of it, and the chain refused. The deposit is at least the equity the gate still needs (lib/v22/growth-gate.ts).
   // The engine charges the fee at its price, which can sit above the receipt's feed-priced fee.
   const fundFee = openNeed.fee > fee ? openNeed.fee : fee;
-  const growthDepositFloor = (() => {
-    if (!fundingMode || !hasOrder || !marketLimits.growth || isReducingOrder(existingPositionSize, direction, positionSize)) return 0n;
-    const equityNow = needsAccount || !userAccount
+  const growthDepositFloor =
+    !fundingMode || !hasOrder || !marketLimits.growth || isReducingOrder(existingPositionSize, direction, positionSize)
       ? 0n
-      : capital +
-        (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
-        (!isSentinelValue(userAccount.account.feeCredits) && userAccount.account.feeCredits < 0n ? userAccount.account.feeCredits : 0n);
-    const g = growthGate({ view: marketLimits.growth, direction, takerEffQ: existingPositionSize, askQ: positionSize, takerEquity: equityNow });
-    if (g.closed) return 0n;
-    // The gate compares equity AFTER the fill fee, so `extraEquityNeeded` already contains that fee, and the deposit adds `fundFee`
-    // on top (fundDepositAtoms / fundMinAtoms). Net out the part both count (review of #3778, Low-1) so the fee is not asked twice;
-    // floored at the smaller of the two fees, the deposit (floor + fundFee) still covers `extraEquityNeeded` in full.
-    const gateFee = equityNow > g.equityAtClip ? equityNow - g.equityAtClip : 0n;
-    const shared = gateFee < fundFee ? gateFee : fundFee;
-    return g.extraEquityNeeded > shared ? g.extraEquityNeeded - shared : 0n;
-  })();
+      : growthDepositFloorAtoms({ view: marketLimits.growth, direction, takerEffQ: existingPositionSize, askQ: positionSize, equityNow: growthEquityNow, fundFee });
   const marginShort = growthDepositFloor > marginShortEngine ? growthDepositFloor : marginShortEngine;
   const fundNeededAtoms = fundingMode && hasOrder ? fundDepositAtoms(marginShort, fundFee, walletAtaBalance ?? 0n, decimals) : 0n;
   const fundMinAtoms = fundingMode && hasOrder ? marginShort + fundFee : 0n;
