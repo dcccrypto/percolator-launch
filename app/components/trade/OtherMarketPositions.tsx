@@ -42,7 +42,7 @@ import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider"
 import { ClosePositionModal } from "./ClosePositionModal";
 import { MOBILE_CARD_ACTIONS, MOBILE_CARD_CELL, MOBILE_CARD_ROW } from "./positionCardClasses";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
-import { isEntryKnown, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
+import { isEntryKnown } from "@/lib/entry-price-display";
 import { onChainMarkE6, portfolioPositionPnl } from "@/lib/position-pnl";
 import {
   formatTokenAmount,
@@ -191,7 +191,7 @@ const OtherMarketRow: FC<{
     markPriceE6: markE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
     // #2660: `entryE6 > 0n` is always true — on "unknown" it is the mark.
-    hasResolvedEntry: pnlIsKnown,
+    hasResolvedEntry: live.riskKnown,
   });
   // "5.3% to liq" under a real price only, like the current market's row.
   const liqDistance = describeLiqDistance(liqDisplay, posSize, markE6, liqPriceE6);
@@ -251,7 +251,6 @@ const OtherMarketRow: FC<{
             <>
               <div>
                 {formatPnl(pnlTokens, decimals)} USDC
-                {live.isEstimate && <span className="ml-1 text-[9px] text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>}
               </div>
               {pnlUsd !== null && (
                 <div className="text-[9px]">

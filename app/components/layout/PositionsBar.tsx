@@ -8,7 +8,7 @@ import { parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/priceStore";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
-import { DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
+import { ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import { portfolioPositionPnl } from "@/lib/position-pnl";
 import { positionRowKeys, usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
@@ -71,9 +71,6 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
             {/* #865: a known zero is "0.00", never a bare "0" (which read as the position size). */}
             {abs === 0n ? "0.00" : `${sign}${formatTokenAmount(abs, decimals)}`}
           </span>
-          {live.isEstimate && (
-            <span className="text-[9px] font-medium text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
-          )}
           {/* ROE — smaller + dimmed so the dollar figure stays the loud number;
               no extra sign (color + the main value already carry direction). */}
           <span className={`text-[10px] font-medium opacity-60 ${colorClass}`}>

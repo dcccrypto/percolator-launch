@@ -37,7 +37,8 @@ export function isExactEntrySource(source: EntryPriceSource | null | undefined):
 export const ESTIMATE_LABEL = "est.";
 
 /**
- * True when `entryE6` is a real (cached or PnL-derived) entry, not the mark placeholder.
+ * True when `entryE6` is a RECORDED entry (server or this device's cache) that may be shown as the entry and used for a displayed PnL.
+ * A PnL-derived back-solve is not (see `isRiskEntryKnown`); neither is the mark placeholder.
  *
  * An ALLOWLIST, not `source !== "unknown"` (#2671, @0x-SquidSol): the denylist
  * fails open — a missing/undefined source (a fixture, mock data, a JS caller)
@@ -45,6 +46,18 @@ export const ESTIMATE_LABEL = "est.";
  * using the non-member "onchain" sailed straight through it.
  */
 export function isEntryKnown(
+  entryE6: bigint | null | undefined,
+  source: EntryPriceSource | null | undefined,
+): boolean {
+  const trusted = source === "server" || source === "cache";
+  return trusted && entryE6 != null && entryE6 > 0n;
+}
+
+/**
+ * True when the entry may feed RISK math (liquidation price, covered status): a recorded or a PnL-derived entry, never the mark
+ * placeholder. Liquidation is equity-based, so it does not need the recorded entry that `isEntryKnown` requires.
+ */
+export function isRiskEntryKnown(
   entryE6: bigint | null | undefined,
   source: EntryPriceSource | null | undefined,
 ): boolean {
@@ -84,7 +97,5 @@ export function describeEntryPrice(input: {
   }
   const format = input.formatPrice ?? ((e6: bigint) => formatUsdPriceE6(e6));
   const text = format(input.entryE6 as bigint);
-  // Same text as the trade-terminal surfaces (PositionsDock/PositionPanel
-  // show a derived entry unprefixed); the tooltip says it is an estimate.
-  return { known: true, text, title: input.source === "derived" ? DERIVED_ENTRY_TOOLTIP : undefined };
+  return { known: true, text, title: undefined };
 }

@@ -66,18 +66,19 @@ beforeEach(() => {
 });
 
 describe("PositionsDock PnL scale without a cached entry (M-6)", () => {
-  it("shows an on-chain +5 USDC pnl as +$5, not scaled by the $100 mark", () => {
+  it("no saved entry: the dock shows no PnL figure (never the portfolio-wide pnl, never scaled by the mark)", () => {
     h.account = acct({ pnl: 5_000_000n });
     const { container } = render(<PositionsDock slabAddress="s" />);
     const text = container.textContent ?? "";
-    expect(text).toContain("$5.00");
+    expect(text).not.toContain("$5.00");
     expect(text).not.toContain("$500.00");
   });
 
-  it("does not shrink the same pnl on a sub-cent mark", () => {
-    // 1e9 units at $0.0036 = $3,600 notional; +5 USDC on-chain pnl.
+  it("a saved entry does not shrink the PnL on a sub-cent mark", () => {
+    // 1e9 units at $0.0036 = $3,600 notional; entry $0.003595 => +5 USDC.
     h.priceE6 = 3_600n;
     h.account = acct({ pnl: 5_000_000n, positionSize: 1_000_000_000_000n, capital: 1_000_000_000n });
+    saveEntryPrice("s", 0, 3_595n, 4, OWNER.toBase58());
     const { container } = render(<PositionsDock slabAddress="s" />);
     const text = container.textContent ?? "";
     expect(text).toContain("$5.00");

@@ -30,12 +30,14 @@ describe("computePositionPnl", () => {
     const derived = computePositionPnl(base);
     expect(derived.entrySource).toBe("derived");
     expect(derived.isEstimate).toBe(true);
-    expect(derived.unrealizedPnl).toBe(5_000_000n);
+    // a back-solve from the portfolio-wide pnl is never valued as a PnL
+    expect(derived.pnlKnown).toBe(false);
+    expect(derived.unrealizedPnl).toBeNull();
   });
 
-  it("values at the MARK, not at the anchor: the estimate moves with the live mark", () => {
-    const atAnchor = computePositionPnl(base);
-    const moved = computePositionPnl({ ...base, markE6: 101_000_000n, anchorMarkE6: 100_000_000n });
+  it("values at the MARK, not at the anchor: a recorded entry's PnL moves with the live mark", () => {
+    const atAnchor = computePositionPnl({ ...base, cachedEntryE6: 99_875_000n });
+    const moved = computePositionPnl({ ...base, cachedEntryE6: 99_875_000n, markE6: 101_000_000n, anchorMarkE6: 100_000_000n });
     // +$1.00 x 40 effective tokens on top of the anchored +$5
     const delta = moved.unrealizedPnl! - atAnchor.unrealizedPnl!;
     // (integer flooring in the native -> collateral conversion costs a few atoms)

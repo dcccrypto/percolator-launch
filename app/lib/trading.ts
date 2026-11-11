@@ -245,7 +245,7 @@ export type EntryPriceSource = "server" | "cache" | "derived" | "unknown";
  * same on-chain fact the same way instead of drifting apart.
  */
 export const UNKNOWN_ENTRY_TOOLTIP =
-  "Entry price for this position isn't recoverable on this device, so PnL can't be shown. " +
+  "Entry unknown on this device: this position's entry price isn't recoverable here, so PnL can't be shown. " +
   "Percolator doesn't store entry price on-chain, and a realized loss is settled straight " +
   "out of your capital rather than being carried as negative PnL — so an on-chain PnL of 0 " +
   "does NOT mean the position is flat. Check Realized loss and your capital balance, or " +

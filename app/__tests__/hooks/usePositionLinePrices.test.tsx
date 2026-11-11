@@ -18,7 +18,7 @@ import { usePositionLinePrices } from "@/hooks/usePositionLinePrices";
 
 const owner = { toBase58: () => "OWNER" };
 const ua = (size = 1_000_000n) => ({ idx: 1, account: { positionSize: size, pnl: 0n, capital: 1n, owner } });
-const pnl = (o: Record<string, unknown>) => ({ pnlKnown: true, entry: 3_400n, entrySource: "cache", isEstimate: false, liquidationPriceE6: 2_100n, ...o });
+const pnl = (o: Record<string, unknown>) => ({ pnlKnown: true, riskKnown: true, entry: 3_400n, entrySource: "cache", isEstimate: false, liquidationPriceE6: 2_100n, ...o });
 
 beforeEach(() => {
   m.ua = ua(); m.pnl = pnl({}); m.calls = [];
@@ -31,20 +31,20 @@ describe("usePositionLinePrices (consumes computePositionPnl via terminalPositio
     expect(run()).toEqual({ entry: 0.0034, liq: 0.0021, entryIsEstimate: false });
     expect(m.calls[0]).toMatchObject({ slabAddress: "S", accountIdx: 1, adlApplicable: true, markE6: 3_600n, maintenanceMarginBps: 500n });
   });
-  it("marks a back-solved entry as an estimate", () => {
-    m.pnl = pnl({ entrySource: "derived", isEstimate: true });
-    expect(run().entryIsEstimate).toBe(true);
+  it("a back-solved entry (another device) draws the LIQ line but no entry line", () => {
+    m.pnl = pnl({ entrySource: "derived", isEstimate: true, pnlKnown: false });
+    expect(run()).toEqual({ entry: null, liq: 0.0021, entryIsEstimate: false });
   });
   it("a server entry is exact (not an estimate)", () => {
     m.pnl = pnl({ entrySource: "server" });
     expect(run()).toMatchObject({ entry: 0.0034, entryIsEstimate: false });
   });
-  it("NEGATIVE CONTROL: pnlKnown=false draws NO entry and NO liq line, even if both numbers exist", () => {
-    m.pnl = pnl({ pnlKnown: false });
+  it("NEGATIVE CONTROL: riskKnown=false draws NO entry and NO liq line, even if both numbers exist", () => {
+    m.pnl = pnl({ riskKnown: false, pnlKnown: false });
     expect(run()).toEqual({ entry: null, liq: null, entryIsEstimate: false });
   });
   it("NEGATIVE CONTROL: unknown entry source draws nothing (never the mark fallback)", () => {
-    m.pnl = pnl({ entrySource: "unknown", entry: 3_600n });
+    m.pnl = pnl({ entrySource: "unknown", entry: 3_600n, pnlKnown: false, riskKnown: false });
     expect(run().entry).toBeNull();
   });
   it("no position: nothing; legacy engine (no v17 config) passes adlApplicable=false", () => {

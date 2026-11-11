@@ -151,6 +151,31 @@ export function balanceMaxQ(balanceAtoms: bigint, leverage: number, priceE6: big
   return (balanceAtoms * lev100 * 1_000_000n) / (100n * priceE6);
 }
 
+/**
+ * Display-only "Buying power": the notional the Max button would fill at the SELECTED leverage, i.e. the smaller of
+ *   - what the balance can margin at that leverage (`tradableAtoms x leverage`, the same figure `balanceMaxQ` turns into a size), and
+ *   - the market's own cap on this side (`marketMaxQ`: growth cap, matcher fill cap, side room), valued at `priceE6`.
+ * Never above what can be opened, and it does not fall as leverage rises unless a market cap binds (then it is flat and
+ * `capped` is true so the label can say so). `null` = nothing known to offer (no price, or no balance and no cap).
+ */
+export function buyingPowerAtoms(p: {
+  tradableAtoms: bigint;
+  leverage: number;
+  /** Tightest market cap on the selected side in base q, or null when none applies. */
+  marketMaxQ: bigint | null;
+  priceE6: bigint | null | undefined;
+}): { atoms: bigint; capped: boolean; noBalance?: boolean } | null {
+  const { tradableAtoms, leverage, marketMaxQ, priceE6 } = p;
+  if (!priceE6 || priceE6 <= 0n || !(leverage > 0) || tradableAtoms < 0n) return null;
+  // EXACTLY Max's own sizing (OrderTicket displayMaxQ = oneMaxQ([marketMaxQ, balanceMaxQ(...)])), then valued the way the ticket values
+  // any size: q x priceE6 / 1e6 is already collateral atoms (no decimals factor), so the two cannot diverge on any collateral decimals.
+  const byBalanceQ = balanceMaxQ(tradableAtoms, leverage, priceE6);
+  // No available balance: nothing can be opened (Max may still show the market's room), so say 0 and why rather than quote the room.
+  if (byBalanceQ === null) return { atoms: 0n, capped: false, noBalance: true };
+  const maxQ = oneMaxQ([marketMaxQ, byBalanceQ]) as bigint;
+  return { atoms: (maxQ * priceE6) / 1_000_000n, capped: marketMaxQ !== null && marketMaxQ < byBalanceQ };
+}
+
 /** One cent in USD atoms (6 dp): the smallest step the ticket's USD size and Max can show. */
 export const MIN_SIDE_ROOM_USD_ATOMS = 10_000n;
 

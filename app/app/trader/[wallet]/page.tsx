@@ -12,7 +12,7 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import type { PortfolioPosition } from "@/hooks/usePortfolio";
 import { TradeStatsPanel } from "@/components/trade/TradeStatsPanel";
 import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
-import { describeEntryPrice } from "@/lib/entry-price-display";
+import { describeEntryPrice, isRiskEntryKnown } from "@/lib/entry-price-display";
 import { formatPnl } from "@/lib/format";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
@@ -231,7 +231,7 @@ function PositionCard({
     effectiveSize: pos.adlKnown ? pos.effectiveSize : null,
     markPriceE6: pos.oraclePriceE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
-    hasResolvedEntry: entryDisplay.known,
+    hasResolvedEntry: isRiskEntryKnown(pos.effectiveEntryPrice, pos.entryPriceSource),
     formatPrice,
     unknownText: "—",
   });

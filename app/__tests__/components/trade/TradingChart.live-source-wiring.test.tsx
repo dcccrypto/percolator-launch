@@ -527,7 +527,7 @@ describe('TradingChart live-source wiring', () => {
     });
   });
 
-  it("CASE D: missing cache with derivable PnL restores a trusted derived Entry and Liq", async () => {
+  it("CASE D: missing cache with derivable PnL draws NO Entry line (a back-solve is not an entry), Mark stays", async () => {
     // SHORT at a $100 mark with +10 collateral units of PnL:
     //
     // diff = pnl * 1e6 / abs(position)
@@ -561,9 +561,8 @@ describe('TradingChart live-source wiring', () => {
         (line) => line.title === "Entry",
       );
 
-      expect(entryLine?.price).toBe(101);
+      expect(entryLine).toBeUndefined();
       expect(lines.some((line) => line.title === "Mark")).toBe(true);
-      expect(lines.some((line) => line.title === "Liq")).toBe(true);
     });
   });
 
@@ -669,8 +668,8 @@ describe('TradingChart live-source wiring', () => {
     for (const m of marks) expect(appliedPrices()).toContain(liqForMark(m));
   });
 
-  it("PERF: a derived Entry follows the mark in place, without rebuilding the series", async () => {
-    positionHarness.userAccount.account.pnl = 10_000_000n; // SHORT, entry = mark + $1
+  it("PERF: with no saved entry no Entry line is drawn, and a mark move does not rebuild the series", async () => {
+    positionHarness.userAccount.account.pnl = 10_000_000n; // SHORT, derivable but not recorded
     render(
       <TradingChart
         slabAddress={positionHarness.slab}
@@ -678,19 +677,18 @@ describe('TradingChart live-source wiring', () => {
       />,
     );
     await waitFor(() => {
-      expect(drawnPriceLineTitles()).toContain("Entry");
+      expect(drawnPriceLineTitles()).toContain("Mark");
     });
+    expect(drawnPriceLineTitles()).not.toContain("Entry");
     const adds = harness.chart.addSeries.mock.calls.length;
     const removes = harness.chart.removeSeries.mock.calls.length;
 
     act(() => positionHarness.setState(() => { positionHarness.markE6 = 105_000_000n; }));
 
-    await waitFor(() => {
-      expect(shownPrices("Entry")).toContain(106);
-    });
+    await act(async () => {});
     expect(harness.chart.removeSeries.mock.calls.length).toBe(removes);
     expect(harness.chart.addSeries.mock.calls.length).toBe(adds);
-    expect(appliedPrices()).toContain(106);
+    expect(drawnPriceLineTitles()).not.toContain("Entry");
   });
 
   it("toggling the Liq/Entry Display prefs removes the lines without rebuilding the series", async () => {

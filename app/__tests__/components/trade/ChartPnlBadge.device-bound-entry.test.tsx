@@ -129,23 +129,21 @@ describe("ChartPnlBadge resolves its entry like every other position surface", (
     expect(badgeUsd(container)).toBe("+$1.02");
   });
 
-  it("renders on ANY OTHER device, from the entry back-solved on chain, at the SAME PnL", () => {
-    // The regression. Before the fix this returned null and the badge vanished.
-    // The number must match the trading device's, not merely appear.
+  it("on a device with no saved entry the badge shows no PnL (a back-solve from the portfolio-wide pnl is not shown)", () => {
     asSecondDevice();
     const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
-    expect(container.textContent).toMatch(/PnL/i);
-    expect(badgeUsd(container)).toBe("+$1.02");
+    expect(container.textContent ?? "").not.toMatch(/\$1\.02/);
+    expect(badgeUsd(container)).toBeNull();
   });
 
-  it("a losing derived position reads as a loss of the on-chain amount", () => {
+  it("a position with no saved entry shows nothing for a negative on-chain pnl too", () => {
     asSecondDevice();
     onChainPnl = -ON_CHAIN_PNL;
     const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
-    expect(badgeUsd(container)).toBe("-$1.02");
+    expect(badgeUsd(container)).toBeNull();
   });
 
-  it("ADL: a deleveraged leg on a second device shows its on-chain pnl, not pnl x a_side/a_basis", () => {
+  it("ADL: a deleveraged leg on a second device shows no PnL (effective size is still the engine's)", () => {
     // Fixture sanity: the app's effective size equals the engine port
     // (effective_abs_quantity_for_leg, engine 35ddd692 v16.rs:1695) for this leg.
     asDeleveragedShort();
@@ -157,9 +155,7 @@ describe("ChartPnlBadge resolves its entry like every other position surface", (
 
     asSecondDevice();
     const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
-    // On-chain pnl is +$1.02, earned on the 10,000 effective. Back-solving over
-    // the 20,000 raw basis put the entry at $0.013381 and showed +$0.51.
-    expect(badgeUsd(container)).toBe("+$1.02");
+    expect(badgeUsd(container)).toBeNull();
   });
 
   it("CONTROL (ADL): the same deleveraged leg with its cached entry also shows +$1.02", () => {

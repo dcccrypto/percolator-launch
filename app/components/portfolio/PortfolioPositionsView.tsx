@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
-import { describeEntryPrice, displayEntryE6, isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
+import { describeEntryPrice, displayEntryE6, isExactEntrySource } from "@/lib/entry-price-display";
 import { onChainMarkE6, portfolioPositionPnl, unknownPnlCaveat } from "@/lib/position-pnl";
 import { adlReductionTooltip } from "@/lib/v17-adl";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
@@ -25,6 +25,7 @@ import {
   liveLiquidationSeverity,
   liveMarginCushion,
   positionRowKeys,
+  positionValuePnl,
   type PortfolioPosition,
 } from "@/hooks/usePortfolio";
 import { classifyLiquidation } from "@/lib/liquidation-state";
@@ -253,8 +254,6 @@ function PositionCard({
   // must not be shown as the entry, nor feed the live PnL (live mark − polled
   // mark is drift, not PnL) — `displayEntryE6` returns 0n there, which
   // computeLivePositionPnl already treats as "no entry".
-  const entryDisplay = describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource, formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0) });
-  const posEntry = displayEntryE6(pos.effectiveEntryPrice, pos.entryPriceSource);
   const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
   const sizeAbs = posSize < 0n ? -posSize : posSize;
   const { liquidationPriceE6 } = pos;
@@ -281,6 +280,10 @@ function PositionCard({
   // margin chain. Shared verbatim with PositionsBar's PositionChip and the
   // portfolio hero's live totals below.
   const livePnl = portfolioPositionPnl(pos, livePriceE6);
+  // Entry from the same resolution as the PnL (cache read live), not the poll-time snapshot, so the row, the close dialog and
+  // the trade page's dock show one entry.
+  const entryDisplay = describeEntryPrice({ entryE6: livePnl.entry, source: livePnl.entrySource, formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0) });
+  const posEntry = displayEntryE6(livePnl.entry, livePnl.entrySource);
   const pnlTokens = livePnl.unrealizedPnl ?? 0n;
   const pnlPct = livePnl.roe ?? 0;
   const liquidationDistancePct = liveLiquidationDistancePct(pos, livePriceE6);
@@ -293,7 +296,7 @@ function PositionCard({
     posSize,
     markE6,
     liquidationPriceE6,
-    entryDisplay.known,
+    livePnl.riskKnown,
   );
   const severity = getLiquidationSeverityForState(liveLiquidationState, liveMarginCushion(pos, livePriceE6));
   // The risk figure that survives a missing liquidation price: equity over
@@ -310,8 +313,8 @@ function PositionCard({
     effectiveSize: pos.adlKnown ? pos.effectiveSize : null,
     markPriceE6: markE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
-    // Same verdict as the Entry cell, so the two cannot contradict (#2671).
-    hasResolvedEntry: entryDisplay.known,
+    // Liquidation is equity-based: it needs a risk entry (recorded or back-solved), not the recorded entry the Entry cell shows.
+    hasResolvedEntry: livePnl.riskKnown,
     formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
     unknownText: "—",
   });
@@ -400,9 +403,6 @@ function PositionCard({
                     >
                       {formatPnlPct(pnlPct)}
                     </span>
-                    {livePnl.isEstimate && (
-                      <span className="ml-1 text-[9px] font-medium text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
-                    )}
                   </>
                 ) : (
                   <span
@@ -422,7 +422,7 @@ function PositionCard({
                 // that gets shared as a fact.
                 liveSlabCapacity
                 data={
-                  hasPosition && livePnl.pnlKnown && isExactEntrySource(pos.entryPriceSource) && posEntry > 0n && markE6 > 0n
+                  hasPosition && livePnl.pnlKnown && isExactEntrySource(livePnl.entrySource) && posEntry > 0n && markE6 > 0n
                     ? {
                         slab: pos.slabAddress,
                         symbol: baseSymbol,
@@ -698,6 +698,7 @@ export function PortfolioPositionsView() {
   const computeUsdTotals = () => {
     let depositedUsd = 0;
     let unrealizedPnlUsd = 0;
+    let unknownEntryValueUsd = 0;
     // Losses already taken out of capital. The engine crystallizes a realized
     // loss out of `capital` and resets `pnl` to 0 (percolator/src/v16.rs:9382-9437),
     // so without this line a drained balance has NO explanation anywhere in the
@@ -729,8 +730,10 @@ export function PortfolioPositionsView() {
       // divide by decimals only, same as PositionsDock's pnlUsdRaw and raw
       // capital above (collateral is sim-USDC dollars, no price factor).
       unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;
+      // A position with no recorded entry shows no PnL, but its on-chain value (capital + pnl) still counts in the total.
+      if (!pos.pnlKnown) unknownEntryValueUsd += Number(positionValuePnl(pos)) / divisor;
     }
-    return { depositedUsd, pendingProfitUsd, unrealizedPnlUsd, realizedLossUsd, realizedNetUsd, realizedRecorded, valueUsd: depositedUsd + pendingProfitUsd + unrealizedPnlUsd };
+    return { depositedUsd, pendingProfitUsd, unrealizedPnlUsd, realizedLossUsd, realizedNetUsd, realizedRecorded, valueUsd: depositedUsd + pendingProfitUsd + unrealizedPnlUsd + unknownEntryValueUsd };
   };
   // Don't compute USD totals until token metadata (decimals) has loaded —
   // using the default 6 decimals for a 9-decimal token inflates values 1000x
@@ -753,6 +756,7 @@ export function PortfolioPositionsView() {
   const liveUsdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? (() => {
         let unrealizedPnlUsd = 0;
+        let unknownEntryValueUsd = 0;
         let unknownPnlCount = 0;
         for (const pos of activePositions) {
           const decimals = getDecimals(pos);
@@ -762,12 +766,15 @@ export function PortfolioPositionsView() {
           // PnL (no entry / unknown ADL factors) contributes nothing rather
           // than a wrong number. Flat positions are 0 by construction.
           const livePnl = portfolioPositionPnl(pos, liveE6);
-          if (!livePnl.pnlKnown) unknownPnlCount++;
+          if (!livePnl.pnlKnown) {
+            unknownPnlCount++;
+            unknownEntryValueUsd += Number(livePnl.riskUnrealizedPnl ?? 0n) / divisor;
+          }
           unrealizedPnlUsd += Number(livePnl.unrealizedPnl ?? 0n) / divisor;
         }
         // Deposited and pending-profit totals aren't price-dependent — reuse
         // usdTotals' values rather than re-summing them a second time.
-        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + usdTotals.pendingProfitUsd + unrealizedPnlUsd };
+        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + usdTotals.pendingProfitUsd + unrealizedPnlUsd + unknownEntryValueUsd };
       })()
     : { unrealizedPnlUsd: 0, unknownPnlCount: 0, valueUsd: 0 };
 

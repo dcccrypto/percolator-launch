@@ -68,6 +68,7 @@ import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { saveEntryPrice } from "@/lib/entry-price";
 import { estimateEntryFromPnl } from "@/lib/trading";
 import { describeEntryPrice, displayEntryE6 } from "@/lib/entry-price-display";
+import { positionValuePnl } from "@/hooks/usePortfolio";
 
 function loadPortfolio(name: string) {
   const f = JSON.parse(fs.readFileSync(path.resolve(__dirname, `../fixtures/${name}.portfolio.json`), "utf8")) as {
@@ -92,6 +93,13 @@ function build(name: string): PortfolioPosition {
 }
 
 const MARK_TEXT = "$1.000000";
+
+/** A position whose open-time entry IS saved on this device (so its PnL is known). */
+function buildKnown(name: string): PortfolioPosition {
+  const { market } = loadPortfolio(name);
+  saveEntryPrice(market, 0, build(name).effectiveEntryPrice, undefined, WALLET);
+  return build(name);
+}
 
 beforeEach(() => {
   localStorage.clear();
@@ -132,13 +140,13 @@ describe("real v18 portfolio bytes → resolved entry", () => {
 const summaryCell = (label: string) => screen.getByText(label).parentElement as HTMLElement;
 
 describe("dashboard Overview (PositionSummary) — Defect 1", () => {
-  it("renders the DERIVED entry instead of a dash", () => {
+  it("a DERIVED entry (nothing saved on this device) is a dash, never a back-solved figure", () => {
     const pos = build("2SewEcvf");
     state.positions = [pos];
     render(<PositionSummary />);
     const cell = summaryCell("Entry:");
-    expect(cell.textContent).toContain(describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: "derived" }).text);
-    expect(cell.textContent).not.toContain("—");
+    expect(cell.textContent).toContain("—");
+    expect(cell.textContent).not.toContain(describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: "cache" }).text);
   });
 
   it("renders the CACHED entry", () => {
@@ -178,14 +186,13 @@ describe("portfolio list (PortfolioPositionsView) — Defect 2", () => {
     expect(screen.getByTestId("pnl-unknown")).toBeInTheDocument();
   });
 
-  it("derived → Entry shows the derived value, PnL renders a number", () => {
+  it("derived (no saved entry) → Entry is a dash with the 'unknown' hint and PnL is unavailable", () => {
     const pos = build("2SewEcvf");
     state.positions = [pos];
     render(<PortfolioPositionsView />);
-    const expected = describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: "derived" });
-    expect(portfolioCell("Entry").textContent).toContain(expected.text);
-    expect(within(portfolioCell("Entry")).getByTitle(expected.title as string)).toBeInTheDocument();
-    expect(screen.queryByTestId("pnl-unknown")).toBeNull();
+    expect(portfolioCell("Entry").textContent).toContain("—");
+    expect(within(portfolioCell("Entry")).getByTitle(/Entry unknown on this device/i)).toBeInTheDocument();
+    expect(screen.getAllByTestId("pnl-unknown").length).toBeGreaterThan(0);
   });
 });
 
@@ -223,13 +230,13 @@ describe("trade-terminal surfaces feed describeLiqPrice the entry SOURCE, not `e
   const read = (f: string) => fs.readFileSync(path.resolve(__dirname, `../../components/trade/${f}`), "utf8");
   it.each(["PositionsDock.tsx", "PositionPanel.tsx", "OtherMarketPositions.tsx"])("%s", (f) => {
     const src = read(f);
-    expect(src).toMatch(/hasResolvedEntry: pnlIsKnown,/);
+    expect(src).toMatch(/hasResolvedEntry: (pnlResult|live)\.riskKnown,/);
     expect(src).not.toMatch(/hasResolvedEntry: (entryPriceE6|entryE6) > 0n/);
   });
   it("OrderTicket tracks the existing entry's source", () => {
     const src = read("OrderTicket.tsx");
     expect(src).toMatch(/hasResolvedEntry: existingEntryKnown,/);
-    expect(src).toMatch(/entryPriceE6=\{existingEntryKnown \? existingEntryPriceE6 : 0n\}/);
+    expect(src).toMatch(/entryPriceE6=\{existingRecordedEntryKnown \? existingEntryPriceE6 : 0n\}/);
   });
 });
 
@@ -243,16 +250,59 @@ describe("hero / aggregate totals never silently sum an unknown PnL as 0 (#3077 
   });
 
   it("one known + one unknown: the number stays, and the caveat says one position is excluded", () => {
-    state.positions = [build("2SewEcvf"), build("DAC2a44p")];
+    state.positions = [buildKnown("2SewEcvf"), build("DAC2a44p")];
     render(<PortfolioPositionsView />);
     expect(screen.queryByTestId("hero-pnl-unknown")).toBeNull();
     expect(screen.getByTestId("hero-pnl-caveat").textContent).toMatch(/Excludes 1 position /);
   });
 
   it("CONTROL: every position known -> neither '--' nor a caveat", () => {
-    state.positions = [build("2SewEcvf")];
+    state.positions = [buildKnown("2SewEcvf")];
     render(<PortfolioPositionsView />);
     expect(screen.queryByTestId("hero-pnl-unknown")).toBeNull();
     expect(screen.queryByTestId("hero-pnl-caveat")).toBeNull();
+  });
+});
+
+describe("Portfolio Value keeps the on-chain value of a position whose entry is unknown", () => {
+  const valueText = () => Number((screen.getByText("Portfolio Value").nextElementSibling?.textContent ?? "").replace(/[^\d.-]/g, ""));
+
+  it("capital + on-chain pnl, not capital alone (only the per-position PnL is withheld)", () => {
+    const pos = build("2SewEcvf");
+    expect(pos.pnlKnown).toBe(false);
+    const valuePnl = Number(positionValuePnl(pos)) / 1e6;
+    const capital = Number(pos.account.capital) / 1e6;
+    expect(Math.abs(valuePnl)).toBeGreaterThan(0.01); // the control is only meaningful when the on-chain pnl is real
+    state.positions = [pos];
+    render(<PortfolioPositionsView />);
+    expect(valueText()).toBeCloseTo(capital + valuePnl, 1);
+    expect(Math.abs(valueText() - capital)).toBeGreaterThan(Math.abs(valuePnl) / 2);
+  });
+});
+
+describe("Portfolio row: a covered position opened on another device still reads covered (liquidation is equity-based)", () => {
+  const longDerived = (): PortfolioPosition => {
+    const pos = build("2SewEcvf");
+    const size = pos.account.positionSize < 0n ? -pos.account.positionSize : pos.account.positionSize;
+    return {
+      ...pos,
+      liquidationPriceE6: 0n, // no price exists: the collateral covers the position
+      effectiveSize: size,
+      account: { ...pos.account, positionSize: size, capital: 1_000_000_000_000n },
+    } as PortfolioPosition;
+  };
+
+  it("derived entry + no liquidation price -> 'N% mgn' (covered), not the unknown dash", () => {
+    const pos = longDerived();
+    state.positions = [pos];
+    render(<PortfolioPositionsView />);
+    expect(screen.getAllByText(/% mgn/).length).toBeGreaterThan(0);
+  });
+
+  it("CONTROL: a truly unknown entry (nothing resolvable) does not claim covered", () => {
+    const pos = { ...longDerived(), account: { ...longDerived().account, pnl: 0n } } as PortfolioPosition;
+    state.positions = [pos];
+    render(<PortfolioPositionsView />);
+    expect(screen.queryAllByText(/% mgn/).length).toBe(0);
   });
 });

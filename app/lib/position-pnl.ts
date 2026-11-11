@@ -115,8 +115,14 @@ export interface PositionPnl {
   riskEntry: bigint;
   /** True when `riskEntry` is the settled back-solve rather than `entry`. */
   riskEntrySettled: boolean;
-  /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed. */
+  /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed (needs a RECORDED entry: server or cache). */
   pnlKnown: boolean;
+  /**
+   * True when the risk math (liquidation price, covered / unliquidatable status) stands on known inputs: the ADL-effective size is
+   * known and an entry (recorded OR back-solved) and a mark exist. Liquidation is equity-based, so it does not need the recorded
+   * entry; only `pnlKnown` (display of entry and PnL) does.
+   */
+  riskKnown: boolean;
   /** Coin-margined native PnL (same scale as size), or null when unknown. */
   pnlNative: bigint | null;
   /** Collateral-scale PnL at the mark, or null when unknown. */
@@ -261,6 +267,8 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     isEstimate: resolved.source === "derived",
     riskEntry,
     riskEntrySettled: settledEntry !== null,
+    riskKnown:
+      flat || (effectiveSize !== null && !resetObligation && resolved.source !== "unknown" && resolved.entry > 0n && markE6 > 0n),
     liquidationPriceE6:
       effectiveSize === null || input.maintenanceMarginBps === undefined
         ? null
@@ -278,6 +286,22 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
   if (flat) return { ...base, pnlKnown: true, pnlNative: 0n, unrealizedPnl: 0n, riskUnrealizedPnl: 0n, roe: 0 };
   if (effectiveSize === null || resetObligation) return unknown;
   if (resolved.source === "unknown" || resolved.entry <= 0n || markE6 <= 0n) return unknown;
+  // A back-solved entry is built from the portfolio-wide `pnl` (claimable / earlier settled value included), so a long that lost
+  // can read a profit. No recorded entry on this device = entry and PnL unavailable, never an estimate. Risk math keeps `entry`.
+  if (resolved.source === "derived") {
+    // The VALUE side stays chain-faithful: the back-solve makes capital + this PnL the account's on-chain equity (capital + pnl at
+    // the anchor mark, moved to the live mark), so totals keep it. It is never displayed as this position's PnL.
+    const v = valueAtMark({
+      effectiveSize,
+      entryE6: resolved.entry,
+      markE6,
+      initialMarginBps: input.initialMarginBps,
+      capital: input.capital,
+      capitalIsPositionMargin: (input.activeLegCount ?? 1) <= 1,
+    });
+    const valuePnl = settledEntry !== null && riskEntry > 0n ? computeMarkPnlLinear(effectiveSize, riskEntry, markE6) : v.unrealizedPnl;
+    return { ...unknown, riskUnrealizedPnl: valuePnl };
+  }
 
   const valued = valueAtMark({
     effectiveSize,
@@ -324,6 +348,24 @@ export interface PortfolioPnlSource {
   initialMarginBps: bigint;
   maintenanceMarginBps?: bigint;
   oraclePriceE6: bigint;
+  /** Portfolio slab + account idx + connected wallet key the open-time entry was saved under (lib/entry-price.ts). */
+  slabAddress?: string;
+  idx?: number;
+  entryCacheWallet?: string;
+}
+
+/**
+ * The open-time entry cached on this device, read NOW. A portfolio row is a snapshot (up to minutes old, shared across
+ * hook instances) and the entry is written a moment AFTER the open lands, so a snapshot polled in between froze a
+ * back-solved `derived` entry (from the portfolio-wide `pnl`, leftovers included) while the trade page, which reads
+ * the cache on every render, showed the recorded one. Re-reading here makes every surface resolve the same entry.
+ */
+function liveCachedEntryE6(pos: PortfolioPnlSource): bigint {
+  if (pos.entryCacheWallet && pos.slabAddress !== undefined && pos.idx !== undefined) {
+    const live = getEntryPrice(pos.slabAddress, pos.idx, pos.entryCacheWallet);
+    if (live > 0n) return live;
+  }
+  return pos.entryPriceSource === "cache" ? pos.effectiveEntryPrice : 0n;
 }
 
 /** Live-mark PnL for a polled `PortfolioPosition` - what the bar, card, hero totals and metrics all call. */
@@ -338,7 +380,7 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
     markE6,
     anchorMarkE6: pos.oraclePriceE6,
     serverEntryE6: pos.entryPriceSource === "server" ? pos.effectiveEntryPrice : null,
-    cachedEntryE6: pos.entryPriceSource === "cache" ? pos.effectiveEntryPrice : 0n,
+    cachedEntryE6: liveCachedEntryE6(pos),
     onChainPnl: pos.account?.pnl ?? 0n,
     initialMarginBps: pos.initialMarginBps,
     maintenanceMarginBps: pos.maintenanceMarginBps,

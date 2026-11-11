@@ -207,12 +207,14 @@ describe("wiring: the risk surfaces read the risk entry, display keeps the entry
   });
   it.each([
     "components/portfolio/PortfolioPositionsView.tsx",
-    "components/portfolio/LiquidationRiskItem.tsx",
     "components/trade/OtherMarketPositions.tsx",
     "hooks/usePortfolio.ts",
     "app/trader/[wallet]/page.tsx",
   ])("%s: risk entry from the polled position", (f) => {
     expect(src(f)).toContain("entryPriceE6: pos.riskEntryPrice ?? pos.effectiveEntryPrice,");
+  });
+  it("components/portfolio/LiquidationRiskItem.tsx: risk entry from the same live resolution as the row", () => {
+    expect(src("components/portfolio/LiquidationRiskItem.tsx")).toContain("entryPriceE6: live.riskEntry,");
   });
   it("the ticket's before/after preview and the account mappers", () => {
     const t = src("components/trade/OrderTicket.tsx");

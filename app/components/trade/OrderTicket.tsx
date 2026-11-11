@@ -84,6 +84,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
+import { isEntryKnown } from "@/lib/entry-price-display";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice, entryAfterTrade, getSavedEntry } from "@/lib/entry-price";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
@@ -101,7 +102,7 @@ import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
 import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
-import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketRow } from "@/lib/limits/ticket-state";
+import { balanceMaxQ, buyingPowerAtoms, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
 import { fmtQ as fmtQLots } from "@/lib/limits/format";
 import { takeFillResult } from "@/lib/limits/fill-check";
@@ -628,6 +629,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       })
     : null;
   const existingEntryKnown = existingResolved != null && existingResolved.source !== "unknown" && existingEntryPriceE6 > 0n;
+  // The Close tab's displayed entry / PnL need a RECORDED entry (server / cache); a back-solve is risk-math only (`existingEntryKnown`).
+  const existingRecordedEntryKnown = isEntryKnown(existingEntryPriceE6, existingResolved?.source);
   const lockedMargin = computePositionInitialMargin(existingPositionSize, existingEntryPriceE6, initialMarginBps);
   const availableBalance = userAccount ? (capital > lockedMargin ? capital - lockedMargin : 0n) : 0n;
   const effectiveBalance = userAccount ? availableBalance : (walletAtaBalance ?? 0n);
@@ -669,14 +672,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     return gateFeeBps(tradingFeeBps, feeProbe(refQ));
   })();
   const tradableBalance = mockMode || maxOrderFeeBps <= tradingFeeBps ? tradableAtBaseFee : tradableFor(maxOrderFeeBps);
-  // Buying power: how large a position (in collateral notional) the user could
-  // open at the current max leverage with their full AVAILABLE (not total)
-  // balance — capital already locked by an open position can't back a
-  // second one too.
-  // Fractional-safe: maxLeverage can be 6.66, so scale by 100 rather than
-  // Math.round (which would overshoot to 7x and make "Max" size a rejected order).
-  const buyingPower = (tradableBalance * BigInt(Math.max(100, Math.round(maxLeverage * 100)))) / 100n;
-
   useEffect(() => {
     if (!publicKey || !mktConfig?.collateralMint || mockMode) {
       setOnChainDecimals(null);
@@ -1214,6 +1209,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // While the room is unknown (whatever size is typed): nothing on the adding side, and on the reducing side at most the open position (a full close).
   const reduceOnlyMaxQ = existingPositionSize !== 0n && (existingPositionSize > 0n) !== (direction === "long") ? (existingPositionSize < 0n ? -existingPositionSize : existingPositionSize) : 0n;
   const displayMaxQ = roomUnknownRaw ? reduceOnlyMaxQ : oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
+  // Buying power (display only): the notional the Max above would fill at the SELECTED leverage: the balance's margin x leverage, or
+  // the market's cap when that is smaller (then `capped` says so). It used to be tradable margin x the MAX leverage, which fell as
+  // leverage rose (the fee scales with leverage) and ignored the caps, so it read far above any size that could be opened.
+  const buyingPowerInfo = roomUnknownRaw ? null : buyingPowerAtoms({ tradableAtoms: tradableBalance, leverage, marketMaxQ, priceE6: livePriceE6 });
+  const buyingPower = buyingPowerInfo?.atoms ?? 0n;
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.
   // Never on a paused side: there is nothing to reduce to, and the paused label says why.
@@ -2066,8 +2066,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             previewUnavailable={closeView != null && !closeView.adlKnown}
             portfolioPk={userAccount?.pubkey}
             accountPending={accountPending}
-            entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
-            riskEntryPriceE6={existingEntryKnown ? existingRiskEntryE6 : 0n}
+            entryPriceE6={existingRecordedEntryKnown ? existingEntryPriceE6 : 0n}
+            riskEntryPriceE6={existingRecordedEntryKnown ? existingRiskEntryE6 : 0n}
             capital={capital}
             symbol={baseTicker}
             collateralSymbol={collateralSymbol}
@@ -2819,10 +2819,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div>
           <div className="flex items-center gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
             Buying power
-            <InfoIcon tooltip="Available balance x max leverage - the largest notional you could open right now." />
+            <InfoIcon tooltip="The largest position the Max button allows at the leverage you picked: your available balance x that leverage, or the market's room if that is smaller." />
           </div>
           {/* Council GO1106 (first-timer): "199366.68411 USDC" - 2 dp with thousands separators like every other amount. */}
-          <div data-testid="buying-power" className="font-mono tabular-nums text-[var(--text)]">{accountPending ? "—" : formatTokenAmount(buyingPower, decimals, 2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} {collateralSymbol}</div>
+          <div data-testid="buying-power" className="font-mono tabular-nums text-[var(--text)]">{accountPending || buyingPowerInfo === null ? "—" : `${formatTokenAmount(buyingPower, decimals, 2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${collateralSymbol}`}</div>
+          {buyingPowerInfo?.noBalance && !accountPending && (
+            <div data-testid="buying-power-nobalance" className="text-[9px] text-[var(--text-muted)]">No available balance</div>
+          )}
+          {buyingPowerInfo?.capped && !accountPending && (
+            <div data-testid="buying-power-capped" className="text-[9px] text-[var(--text-muted)]">Limited by market room</div>
+          )}
         </div>
         {/* SOL-2 (v2.2): a new user with tokens can deposit without trading first. */}
         {isDevnetV22Enabled() && connected && !accountPending && needsAccount && walletHasTokens && (
