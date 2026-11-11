@@ -104,6 +104,7 @@ export const V22_COPY = {
     atLeast: (usd: string) => `You'll receive at least ${usd}`,
     quoting: "Getting your exit price…",
     quoteExpired: "Your quote expired. See the exit price again.",
+    amountChanged: "You changed the amount, so the earlier price no longer applies. See the exit price for the new amount.",
     requote: "The exit price moved. Here is the new minimum.",
     refreshing: "Refreshing positions…",
     estimateNote: "Set 10% under today's value and fixed when you request, so normal price moves during the wait don't block collecting it.",
