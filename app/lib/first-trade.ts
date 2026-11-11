@@ -64,6 +64,13 @@ export function firstTradeDepositAtoms(marginAtoms: bigint, feeAtoms: bigint, de
   return ((buffered + cent - 1n) / cent) * cent;
 }
 
+/** What the wallet can put into the account in one bundled deposit: its balance less the one-cent keep-back `tradableMarginAtoms` also leaves. 0 when unknown. */
+export function maxWalletDepositAtoms(walletAtoms: bigint | null | undefined, decimals = 6): bigint {
+  const cent = decimals >= 2 ? 10n ** BigInt(decimals - 2) : 1n;
+  const w = (walletAtoms ?? 0n) - cent;
+  return w > 0n ? w : 0n;
+}
+
 /**
  * The largest margin a ticket can offer when the wallet can top the account up in the same
  * approval (UX WP-6 fund-and-trade). Live report 2026-10-01 (Squid): with an account on the

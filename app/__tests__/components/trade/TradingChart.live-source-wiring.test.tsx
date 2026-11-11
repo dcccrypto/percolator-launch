@@ -505,6 +505,7 @@ describe('TradingChart live-source wiring', () => {
       100_000_000n,
       2,
       positionHarness.wallet,
+      positionHarness.userAccount.account.positionSize,
     );
 
     render(
@@ -573,6 +574,7 @@ describe('TradingChart live-source wiring', () => {
       100_000_000n,
       2,
       positionHarness.wallet,
+      positionHarness.userAccount.account.positionSize,
     );
 
     positionHarness.overlayPrefs = {
@@ -692,7 +694,7 @@ describe('TradingChart live-source wiring', () => {
   });
 
   it("toggling the Liq/Entry Display prefs removes the lines without rebuilding the series", async () => {
-    saveEntryPrice(positionHarness.slab, positionHarness.userAccount.idx, 100_000_000n, 2, positionHarness.wallet);
+    saveEntryPrice(positionHarness.slab, positionHarness.userAccount.idx, 100_000_000n, 2, positionHarness.wallet, positionHarness.userAccount.account.positionSize);
     render(
       <TradingChart
         slabAddress={positionHarness.slab}

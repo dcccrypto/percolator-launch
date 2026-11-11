@@ -590,6 +590,8 @@ export function buildV17Position(
     markE6: oraclePriceE6,
     serverEntryE6: knownEntries.serverEntryE6,
     cachedEntryE6: knownEntries.cachedEntryE6,
+    cachedRiskEntryE6: knownEntries.cachedRiskEntryE6,
+    cachedEntryCheck: knownEntries.cachedEntryCheck,
     onChainPnl: account.pnl,
     initialMarginBps,
     maintenanceMarginBps,

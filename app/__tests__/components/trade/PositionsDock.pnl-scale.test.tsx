@@ -78,7 +78,7 @@ describe("PositionsDock PnL scale without a cached entry (M-6)", () => {
     // 1e9 units at $0.0036 = $3,600 notional; entry $0.003595 => +5 USDC.
     h.priceE6 = 3_600n;
     h.account = acct({ pnl: 5_000_000n, positionSize: 1_000_000_000_000n, capital: 1_000_000_000n });
-    saveEntryPrice("s", 0, 3_595n, 4, OWNER.toBase58());
+    saveEntryPrice("s", 0, 3_595n, 4, OWNER.toBase58(), 1_000_000_000_000n);
     const { container } = render(<PositionsDock slabAddress="s" />);
     const text = container.textContent ?? "";
     expect(text).toContain("$5.00");
@@ -87,7 +87,7 @@ describe("PositionsDock PnL scale without a cached entry (M-6)", () => {
 
   it("a cached entry still drives the PnL (unchanged path)", () => {
     // Entry $99.875, mark $100, 40 units long => +$5.
-    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58());
+    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58(), 40_000_000n);
     const { container } = render(<PositionsDock slabAddress="s" />);
     expect(container.textContent ?? "").toContain("$5.00");
   });

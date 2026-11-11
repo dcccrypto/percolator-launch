@@ -65,7 +65,7 @@ describe("PositionsDock USD line under a cent", () => {
   it("a +$0.003 short on a $0.0047 token shows its amount, not $0.00", () => {
     h.priceE6 = 4_693n;
     h.account = acct({ positionSize: -3_000_000_000n, capital: 1_000_000_000n });
-    saveEntryPrice("s", 0, 4_694n, -4, OWNER.toBase58());
+    saveEntryPrice("s", 0, 4_694n, -4, OWNER.toBase58(), -3_000_000_000n);
     const { container } = render(<PositionsDock slabAddress="s" />);
     const text = container.textContent ?? "";
     expect(text).toContain("+$0.0030");
@@ -75,7 +75,7 @@ describe("PositionsDock USD line under a cent", () => {
   it("a real zero still reads $0.00", () => {
     h.priceE6 = 4_694n;
     h.account = acct({ positionSize: -3_000_000_000n, capital: 1_000_000_000n });
-    saveEntryPrice("s", 0, 4_694n, -4, OWNER.toBase58());
+    saveEntryPrice("s", 0, 4_694n, -4, OWNER.toBase58(), -3_000_000_000n);
     const { container } = render(<PositionsDock slabAddress="s" />);
     expect(container.textContent ?? "").toContain("$0.00");
   });

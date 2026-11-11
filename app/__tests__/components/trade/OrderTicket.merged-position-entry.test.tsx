@@ -114,7 +114,7 @@ describe("OrderTicket: the saved entry across a merged position (#3314)", () => 
     await submit("40");
     expect(mocks.trade).toHaveBeenCalledTimes(1);
     const saved = getSavedEntry(SLAB, 0, W);
-    expect(saved).toEqual({ entryPriceE6: 1_100_000n, leverage: 3, sizeQ: 80_000_000n });
+    expect(saved).toMatchObject({ entryPriceE6: 1_100_000n, leverage: 3, sizeQ: 80_000_000n });
     // the dock's share gate accepts a saved entry again
     expect(isExactEntrySource(resolveEntryPrice(80_000_000n, saved!.entryPriceE6, 8_000_000n, 1_200_000n).source)).toBe(true);
   });

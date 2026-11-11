@@ -97,7 +97,7 @@ const MARK_TEXT = "$1.000000";
 /** A position whose open-time entry IS saved on this device (so its PnL is known). */
 function buildKnown(name: string): PortfolioPosition {
   const { market } = loadPortfolio(name);
-  saveEntryPrice(market, 0, build(name).effectiveEntryPrice, undefined, WALLET);
+  saveEntryPrice(market, 0, build(name).effectiveEntryPrice, undefined, WALLET, build(name).effectiveSize);
   return build(name);
 }
 
@@ -130,7 +130,7 @@ describe("real v18 portfolio bytes → resolved entry", () => {
 
   it("pnl = 0 but cached at open → cache", () => {
     const { market } = loadPortfolio("DAC2a44p");
-    saveEntryPrice(market, 0, 1_234_567n, undefined, WALLET);
+    saveEntryPrice(market, 0, 1_234_567n, undefined, WALLET, build("DAC2a44p").effectiveSize);
     const pos = build("DAC2a44p");
     expect(pos.entryPriceSource).toBe("cache");
     expect(pos.effectiveEntryPrice).toBe(1_234_567n);
@@ -151,7 +151,7 @@ describe("dashboard Overview (PositionSummary) — Defect 1", () => {
 
   it("renders the CACHED entry", () => {
     const { market } = loadPortfolio("DAC2a44p");
-    saveEntryPrice(market, 0, 1_234_567n, undefined, WALLET);
+    saveEntryPrice(market, 0, 1_234_567n, undefined, WALLET, build("DAC2a44p").effectiveSize);
     state.positions = [build("DAC2a44p")];
     render(<PositionSummary />);
     expect(summaryCell("Entry:").textContent).toContain("$1.234567");

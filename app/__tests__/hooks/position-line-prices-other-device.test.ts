@@ -38,7 +38,7 @@ describe("usePositionLinePrices", () => {
     expect(result.current.liq).not.toBeNull();
   });
   it("saved entry: both lines", () => {
-    saveEntryPrice("SLAB", 0, 99_875_000n, 4, OWNER.toBase58());
+    saveEntryPrice("SLAB", 0, 99_875_000n, 4, OWNER.toBase58(), 40_000_000n);
     const { result } = renderHook(() => usePositionLinePrices("SLAB"));
     expect(result.current.entry).toBeCloseTo(99.875, 3);
     expect(result.current.liq).not.toBeNull();

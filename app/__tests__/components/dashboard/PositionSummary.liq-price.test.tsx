@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@/lib/entry-price", async (orig) => ({
   ...(await orig<object>()),
-  getEntryPrice: () => state.cachedEntryE6,
+  getSavedEntry: () => (state.cachedEntryE6 > 0n ? { entryPriceE6: state.cachedEntryE6, leverage: null, sizeQ: 1_000_000n, bookedPriceE6: state.cachedEntryE6, pending: false } : null),
 }));
 
 vi.mock("next/link", () => ({

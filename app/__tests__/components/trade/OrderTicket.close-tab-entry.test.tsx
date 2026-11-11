@@ -108,7 +108,7 @@ describe("OrderTicket Close tab entry / PnL", () => {
   it("CONTROL: with an entry recorded on this device the close form gets it", async () => {
     setupPosition();
     const { saveEntryPrice } = await import("@/lib/entry-price");
-    saveEntryPrice(SLAB, 0, 149_875_000n, 2, OWNER.toBase58());
+    saveEntryPrice(SLAB, 0, 149_875_000n, 2, OWNER.toBase58(), 40_000_000n); // the size the test account holds
     await openCloseTab();
     expect(mocks.closeProps!.entryPriceE6).toBe(149_875_000n);
   });

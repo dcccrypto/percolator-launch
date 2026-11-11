@@ -91,7 +91,7 @@ describe("PositionPanel leverage badge + row", () => {
   });
 
   it("a locally remembered order-slider leverage never replaces the effective figure", () => {
-    saveEntryPrice("s", 0, 100_000_000n, 10, OWNER.toBase58());
+    saveEntryPrice("s", 0, 100_000_000n, 10, OWNER.toBase58(), 40_000_000n);
     render(<PositionPanel slabAddress="s" />);
     // Badge is the effective leverage (4x), NOT the 10x the user picked at open...
     expect(lev().textContent).toBe("Lev 4×");

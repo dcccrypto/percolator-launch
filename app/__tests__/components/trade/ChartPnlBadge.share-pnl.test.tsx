@@ -46,7 +46,11 @@ vi.mock("@/hooks/useMarketInfo", () => ({ useMarketInfo: () => ({ market: h.mark
 vi.mock("@/hooks/useEngineState", () => ({ useEngineState: () => ({ engine: null, insuranceBalance: h.insurance }) }));
 vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccount: () => null }));
-vi.mock("@/lib/entry-price", () => ({ getEntryPrice: () => h.entry }));
+// r8: the entry is read as a saved record (with the size it was saved for): this one is current for the 40-unit position under test.
+vi.mock("@/lib/entry-price", async (orig) => ({
+  ...(await orig<object>()),
+  getSavedEntry: () => (h.entry > 0n ? { entryPriceE6: h.entry, leverage: null, sizeQ: 40_000_000n, bookedPriceE6: h.entry, pending: false } : null),
+}));
 
 vi.mock("@/components/share/PnlShareButton", () => ({
   PnlShareButton: ({ data }: { data: unknown }) => {

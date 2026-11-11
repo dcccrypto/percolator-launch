@@ -21,8 +21,22 @@ interface EntryRecord {
    * when the measurement failed: such an entry is never carried into a later trade.
    */
   sizeQ?: string;
+  /**
+   * The BOOKED price (the engine's basis: the mark at execution) when `entryPriceE6` is the price the trader EFFECTIVELY paid (booked +/- the
+   * spread part of the fee, lib/v22/exec-fill.ts effectivePriceE6). Risk math (liquidation price, equity) uses this one: the spread already
+   * left capital as a fee, so valuing the position from the fill price there would count it a second time. Absent = the entry IS the basis.
+   */
+  bookedPriceE6?: string;
+  /**
+   * The save made the moment a fill landed, BEFORE the position's size is measured on chain (so it has no `sizeQ`). It is the opening
+   * device's own entry for a short window (PENDING_ENTRY_WINDOW_MS); the measured save replaces it (or the window ends and it stops counting).
+   */
+  pending?: boolean;
   timestamp: number;
 }
+
+/** How long a size-less `pending` save counts as this position's entry: long enough for the post-trade measurement (takePositionChange waits up to 8 s), short enough that a change from another device is not masked. */
+export const PENDING_ENTRY_WINDOW_MS = 60_000;
 
 /**
  * BUG 10 fix: on v17 every standalone portfolio uses `accountIdx === 0` (one
@@ -54,10 +68,13 @@ export function saveEntryPrice(
   leverage?: number,
   wallet?: string,
   sizeQ?: bigint,
+  opts?: { bookedPriceE6?: bigint; pending?: boolean },
 ): void {
   try {
     const record: EntryRecord = {
       entryPriceE6: entryPriceE6.toString(),
+      ...(opts?.bookedPriceE6 != null && opts.bookedPriceE6 > 0n && opts.bookedPriceE6 !== entryPriceE6 ? { bookedPriceE6: opts.bookedPriceE6.toString() } : {}),
+      ...(opts?.pending && (sizeQ == null || sizeQ === 0n) ? { pending: true } : {}),
       ...(leverage != null && Number.isFinite(leverage) && leverage > 0 ? { leverage } : {}),
       ...(sizeQ != null && sizeQ !== 0n ? { sizeQ: sizeQ.toString() } : {}),
       timestamp: Date.now(),
@@ -106,6 +123,26 @@ export interface SavedEntry {
   leverage: number | null;
   /** Signed effective size the entry was saved for; null on a record without one. */
   sizeQ: bigint | null;
+  /** The engine's basis price for the same position (== entryPriceE6 when the record has none). */
+  bookedPriceE6: bigint;
+  /** A fresh size-less save from the fill that has not been measured yet (see EntryRecord.pending). Always false once the window has passed. */
+  pending: boolean;
+}
+
+/** The two facts that decide whether a saved entry still describes the position. */
+export type EntryCheck = Pick<SavedEntry, "sizeQ" | "pending">;
+
+/**
+ * Whether a saved entry still describes the position measured on chain NOW (r8): only while that position's signed ADL-effective size
+ * equals the size the entry was saved for. A trade from another device (an add, a reduce, a flip, a close) changes the size, so a record
+ * this device wrote earlier no longer says what the entry is; a record with no size cannot vouch for anything. The one exception is the
+ * opening device's own fresh `pending` save (no size yet, within PENDING_ENTRY_WINDOW_MS): it has nothing to compare against until the
+ * measurement lands and replaces it, and must not flicker to "unknown" meanwhile. An unknown effective size (ADL factors unreadable)
+ * cannot be compared, so only the pending save stands.
+ */
+export function entryRecordCurrent(check: EntryCheck, effectiveSizeQ: bigint | null): boolean {
+  if (check.sizeQ !== null) return effectiveSizeQ !== null && check.sizeQ === effectiveSizeQ;
+  return check.pending;
 }
 
 export function getSavedEntry(slab: string, accountIdx: number, wallet?: string): SavedEntry | null {
@@ -123,7 +160,16 @@ export function getSavedEntry(slab: string, accountIdx: number, wallet?: string)
     }
     const leverage =
       typeof record.leverage === "number" && Number.isFinite(record.leverage) && record.leverage > 0 ? record.leverage : null;
-    return { entryPriceE6, leverage, sizeQ: sizeQ === 0n ? null : sizeQ };
+    let bookedPriceE6 = entryPriceE6;
+    try {
+      const b = record.bookedPriceE6 != null ? BigInt(record.bookedPriceE6) : 0n;
+      if (b > 0n) bookedPriceE6 = b;
+    } catch {
+      bookedPriceE6 = entryPriceE6;
+    }
+    const sized = sizeQ !== null && sizeQ !== 0n;
+    const fresh = typeof record.timestamp === "number" && Date.now() - record.timestamp >= 0 && Date.now() - record.timestamp < PENDING_ENTRY_WINDOW_MS;
+    return { entryPriceE6, leverage, sizeQ: sized ? sizeQ : null, bookedPriceE6, pending: !sized && record.pending === true && fresh };
   } catch {
     return null;
   }

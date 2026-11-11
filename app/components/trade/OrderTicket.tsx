@@ -45,7 +45,7 @@ import { computeNotionalNative } from "@/lib/notional";
 import { availableLeverage as availableLeverageFor, nextLeverageInputState, clampSliderLeverage, leverageToPct, pctToLeverage, LEVERAGE_STEP } from "@/lib/leverage-control";
 import { useTrade, prewarmTradeSubmission, resolveLpTradeAccounts } from "@/hooks/useTrade";
 import { useFirstTrade } from "@/hooks/useFirstTrade";
-import { FIRST_TRADE_COPY, FirstTradeDepositError, engineGateBps, engineOpenNeedAtoms, firstTradeCancelledExtras, fundDepositAtoms, tradableMarginAtoms } from "@/lib/first-trade";
+import { FIRST_TRADE_COPY, FirstTradeDepositError, engineGateBps, engineOpenNeedAtoms, firstTradeCancelledExtras, fundDepositAtoms, maxWalletDepositAtoms, tradableMarginAtoms } from "@/lib/first-trade";
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 import { isBlockedSlab } from "@/lib/blocklist";
@@ -85,7 +85,7 @@ import { formatTokenAmount, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
-import { saveEntryPrice, getEntryPrice, clearEntryPrice, entryAfterTrade, getSavedEntry } from "@/lib/entry-price";
+import { saveEntryPrice, clearEntryPrice, entryAfterTrade, entryRecordCurrent, getSavedEntry } from "@/lib/entry-price";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
@@ -580,9 +580,27 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // maxLeverage/liq-price everywhere else.
   const existingPositionSize = userAccount?.account.positionSize ?? 0n;
   const rawExistingEntryPrice = userAccount?.account.entryPrice ?? 0n;
-  const cachedExistingEntryPrice = userAccount && rawExistingEntryPrice === 0n
-    ? getEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58())
-    : 0n;
+  // r8: the entry cached on this device counts only while the position measured on chain (ADL-effective size) is still the one it was
+  // saved for; a trade from another device leaves it stale, and then the entry is unknown here like everywhere else. The effective size
+  // is the one every surface resolves (terminalPositionPnl).
+  const savedExistingEntry = userAccount && rawExistingEntryPrice === 0n && existingPositionSize !== 0n
+    ? getSavedEntry(slabAddress, userAccount.idx, publicKey?.toBase58())
+    : null;
+  const existingEffectiveQ = userAccount && savedExistingEntry !== null
+    ? terminalPositionPnl({
+        account: userAccount.account,
+        slabAddress,
+        accountIdx: userAccount.idx,
+        adlFactors: slabAdlFactors ?? null,
+        adlApplicable: slabWrapperV17 !== null,
+        markE6: livePriceE6 ?? 0n,
+        initialMarginBps: 1000n,
+      }).effectiveSize
+    : null;
+  const savedExistingCurrent = savedExistingEntry !== null && entryRecordCurrent(savedExistingEntry, existingEffectiveQ);
+  const cachedExistingEntryPrice = savedExistingCurrent ? savedExistingEntry.entryPriceE6 : 0n;
+  // The engine's basis for that fill (booked price), for risk math: the spread is already out of capital as a fee.
+  const cachedExistingBookedPrice = savedExistingCurrent ? savedExistingEntry.bookedPriceE6 : 0n;
   // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math — same
   // fix as PositionsDock/usePortfolio's identical call sites (an unguarded
   // u64::MAX-class account.pnl can poison the derived entry/liq/margin math
@@ -606,13 +624,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const existingEntryPriceE6 = existingResolved?.entry ?? 0n;
   // #3534: the before/after liquidation preview is risk math: a fully settled single leg is priced from the settled
   // back-solve (lib/risk-entry.ts), so a loss settlement already moved out of `capital` is not counted twice.
+  const existingBasisE6 = existingResolved?.source === "cache" && cachedExistingBookedPrice > 0n && rawExistingEntryPrice === 0n ? cachedExistingBookedPrice : existingEntryPriceE6;
   const existingRiskEntryE6 = (() => {
-    if (!userAccount || existingPositionSize === 0n) return existingEntryPriceE6;
+    if (!userAccount || existingPositionSize === 0n) return existingBasisE6;
     const { riskLeg, activeLegCount } = riskLegOf(userAccount.account);
-    if (!riskLeg || riskLeg.side !== (existingPositionSize > 0n ? 0 : 1)) return existingEntryPriceE6;
+    if (!riskLeg || riskLeg.side !== (existingPositionSize > 0n ? 0 : 1)) return existingBasisE6;
     const anchor = settledRiskAnchorE6(slabAdlFactors?.settle, riskLeg, activeLegCount);
     const e = anchor === null ? null : riskEntryFromSettled(existingPositionSize, safeExistingPnl, anchor);
-    return e ?? existingEntryPriceE6;
+    return e ?? existingBasisE6;
   })();
   // The Close tab previews size/PnL/balance for a close that acts on the leg's
   // EFFECTIVE size (engine plan_delta, v16.rs:6075), so it is handed that size -
@@ -1154,6 +1173,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
           (!isSentinelValue(userAccount.account.feeCredits) && userAccount.account.feeCredits < 0n ? userAccount.account.feeCredits : 0n)
         : null,
+    // Max / buying power bound by the equity the account could have after bundling the whole wallet: independent of size, leverage and of
+    // whether THIS order needs a deposit (takerEquity above is null exactly when one is bundled, which switched Max's formula mid-slider).
+    maxEquity:
+      marketLimits.growth && userAccount && !mockMode
+        ? capital +
+          (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
+          (!isSentinelValue(userAccount.account.feeCredits) && userAccount.account.feeCredits < 0n ? userAccount.account.feeCredits : 0n) +
+          maxWalletDepositAtoms(walletAtaBalance, decimals)
+        : null,
     minLegQ: bandMinLegExactQ(bandView),
     sizeStepQ: lotExp > 0 ? POS_SCALE_V22 : 100n,
     format: {
@@ -1196,6 +1224,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const marketMaxQFor = (side: "long" | "short") =>
     oneMaxQ([ticketLimits.sideLimits?.[side]?.maxQ, fillCapQ, legacySideCapQ(side), side === direction ? ticketLimits.growthCapQ : null]);
   const marketMaxQ = marketMaxQFor(direction);
+  // The market-ROOM part of that cap (no collateral bound): the only thing that may be labelled "Limited by market room".
+  const marketRoomQ = oneMaxQ([ticketLimits.sideLimits?.[direction]?.maxQ, fillCapQ, legacySideCapQ(direction), ticketLimits.growthRoomQ]);
   // M9: the typed size is above what this side can fill (the program clips it). The size input is clamped to the room below, but until
   // that lands (and whenever it cannot) the ticket must not price, deposit for or submit the ask: it would quote more than it fills.
   const overFillable = !roomUnknown && sideOverFillable(positionSize, marketMaxQ) && marketMaxQ !== null && marketMaxQ > 0n;
@@ -1213,7 +1243,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Buying power (display only): the notional the Max above would fill at the SELECTED leverage: the balance's margin x leverage, or
   // the market's cap when that is smaller (then `capped` says so). It used to be tradable margin x the MAX leverage, which fell as
   // leverage rose (the fee scales with leverage) and ignored the caps, so it read far above any size that could be opened.
-  const buyingPowerInfo = roomUnknownRaw ? null : buyingPowerAtoms({ tradableAtoms: tradableBalance, leverage, marketMaxQ, priceE6: livePriceE6 });
+  const buyingPowerInfo = roomUnknownRaw ? null : buyingPowerAtoms({ tradableAtoms: tradableBalance, leverage, marketMaxQ, roomMaxQ: marketRoomQ, priceE6: livePriceE6 });
   const buyingPower = buyingPowerInfo?.atoms ?? 0n;
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.
@@ -1552,7 +1582,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // long wait in the wallet). Pre-v2.2: the live mark (those fills settle at it). v2.2 (M7): the BOOKED price from the FILL event
       // (applied below once read); the mark is never the entry of a v2.2 fill.
       const markFillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
-      const applyEntryFill = (fillPriceE6: bigint) => {
+      // `fillPriceE6` is the entry the surfaces show (the price paid); `bookedPriceE6` the engine's basis for the same fill (risk math only).
+      const applyEntryFill = (fillPriceE6: bigint, bookedPriceE6: bigint = fillPriceE6) => {
       if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
         const slab = slabAddress;
@@ -1563,7 +1594,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // an existing one clears it (BUG 9: never let this fill's raw price stand in for the
         // position's entry), so nothing shows an out-of-date entry as exact in the meantime.
         if (existingPositionSize === 0n) {
-          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet);
+          // r8: this save has no size yet (it is measured below). It is flagged pending so the opening device keeps showing it in the
+          // meantime; the measured save replaces it, and once the short window passes an unmeasured one stops counting.
+          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet, undefined, { bookedPriceE6, pending: true });
         } else {
           clearEntryPrice(slab, entryIdx, wallet);
         }
@@ -1578,20 +1611,32 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             clearEntryPrice(slab, entryIdx, wallet);
             return;
           }
+          // The same average over the BOOKED prices (the engine's basis) for risk math: an add averages fills, a reduce keeps the basis.
+          const nextBooked =
+            entryAfterTrade({
+              beforeQ: change.beforeQ,
+              afterQ: change.afterQ,
+              saved: prior ? { entryPriceE6: prior.bookedPriceE6, sizeQ: prior.sizeQ } : null,
+              fillPriceE6: bookedPriceE6,
+            }) ?? next;
           const opened = change.beforeQ === 0n || (change.beforeQ > 0n) !== (change.afterQ > 0n);
           // The saved leverage describes the order that opened the position (PositionPanel's
           // "Order Lev."), so an add or a reduce keeps it.
           const lev = opened ? orderLeverage : prior?.leverage ?? undefined;
-          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ);
+          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ, { bookedPriceE6: nextBooked });
         });
       }
       };
       if (v22Fill) {
         void execFillP.then(async (ef) => {
-          // N-1: the ENTRY is the BOOKED price (the engine's basis: capital + pnl is measured against it, and the spread is already out of
-          // capital as a fee). The effective price (booked + spread) is only for the result line and the toast.
-          if (ef) applyEntryFill(ef.bookedPriceE6);
-          // The fill could not be read: keep no entry at all (the position panel then derives an "est." one) rather than the mark.
+          // Owner decision (r8): the ENTRY is the price the trader actually paid, the fill's effective price (booked +/- the spread part of
+          // the fee, the same price the toast and the result line show), so the PnL shown is net of the spread. The BOOKED price is kept
+          // beside it for risk math only (liquidation price, equity): the engine's basis is the booked price and the spread already left
+          // capital as a fee, so valuing risk from the fill price would count it twice (lib/position-pnl.ts riskEntry).
+          const paid = ef ? effectivePriceE6(ef, baseFeeBps) : null;
+          if (ef && paid !== null) applyEntryFill(paid, ef.bookedPriceE6);
+          // The fill could not be read (or its price cannot be split from the fee): keep no entry at all (the position panel then shows an
+          // unknown one) rather than the mark or the booked price, which is gross of the spread.
           else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
           // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
           if (ef && publicKey) {

@@ -145,6 +145,7 @@ describe("chart liquidation risk survives browser-local entry-cache loss", () =>
       ENTRY_E6,
       2,
       h.wallet,
+      h.userAccount.account.positionSize,
     );
 
     expect(
