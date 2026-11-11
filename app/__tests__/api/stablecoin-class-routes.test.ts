@@ -263,17 +263,32 @@ describe("POST /api/oracle-keeper/register (hot-registers with the keeper)", () 
   });
 });
 
-describe("POST /api/mobile/create-market", () => {
-  it.each(NEW_CLASS)("%s mint: 400 before anything is built; a stable symbol is refused too", async (_n, mint) => {
+describe("POST /api/mobile/create-market (checks the UNDERLYING, not the collateral mint)", () => {
+  async function mobile(b: Record<string, unknown>) {
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
     vi.doMock("@/lib/rate-limit", async (orig) => ({ ...(await orig<object>()), checkCreateMarketRateLimit: async () => ({ allowed: true, retryAfterSecs: 0 }) }));
     const { POST } = await import("@/app/api/mobile/create-market/route");
-    const mk = (b: Record<string, unknown>) => new NextRequest("http://localhost/api/mobile/create-market", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deployer: DEPLOYER, symbol: "X", ...b }) });
-    const a = await POST(mk({ mint }));
-    expect(a.status).toBe(400);
-    expect(await errOf(a)).toMatch(/dollar stablecoin/i);
-    const b = await POST(mk({ mint: CONTROL, symbol: "USDS" }));
-    expect(b.status).toBe(400);
-    expect(await errOf(b)).toMatch(/dollar stablecoin/i);
+    const res = await POST(new NextRequest("http://localhost/api/mobile/create-market", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deployer: DEPLOYER, mint: CONTROL, ...b }) }));
+    return { status: res.status, error: await errOf(res) };
+  }
+  it.each(NEW_CLASS)("%s as the underlying (mainnet_ca): 400 before anything is built", async (_n, ca) => {
+    const r = await mobile({ mainnet_ca: ca });
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/dollar stablecoin/i);
+  });
+  it("a stable pool base (dex_pool_address) and a stable symbol are refused too", async () => {
+    expect((await mobile({ dex_pool_address: pool(PUMPSWAP, USDS, USDC) })).error).toMatch(/dollar stablecoin/i);
+    expect((await mobile({ mainnet_ca: CONTROL, symbol: "USDS" })).error).toMatch(/dollar stablecoin/i);
+  });
+  it("a stable COLLATERAL mint is not what is refused (it is the normal collateral); the underlying is", async () => {
+    const r = await mobile({ mint: USDS, mainnet_ca: CONTROL });
+    expect(r.error).not.toMatch(/dollar stablecoin/i);
+  });
+  it("no underlying identity at all is refused; a metadata RPC failure is a retryable 503", async () => {
+    const none = await mobile({});
+    expect(none.status).toBe(400);
+    expect(none.error).toMatch(/no token identity/i);
+    h.rpcDown = true;
+    expect((await mobile({ mainnet_ca: CONTROL })).status).toBe(503);
   });
 });

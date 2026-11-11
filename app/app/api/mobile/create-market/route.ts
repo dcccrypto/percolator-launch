@@ -27,7 +27,9 @@
  * staging, unset) return 403 (GH#1950).
  */
 import { marketAccountLen } from "@/lib/v22/layout";
-import { STABLECOIN_PERP_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
+import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, STABLECOIN_MISMATCH_REASON, STABLECOIN_NO_IDENTITY_REASON } from "@/lib/v22/stablecoin-perps";
+import { checkStablecoinUnderlying } from "@/lib/v22/stablecoin-resolve";
+import { isDevnetV22Enabled as isV22ForStablecoin } from "@/lib/v22/flag";
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -108,8 +110,10 @@ interface MobileCreateMarketBody {
   symbol?: string;
   /** Oracle mode. Only "admin" is implemented — "hyperp"/"pyth" are rejected (GH#1989). */
   oracle_mode?: string;
-  /** DEX pool address (base58). Reserved for future hyperp mode; currently unused. */
+  /** DEX pool address (base58) of the market's UNDERLYING token. Not used to build the market; v2.2 checks it for the stablecoin refusal. */
   dex_pool_address?: string | null;
+  /** Mainnet mint (base58) of the market's UNDERLYING token. v2.2: this or dex_pool_address is required (stablecoin refusal). */
+  mainnet_ca?: string | null;
   /** Initial mark price in e6 format (price × 1_000_000). Default: "1000000" ($1.00). */
   initial_price_e6?: string;
 }
@@ -159,6 +163,8 @@ export async function POST(req: NextRequest) {
       tier = "small",
       name: rawName = "Mobile Market",
       symbol,
+      mainnet_ca,
+      dex_pool_address,
       oracle_mode = "admin",
       initial_price_e6 = "1000000",
     } = body;
@@ -203,13 +209,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // v2.2: dollar stablecoins are not perp underlyings (owner 2026-11-09). This route takes no mainnet_ca and ignores
-    // dex_pool_address: the only token it is given is `mint` (the collateral/mint it builds the market around), so that is
-    // what it can refuse. The underlying's identity (mainnet_ca) is first presented at POST /api/markets, which carries
-    // the same refusal; this is the early stop before the deployer signs anything. Off v2.2 this never fires.
-    // The client `symbol` / `name` are refuse-only here (a stable ticker adds a refusal; nothing a client sends lifts one).
-    if (isStablecoinPerpBlocked(mintPk.toBase58(), { symbol: typeof symbol === "string" ? symbol : null, name })) {
-      return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
+    // v2.2: dollar stablecoins are not perp underlyings. `mint` here is the COLLATERAL (a dollar token is the normal collateral), so
+    // it is NOT what is checked. The underlying is identified by mainnet_ca and/or dex_pool_address (plus the client symbol / name,
+    // refuse-only): same check as POST /api/markets (address list, pool base mint, on-chain symbol; no identity at all is refused).
+    // Off v2.2 this never fires.
+    if (isV22ForStablecoin()) {
+      let ca: string | null = null;
+      let poolAddr: string | null = null;
+      try {
+        if (mainnet_ca) ca = new PublicKey(mainnet_ca).toBase58();
+      } catch {
+        return NextResponse.json({ error: "Invalid mainnet_ca: must be a valid Solana public key" }, { status: 400 });
+      }
+      try {
+        if (dex_pool_address) poolAddr = new PublicKey(dex_pool_address).toBase58();
+      } catch {
+        return NextResponse.json({ error: "Invalid dex_pool_address: must be a valid Solana public key" }, { status: 400 });
+      }
+      const stable = await checkStablecoinUnderlying({ mainnetCa: ca, pool: poolAddr, symbol, name });
+      if (!stable.ok) {
+        if (stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
+        if (stable.kind === "mismatch") return NextResponse.json({ error: STABLECOIN_MISMATCH_REASON }, { status: 400 });
+        if (stable.kind === "no-identity") return NextResponse.json({ error: STABLECOIN_NO_IDENTITY_REASON }, { status: 400 });
+        return stable.retryable
+          ? NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } })
+          : NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
+      }
     }
 
     const validTiers: SlabTierKey[] = ["small", "medium", "large"];
