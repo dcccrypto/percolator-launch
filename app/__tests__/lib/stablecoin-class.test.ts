@@ -271,6 +271,9 @@ describe("checkStablecoinUnderlying", () => {
       ["Token-2022 token account (165 B)", { owner: T22, data: Buffer.alloc(165) }],
       ["Token-2022 token account (extended, type 2)", { owner: T22, data: t22Acct }],
       ["multisig (355 B)", { owner: SPL_TOKEN, data: Buffer.alloc(355) }],
+      ["crafted Token-2022 multisig (355 B, bytes 45 and 165 set)", { owner: T22, data: (() => { const b = Buffer.alloc(355); b[45] = 1; b[165] = 1; return b; })() }],
+      ["crafted Token-2022 multisig (355 B, signer keys in the padding)", { owner: T22, data: (() => { const b = Buffer.alloc(355, 7); b[45] = 1; b[165] = 1; return b; })() }],
+      ["Token-2022 extended account with non-zero padding (not 355 B)", { owner: T22, data: (() => { const b = Buffer.alloc(200); b[45] = 1; b[165] = 1; b[100] = 9; return b; })() }],
       ["empty token-program account", { owner: SPL_TOKEN, data: Buffer.alloc(0) }],
       ["uninitialized mint", { owner: SPL_TOKEN, data: uninit }],
     ];
@@ -281,6 +284,10 @@ describe("checkStablecoinUnderlying", () => {
     // Real mints are fine: SPL (82 B), Token-2022 base (82 B) and Token-2022 extended (type 1)
     const t22Mint = Keypair.generate().publicKey.toBase58(), t22Base = Keypair.generate().publicKey.toBase58();
     expect(await checkStablecoinUnderlying({ mainnetCa: t22Mint, conn: fakeConn(new Map<string, Acct>([[t22Mint, token2022Mint("Okay", "OKAY")]])) })).toEqual({ ok: true });
+    const t22Ext = Keypair.generate().publicKey.toBase58();
+    const ext = Buffer.alloc(200); ext[45] = 1; ext[165] = 1; // extended mint with extension data after the type byte
+    ext.fill(5, 170);
+    expect(await checkStablecoinUnderlying({ mainnetCa: t22Ext, conn: fakeConn(new Map<string, Acct>([[t22Ext, { owner: T22, data: ext }]])) })).toEqual({ ok: true });
     expect(await checkStablecoinUnderlying({ mainnetCa: t22Base, conn: fakeConn(new Map<string, Acct>([[t22Base, { owner: T22, data: mintBytes() }]])) })).toEqual({ ok: true });
     expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map()) })).toEqual({ ok: true });
   });

@@ -1,5 +1,6 @@
 import { cleanup } from '@testing-library/react';
-import { afterEach, vi } from 'vitest';
+import { afterAll, afterEach, vi } from 'vitest';
+import { rmSync } from 'node:fs';
 import '@testing-library/jest-dom';
 
 // keeper-register re-reads a not-yet-visible creation tx in-request (app/api/playground/keeper-register);
@@ -8,6 +9,8 @@ process.env.KEEPER_REGISTER_PROOF_POLL_MS ??= '0';
 
 // registerPlaygroundSlab persists to lib/playground-created-markets.json; route tests that register random slabs must not write that tracked file.
 process.env.PLAYGROUND_REGISTRY_PATH ??= `${process.env.TMPDIR ?? '/tmp'}/percolator-test-playground-created-markets-${process.pid}.json`;
+// ...and the temp file is removed when each test file finishes (setup runs per file, so no files are left behind).
+afterAll(() => { try { rmSync(process.env.PLAYGROUND_REGISTRY_PATH as string, { force: true }); } catch { /* best effort */ } });
 
 // jsdom doesn't implement window.matchMedia — mock it so hooks like
 // usePrefersReducedMotion don't throw during component tests.

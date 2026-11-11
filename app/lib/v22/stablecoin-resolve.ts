@@ -22,6 +22,7 @@ const METAPLEX_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzj
 const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 const MINT_LEN = 82;
+const MULTISIG_LEN = 355;
 const MINT_IS_INITIALIZED_OFF = 45;
 /** Token-2022 account-type byte (after the 165-byte base): 1 = Mint, 2 = Account. */
 const T22_ACCOUNT_TYPE_OFF = 165;
@@ -35,7 +36,11 @@ export function isMintAccount(owner: string, data: Uint8Array): boolean {
   if (owner !== SPL_TOKEN_PROGRAM && owner !== TOKEN_2022_PROGRAM) return false;
   if (data.length < MINT_LEN || data[MINT_IS_INITIALIZED_OFF] !== 1) return false;
   if (data.length === MINT_LEN) return true;
-  return owner === TOKEN_2022_PROGRAM && data.length > T22_ACCOUNT_TYPE_OFF && data[T22_ACCOUNT_TYPE_OFF] === 1;
+  // Token-2022 extended mint. A multisig (355 B, attacker-chosen signer keys in bytes 3..) must not pass by setting bytes 45 / 165, so
+  // also require: not the multisig size, and the padding between the base mint and the account-type byte (82..164) all zero.
+  if (owner !== TOKEN_2022_PROGRAM || data.length <= T22_ACCOUNT_TYPE_OFF || data.length === MULTISIG_LEN) return false;
+  for (let i = MINT_LEN; i < T22_ACCOUNT_TYPE_OFF; i++) if (data[i] !== 0) return false;
+  return data[T22_ACCOUNT_TYPE_OFF] === 1;
 }
 const WSOL = "So11111111111111111111111111111111111111112";
 
