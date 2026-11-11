@@ -6,9 +6,10 @@
  * parser, the one the keeper prices with) and the mints' on-chain metadata (Metaplex PDA, or the Token-2022 metadata extension), then
  * applies the verified address list and the exact-ticker symbol/name rule.
  *
- * Failure policy: a request with a pool that cannot be resolved is REFUSED (never waved through, mainnet_ca or not), and a given mainnet_ca
- * must equal the pool's base mint; a metadata read that fails is
- * not (the address list already ran, the symbol layer is defence in depth).
+ * Failure policy (fail closed): a request with neither a pool nor a mainnet_ca has no token identity to check and is REFUSED; a request
+ * with a pool that cannot be resolved is REFUSED (never waved through, mainnet_ca or not); a given mainnet_ca must equal the pool's base
+ * mint; and an RPC failure while reading the token metadata is REFUSED as retryable (a mint whose metadata account simply does not exist
+ * is fine: the address list and the client symbol already ran).
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import { parseDexPool } from "@percolatorct/sdk";
@@ -18,6 +19,29 @@ import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { isStablecoinMintAddress, stablecoinIdentityVerdict, type StablecoinTokenMeta } from "@/lib/v22/stablecoin-perps";
 
 const METAPLEX_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const MINT_LEN = 82;
+const MULTISIG_LEN = 355;
+const MINT_IS_INITIALIZED_OFF = 45;
+/** Token-2022 account-type byte (after the 165-byte base): 1 = Mint, 2 = Account. */
+const T22_ACCOUNT_TYPE_OFF = 165;
+
+/**
+ * Is this account an initialized mint (not merely owned by a token program: token accounts and multisigs are owned by it too)?
+ * SPL Token: exactly 82 bytes with is_initialized set. Token-2022: the same 82-byte base mint, or an extended account (> 165 bytes)
+ * whose account-type byte is 1 (Mint) and whose base mint is initialized.
+ */
+export function isMintAccount(owner: string, data: Uint8Array): boolean {
+  if (owner !== SPL_TOKEN_PROGRAM && owner !== TOKEN_2022_PROGRAM) return false;
+  if (data.length < MINT_LEN || data[MINT_IS_INITIALIZED_OFF] !== 1) return false;
+  if (data.length === MINT_LEN) return true;
+  // Token-2022 extended mint. A multisig (355 B, attacker-chosen signer keys in bytes 3..) must not pass by setting bytes 45 / 165, so
+  // also require: not the multisig size, and the padding between the base mint and the account-type byte (82..164) all zero.
+  if (owner !== TOKEN_2022_PROGRAM || data.length <= T22_ACCOUNT_TYPE_OFF || data.length === MULTISIG_LEN) return false;
+  for (let i = MINT_LEN; i < T22_ACCOUNT_TYPE_OFF; i++) if (data[i] !== 0) return false;
+  return data[T22_ACCOUNT_TYPE_OFF] === 1;
+}
 const WSOL = "So11111111111111111111111111111111111111112";
 
 export type StablecoinCheck =
@@ -26,7 +50,9 @@ export type StablecoinCheck =
   /** A pool AND a mainnet_ca were given and the pool's base mint is not that mint: the stated identity is not what the pool prices. */
   | { ok: false; kind: "mismatch" }
   /** Request with a pool whose tokens could not be read: `retryable` = the mainnet RPC failed (503), else the pool is missing / unsupported (400). */
-  | { ok: false; kind: "unverifiable"; retryable: boolean };
+  | { ok: false; kind: "unverifiable"; retryable: boolean }
+  /** Neither a pool nor a mainnet_ca was given: there is no token identity to check, so the registration is refused. */
+  | { ok: false; kind: "no-identity" };
 
 type Conn = Pick<Connection, "getMultipleAccountsInfo">;
 
@@ -71,7 +97,10 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-/** On-chain name/symbol per mint (base58). A mint whose metadata is absent / unreadable is simply left out. Throws on RPC failure. */
+/** Thrown when a given mint account does not exist on mainnet or is not an SPL Token / Token-2022 mint. */
+class NotAMintError extends Error {}
+
+/** On-chain name/symbol per mint (base58). A mint whose metadata is absent / unreadable is simply left out. Throws on RPC failure, and NotAMintError when a mint account is missing or is not an initialized SPL Token / Token-2022 mint (a token account or multisig is not). */
 async function readMintMetas(mints: string[], conn: Conn, timeoutMs: number): Promise<Record<string, StablecoinTokenMeta>> {
   const keys: PublicKey[] = [];
   for (const m of mints) {
@@ -85,6 +114,7 @@ async function readMintMetas(mints: string[], conn: Conn, timeoutMs: number): Pr
     // Metaplex first; when that account is absent OR does not parse, fall back to the Token-2022 metadata extension on the mint.
     const mpl = infos[2 * i + 1];
     const t22 = infos[2 * i];
+    if (!t22 || !isMintAccount(t22.owner.toBase58(), new Uint8Array(t22.data))) throw new NotAMintError(m);
     const meta = (mpl ? parseMetaplexNameSymbol(new Uint8Array(mpl.data)) : null) ?? (t22 ? parseToken2022NameSymbol(new Uint8Array(t22.data)) : null);
     if (meta) out[m] = meta;
   });
@@ -112,6 +142,10 @@ export async function checkStablecoinUnderlying(input: StablecoinCheckInput): Pr
   const clientMeta: StablecoinTokenMeta = { symbol: typeof input.symbol === "string" ? input.symbol : null, name: typeof input.name === "string" ? input.name : null };
   if (stablecoinIdentityVerdict(clientMeta) === "block") return { ok: false, kind: "stablecoin" };
   if (isStablecoinMintAddress(input.mainnetCa)) return { ok: false, kind: "stablecoin" };
+
+  // No pool and no mainnet_ca: nothing here says which token the market prices, so it cannot be cleared. (The slab itself holds only the
+  // devnet collateral mint, never the mainnet underlying, so there is nothing on-chain to resolve it from either.)
+  if (!input.mainnetCa && !input.pool) return { ok: false, kind: "no-identity" };
 
   const timeoutMs = input.timeoutMs ?? 8_000;
   const conn: Conn = input.conn ?? new Connection(MAINNET_RPC_URL, "confirmed");
@@ -162,9 +196,21 @@ export async function checkStablecoinUnderlying(input: StablecoinCheckInput): Pr
         if (v === "suspect") suspect = `${mint} ${meta.symbol ?? ""} / ${meta.name ?? ""}`;
       }
       return suspect ? { ok: true, suspect } : { ok: true };
-    } catch {
-      return { ok: true }; // metadata unreadable: the address list already ran (defence in depth only)
+    } catch (e) {
+      // A given mainnet_ca that is not an SPL Token / Token-2022 mint (missing account, wallet, program, random key) is no token identity: refused, not retryable.
+      if (e instanceof NotAMintError) return { ok: false, kind: "unverifiable", retryable: false };
+      // Fail closed: the metadata RPC read failed, so the token's on-chain symbol / name is unknown. Refuse, retryable.
+      return { ok: false, kind: "unverifiable", retryable: true };
     }
   }
   return { ok: true };
+}
+
+/**
+ * The registered pool vs the pool the slab pins on-chain (legacy config layout: `dexPool`, set by SetDexPool). `pinned` null = the slab pins
+ * none (never set, or a layout with no such field, e.g. the v17+ wrapper config), so there is nothing to contradict.
+ */
+export function slabPinnedPoolMismatch(registeredPool: string | null | undefined, pinnedPool: string | null | undefined): boolean {
+  if (!registeredPool || !pinnedPool) return false;
+  return registeredPool !== pinnedPool;
 }

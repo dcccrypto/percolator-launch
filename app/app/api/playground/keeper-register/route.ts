@@ -377,6 +377,8 @@ export async function POST(req: NextRequest) {
   });
   if (!stable.ok && stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
   if (!stable.ok && stable.kind === "mismatch") return NextResponse.json({ error: STABLECOIN_MISMATCH_REASON }, { status: 400 });
+  // Fail closed: any other non-ok verdict (no-identity, a future kind) is refused here, except "unverifiable", answered after the pool is classified below.
+  if (!stable.ok && stable.kind !== "unverifiable") return NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
 
   // Resolve the dexType from the pool's mainnet owner program ONLY. The client
   // dexType string is a hint and is ignored: it cannot tell Meteora DLMM from

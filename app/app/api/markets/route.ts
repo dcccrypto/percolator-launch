@@ -28,8 +28,8 @@ import { validateSymbol, validateName } from "@/lib/market-metadata-validation";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
-import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, STABLECOIN_MISMATCH_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
-import { checkStablecoinUnderlying } from "@/lib/v22/stablecoin-resolve";
+import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, STABLECOIN_MISMATCH_REASON, STABLECOIN_NO_IDENTITY_REASON, STABLECOIN_POOL_MISMATCH_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
+import { checkStablecoinUnderlying, slabPinnedPoolMismatch } from "@/lib/v22/stablecoin-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
 import {
@@ -1015,6 +1015,8 @@ export async function POST(req: NextRequest) {
     );
   }
   const isBypass = !isProd && bypassEnabled && bypassSecret && bypassHeader === bypassSecret;
+  // v2.2: result of the mainnet token-identity check when it was run before the nonce was claimed (reused below, never read twice).
+  let preStable: Awaited<ReturnType<typeof checkStablecoinUnderlying>> | null = null;
 
   if (!isBypass) {
     if (!nonce || !signature) {
@@ -1108,6 +1110,26 @@ export async function POST(req: NextRequest) {
         { error: "Signature verification failed. Ensure you signed the exact market-registration payload with the deployer keypair." },
         { status: 401 }
       );
+    }
+
+    // v2.2: the mainnet token-identity check runs HERE: only after the ed25519 signature has verified against the deployer key (a request
+    // with a missing or bad signature never reaches it, so it makes no mainnet RPC), and BEFORE the nonce is claimed, so a retryable 503
+    // (mainnet RPC down) does not burn the nonce and the client can retry the same signed request. A valid signature only proves the caller
+    // holds SOME keypair, so a self-signed or replayed request does still cost this RPC before the nonce claim rejects it (bounded by the
+    // general per-IP rate limit). Any other verdict is applied at the usual place below. Unparseable keys are left to the 400s below.
+    if (isDevnetV22Enabled()) {
+      let ca: string | null = null;
+      let poolAddr: string | null = null;
+      try {
+        if (mainnet_ca) ca = new PublicKey(mainnet_ca).toBase58();
+        if (dex_pool_address) poolAddr = new PublicKey(dex_pool_address).toBase58();
+        preStable = await checkStablecoinUnderlying({ mainnetCa: ca, pool: poolAddr, symbol, name });
+      } catch {
+        preStable = null;
+      }
+      if (preStable && !preStable.ok && preStable.kind === "unverifiable" && preStable.retryable) {
+        return NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } });
+      }
     }
 
     // Atomically-enough claim the nonce (see lib/playground-nonce-store.ts header for
@@ -1273,11 +1295,13 @@ export async function POST(req: NextRequest) {
   // v2.2: the pool's own tokens and the underlying's on-chain symbol / name, read server-side from mainnet. This closes the
   // pool-only registration (no mainnet_ca): the pool's base mint is resolved and checked, and a pool that cannot be resolved is
   // refused rather than waved through.
-  if (isDevnetV22Enabled() && (canonicalDexPool || canonicalMainnetCa)) {
-    const stable = await checkStablecoinUnderlying({ mainnetCa: canonicalMainnetCa, pool: canonicalDexPool, symbol, name });
+  // A registration with neither a pool nor a mainnet_ca is refused (no token identity to check).
+  if (isDevnetV22Enabled()) {
+    const stable = preStable ?? (await checkStablecoinUnderlying({ mainnetCa: canonicalMainnetCa, pool: canonicalDexPool, symbol, name }));
     if (!stable.ok) {
       if (stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
       if (stable.kind === "mismatch") return NextResponse.json({ error: STABLECOIN_MISMATCH_REASON }, { status: 400 });
+      if (stable.kind === "no-identity") return NextResponse.json({ error: STABLECOIN_NO_IDENTITY_REASON }, { status: 400 });
       return stable.retryable
         ? NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } })
         : NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
@@ -1395,6 +1419,15 @@ export async function POST(req: NextRequest) {
           },
           { status: 400 },
         );
+      }
+
+      // v2.2: the registered pool must be the pool the slab pins on-chain (dex_pool), where the layout carries one. The v17+ wrapper
+      // config has no such field (nothing to contradict); the legacy config does.
+      if (isDevnetV22Enabled() && !isV17) {
+        const pinned = parseConfig(accountInfo.data).dexPool?.toBase58() ?? null;
+        if (slabPinnedPoolMismatch(canonicalDexPool, pinned)) {
+          return NextResponse.json({ error: STABLECOIN_POOL_MISMATCH_REASON }, { status: 400 });
+        }
       }
 
       // Cross-check oracle_authority against on-chain slab config.

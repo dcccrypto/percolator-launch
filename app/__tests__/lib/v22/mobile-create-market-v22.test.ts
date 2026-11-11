@@ -15,6 +15,8 @@ import { METAPLEX_TOKEN_METADATA_PROGRAM_ID_V22 } from "@/lib/v22/sdk";
 
 // The route's own 5 req/min limiter is not under test here.
 vi.mock("@/lib/create-market-rate-limit", () => ({ checkCreateMarketRateLimit: async () => ({ allowed: true, retryAfterSecs: 0 }), CREATE_MARKET_RATE_LIMIT: 5 }));
+// r7: the route now checks the market's underlying (mainnet_ca / pool) against mainnet; these tests are about tx building, not that check.
+vi.mock("@/lib/v22/stablecoin-resolve", () => ({ checkStablecoinUnderlying: async () => ({ ok: true }) }));
 
 const rent = (bytes: number) => (bytes + 128) * 5080;
 const originalNetwork = process.env.NEXT_PUBLIC_DEFAULT_NETWORK;

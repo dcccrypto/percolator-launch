@@ -12,6 +12,8 @@ import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 
 vi.mock("@/lib/get-client-ip", () => ({ getClientIp: () => "127.0.0.1" }));
 vi.mock("@/lib/create-market-rate-limit", () => ({ checkCreateMarketRateLimit: async () => ({ allowed: true, retryAfterSecs: 0 }), CREATE_MARKET_RATE_LIMIT: 5 }));
+// r7: the route now checks the market's underlying (mainnet_ca / pool) against mainnet; these tests are about tx building, not that check.
+vi.mock("@/lib/v22/stablecoin-resolve", () => ({ checkStablecoinUnderlying: async () => ({ ok: true }) }));
 const sentry = vi.hoisted(() => ({ captureException: vi.fn() }));
 vi.mock("@sentry/nextjs", () => sentry);
 

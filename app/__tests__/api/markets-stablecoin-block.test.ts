@@ -96,10 +96,11 @@ describe.each([
       expect(String((await res.json()).error)).not.toMatch(/dollar stablecoin/i);
     });
 
-    it("no mainnet_ca: this gate does not fire (documented gap: a pool-only POST is not resolved to its base mint)", async () => {
+    it("no mainnet_ca and no pool: " + (on ? "refused (no token identity, r7)" : "this gate does not fire"), async () => {
       const { POST } = await import("@/app/api/markets/route");
       const res = await POST(post({ ...BASE }) as unknown as NextRequest);
-      expect(String((await res.json()).error)).not.toMatch(/dollar stablecoin/i);
+      const err = String((await res.json()).error);
+      if (on) { expect(res.status).toBe(400); expect(err).toMatch(/no token identity/i); } else { expect(err).not.toMatch(/token identity/i); }
     });
   });
 

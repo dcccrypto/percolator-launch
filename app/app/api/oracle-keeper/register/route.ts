@@ -104,9 +104,12 @@ export async function POST(req: NextRequest) {
     {
       const stable = await checkStablecoinUnderlying({ mainnetCa: new PublicKey(mainnetCA).toBase58(), symbol });
       if (!stable.ok) {
-        return stable.kind === "stablecoin"
-          ? NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 })
-          : NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
+        if (stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
+        // Fail closed with a retryable error when the mainnet metadata read failed.
+        if (stable.kind === "unverifiable" && stable.retryable) {
+          return NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } });
+        }
+        return NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
       }
     }
 
