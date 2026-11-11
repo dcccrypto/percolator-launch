@@ -53,6 +53,7 @@ export const Footer: FC = () => {
           <div className="flex items-center gap-2.5">
             <Image
               src="/images/logo-icon.png"
+              unoptimized
               alt=""
               width={20}
               height={20}

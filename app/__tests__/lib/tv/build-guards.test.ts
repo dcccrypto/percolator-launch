@@ -246,15 +246,18 @@ describe("Vercel Blob distribution (main)", () => {
 describe("gate + middleware for the library's static files", () => {
   const ON = { PLAYGROUND_GATE_ENABLED: "true", PLAYGROUND_ACCESS_SECRET: "s".repeat(40) };
 
-  it("library + theme CSS pass the gate without a cookie", async () => {
+  it("library + theme CSS are gated without a cookie (only the logged-in chart iframe loads them) and pass with a session", async () => {
+    const { mintSession } = await import("@/lib/playground-access");
+    const cookie = await mintSession("row", 5, ON.PLAYGROUND_ACCESS_SECRET);
     for (const p of [
       "/charting_library/charting_library.standalone.js",
       "/charting_library/sameorigin.html",
       "/charting_library/bundles/runtime.ba95fce24f0291a98470.js",
       "/tv-theme/percolator.css",
     ]) {
-      expect(isExempt(p, "GET"), p).toBe(true);
-      expect(await gateDecision(p, "GET", null, ON)).toBe("pass");
+      expect(isExempt(p, "GET"), p).toBe(false);
+      expect(await gateDecision(p, "GET", null, ON)).toBe("redirect-locked");
+      expect(await gateDecision(p, "GET", cookie, ON)).toBe("pass");
     }
   });
 
@@ -267,13 +270,14 @@ describe("gate + middleware for the library's static files", () => {
     expect(await gateDecision("/trade/x", "GET", null, ON)).toBe("redirect-locked");
   });
 
-  it("the middleware matcher skips the library + theme folders and nothing new", () => {
+  it("the middleware matcher no longer skips the library + theme folders (the gate decides)", () => {
     const src = readFileSync(path.join(APP, "middleware.ts"), "utf8");
     const m = /matcher:\s*\[[\s\S]*?"(\/\(\(\?![^"]+)"/.exec(src);
     expect(m).not.toBeNull();
     const re = new RegExp(`^${m![1].replace(/\\\\/g, "\\")}$`);
-    expect(re.test("/charting_library/bundles/x.js")).toBe(false);
-    expect(re.test("/tv-theme/percolator.css")).toBe(false);
+    expect(re.test("/charting_library/bundles/x.js")).toBe(true);
+    expect(re.test("/tv-theme/percolator.css")).toBe(true);
+    expect(re.test("/_next/static/x.js")).toBe(false);
     expect(re.test("/api/candles/abc")).toBe(true);
     expect(re.test("/trade/abc")).toBe(true);
     expect(re.test("/charting_libraryX/a")).toBe(true);

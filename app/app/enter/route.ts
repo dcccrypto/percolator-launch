@@ -70,13 +70,14 @@ async function handle(req: NextRequest, token: string | null, team: string | nul
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
   // "t" is what percolator.trade sends (main lib/playground-access.ts HANDOFF_PARAM).
-  // The judge code is POST-only (Council r4 N11): in a URL it lands in history, logs and Referer.
-  // A GET carrying ?judge= is refused outright; it does not fall through to another door.
-  if (q.has("judge")) {
-    console.warn("[playground/enter] refused (judge code on GET)");
+  // The team and judge codes are POST-only: in a URL a code lands in history, logs and Referer.
+  // A GET carrying ?team= or ?judge= is refused outright (no cookie); it does not fall through to
+  // another door. The signed handoff token is short-lived and single-use, so it may stay on GET.
+  if (q.has("judge") || q.has("team")) {
+    console.warn("[playground/enter] refused (access code on GET)");
     return finish(req, null);
   }
-  return handle(req, q.get("t") ?? q.get("token") ?? q.get("h"), q.get("team"));
+  return handle(req, q.get("t") ?? q.get("token") ?? q.get("h"), null);
 }
 
 export async function POST(req: NextRequest) {

@@ -590,11 +590,18 @@ export async function middleware(request: NextRequest) {
   // this drops the nonce defense-in-depth layer, a deliberate trade for the
   // devnet playground's load speed. No per-request nonce → HTML is cacheable.
   const response = NextResponse.next();
-  addSecurityHeaders(response);
+  // The TradingView library's files carry their own, stricter CSP from next.config.ts (TV_FRAME_CSP:
+  // connect-src 'self', frame-ancestors 'self', data: fonts). A header set here would replace it, so
+  // leave CSP to next.config for that folder and add the rest.
+  addSecurityHeaders(response, undefined, { skipCsp: isChartingLibraryPath(request.nextUrl.pathname) });
   return response;
 }
 
-function addSecurityHeaders(response: NextResponse, nonce?: string) {
+function isChartingLibraryPath(pathname: string): boolean {
+  return pathname.startsWith("/charting_library/");
+}
+
+function addSecurityHeaders(response: NextResponse, nonce?: string, opts: { skipCsp?: boolean } = {}) {
   // CSP with nonce-based inline script protection
   // - 'unsafe-eval' REMOVED (issue #633): audited all 241 production chunks — zero eval(),
   //   new Function(), or string-arg setTimeout calls found. Wallet adapters (Phantom, Solflare)
@@ -658,7 +665,7 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     "base-uri 'self'",
   ].join("; ");
 
-  response.headers.set("Content-Security-Policy", csp);
+  if (!opts.skipCsp) response.headers.set("Content-Security-Policy", csp);
   // HSTS: enforce HTTPS for 2 years, include subdomains, allow preload list submission.
   // Vercel may add this at the edge, but explicit is defense-in-depth.
   response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
@@ -673,19 +680,14 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
 
 export const config = {
   matcher: [
-    // Image-extension skip is TOP-LEVEL only ([^/]+): a nested /trade/x.png used
-    // to skip middleware entirely and would render the [slab] page shell past
-    // the playground gate. public/ asset folders are skipped by name instead.
-    // charting_library/ + tv-theme/: the TradingView library's ~2,300 static
-    // files and our theme CSS for it (the chart iframe loads them) — no gate
-    // redirect inside the iframe, no per-asset middleware cost. Their headers
-    // (CSP for the iframe document, caching) come from next.config.ts.
-    // Council r4 R3-12: every prefix skip applies only when the rest of the path has no
-    // dot-segment / encoded dot-slash / backslash, so `/images/../trade` is NOT skipped
-    // and reaches the gate. Real asset URLs never contain those sequences.
-    // Council r5 #6: every file-like skip is ANCHORED (`favicon\\.ico$`, `_next/image$`) and
-    // directory skips need their trailing slash, so `/favicon.ico/x`, `/favicon.icox`,
-    // `/_next/staticx` and `/_next/image/x` reach the gate instead of skipping middleware.
-    "/((?!(?:_next/static/|(?:images|icons|audio|token-metadata|charting_library|tv-theme)/)(?!.*(?:\\.\\.|%2[eEfF]|%5[cC]|\\\\))|_next/image$|favicon\\.ico$|[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Only build output that is public by construction skips the proxy: /_next/static/ and the
+    // exact /_next/image. There are no extension or public-folder skips: every other path (public/
+    // assets, /favicon.ico, /x.txt, /.well-known/*, /_vercel/*) reaches the gate, which exempts an
+    // explicit list of exact paths (lib/playground-gate.ts).
+    // Council r4 R3-12: the /_next/static/ skip applies only when the rest of the path has no
+    // dot-segment / encoded dot-slash / backslash, so `/_next/static/../trade` is NOT skipped.
+    // Council r5 #6: `_next/image$` is anchored and the directory skip needs its trailing slash, so
+    // `/_next/image/x` and `/_next/staticx` reach the gate.
+    "/((?!_next/static/(?!.*(?:\\.\\.|%2[eEfF]|%5[cC]|\\\\))|_next/image$).*)",
   ],
 };

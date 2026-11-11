@@ -6,8 +6,8 @@
  * Contract with the gate (percolator.trade/playground):
  *   GET  /enter?token=<handoff>                     (also accepts ?h=)
  *   POST /enter   form field `token` (or `h`)       (keeps the token out of URLs/logs)
- *   GET  /enter?team=<PLAYGROUND_TEAM_BYPASS_SECRET> (team only — see docs/PLAYGROUND-ACCESS.md)
- *   GET  /enter?judge=<PLAYGROUND_JUDGE_ACCESS_CODE> (hackathon judges — see docs/PLAYGROUND-JUDGE-ACCESS.md)
+ *   POST /enter  form field team=<PLAYGROUND_TEAM_BYPASS_SECRET> (POST only; GET ?team= is refused — see docs/PLAYGROUND-ACCESS.md)
+ *   POST /enter  form field judge=<PLAYGROUND_JUDGE_ACCESS_CODE> (POST only; hackathon judges — see docs/PLAYGROUND-JUDGE-ACCESS.md)
  *
  * Success → 303 to "/" with Set-Cookie pg_access (HttpOnly; Secure; SameSite=Lax;
  * Path=/; Max-Age=86400). Anything else → 303 to "/locked", with no reason given
