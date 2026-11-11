@@ -180,6 +180,7 @@ export const Header: FC = () => {
           >
             <Image
               src="/images/logo-icon.png"
+              unoptimized
               alt=""
               width={28}
               height={28}

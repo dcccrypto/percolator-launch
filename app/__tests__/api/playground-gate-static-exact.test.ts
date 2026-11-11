@@ -70,6 +70,10 @@ const ABUSE = [
   "/_next/static/../../trade",
   "/_next/static/%2e%2e/trade",
   "/images/../trade",
+  // Not files this app serves; no pattern exemption any more.
+  "/favicon.ico",
+  "/manifest.webmanifest",
+  "/images/a.png",
 ];
 
 describe("exact static paths only (no cookie)", () => {
@@ -77,7 +81,7 @@ describe("exact static paths only (no cookie)", () => {
     expect(await edge(p)).toBe("locked");
   });
 
-  it.each(["/favicon.ico", "/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/icon.png", "/_next/static/chunks/a.js", "/_next/image", "/images/a.png"])(
+  it.each(["/robots.txt", "/sitemap.xml", "/icon.png", "/_next/static/chunks/a.js", "/_next/image"])(
     "legit %s is still served without a cookie",
     async (p) => {
       expect(await edge(p)).not.toBe("locked");

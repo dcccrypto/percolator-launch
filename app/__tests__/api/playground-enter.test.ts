@@ -143,13 +143,19 @@ describe("GET/POST /enter route", () => {
     }
   });
 
-  it("team bypass via ?team=", async () => {
-    const { GET } = await route();
-    const ok = await GET(new NextRequest(`https://pg.test/enter?team=${TEAM}`));
+  it("team bypass via POST form field only", async () => {
+    const { GET, POST } = await route();
+    const post = (team: string) =>
+      POST(new NextRequest("https://pg.test/enter", { method: "POST", body: new URLSearchParams({ team }), headers: { "content-type": "application/x-www-form-urlencoded" } }));
+    const ok = await post(TEAM);
     expect(new URL(ok.headers.get("location")!).pathname).toBe("/");
     expect(ok.headers.get("set-cookie")).toMatch(/^pg_access=/);
-    const bad = await GET(new NextRequest(`https://pg.test/enter?team=${"n".repeat(40)}`));
+    const bad = await post("n".repeat(40));
     expect(new URL(bad.headers.get("location")!).pathname).toBe("/locked");
+    expect(bad.headers.get("set-cookie")).toBeNull();
+    const viaGet = await GET(new NextRequest(`https://pg.test/enter?team=${TEAM}`));
+    expect(new URL(viaGet.headers.get("location")!).pathname).toBe("/locked");
+    expect(viaGet.headers.get("set-cookie")).toBeNull();
   });
 
   it("the route replays are refused across requests", async () => {

@@ -118,6 +118,7 @@ export const EARN_WITHDRAW_COPY = {
   stepRequest: "Step 1 of 2: request. Your shares are set aside now; you collect the money in step 2 after a short wait.",
   stepCollect: "Step 2 of 2: collect. Check today's price first, then confirm to receive the money.",
   clamped: (all: string) => `That is more than you have, so this withdraws your whole position (${all}).`,
+  overShares: (have: string) => `That is more than your ${have} shares. Enter up to ${have}, or switch to USDC.`,
   collecting: "Collecting…",
   finish: "Finish withdrawal",
   payoutPrompt: "Approve payout (2 of 2)",

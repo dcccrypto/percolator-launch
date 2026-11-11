@@ -109,7 +109,6 @@ describe("gate ON", () => {
     ["GET", "/opengraph-image"],
     ["GET", "/robots.txt"],
     ["GET", "/token-metadata/sim-usdc.json"],
-    ["GET", "/chart-empty-state.svg"],
     ["GET", "/api/health"],
     ["HEAD", "/api/health"],
     ["GET", "/api/playground/registered-markets"],
@@ -230,11 +229,11 @@ describe("middleware matcher (compiled by Next's own getMiddlewareMatchers)", ()
     return ms.some((m) => new RegExp(m.regexp).test(p));
   }
 
-  it.each(["/", "/trade/abc", "/trade/x.png", "/earn/a/b.svg", "/api/markets", "/locked", "/enter"])("runs on %s", async (p) => {
+  it.each(["/", "/trade/abc", "/trade/x.png", "/earn/a/b.svg", "/api/markets", "/locked", "/enter", "/favicon.ico", "/icon.png", "/images/logo.png", "/x.txt", "/.well-known/x", "/_vercel/x"])("runs on %s", async (p) => {
     expect(await runs(p)).toBe(true);
   });
 
-  it.each(["/_next/static/chunks/a.js", "/_next/image", "/favicon.ico", "/icon.png", "/chart-empty-state.svg", "/images/logo.png", "/icons/chart-empty.svg", "/audio/percolator.mp3", "/token-metadata/sim-usdc.json"])(
+  it.each(["/_next/static/chunks/a.js", "/_next/image"])(
     "skips %s",
     async (p) => {
       expect(await runs(p)).toBe(false);

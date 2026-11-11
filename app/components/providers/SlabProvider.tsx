@@ -437,6 +437,8 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
             loading: false,
             error: null,
             programId: owner ?? s.programId,
+            // A WS update must not clear an HTTP-read-failure flag; only a successful poll does.
+            readFailing: s.readFailing,
             wrapperConfigV17,
             assetProfile,
             adlFactors,
@@ -468,6 +470,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           slabAddress, raw: data, header, config, engine, params, accounts,
           loading: false, error: null,
           programId: owner ?? s.programId,
+          readFailing: s.readFailing, // only a successful HTTP poll clears it, not a WS update
           wrapperConfigV17: null,
           assetProfile: null,
           adlFactors: null,
