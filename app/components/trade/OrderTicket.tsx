@@ -100,7 +100,7 @@ import { checkSignatureLanded, timedOutSignature } from "@/lib/tx";
 import { watchPendingSignature } from "@/lib/pending-signature";
 import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
-import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
+import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, shrinkSizeInput, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
 import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
 import { balanceMaxQ, buyingPowerAtoms, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
@@ -967,6 +967,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // can exceed the order's own margin (a higher leverage needs LESS margin but the same gate equity). An order the in-market balance
   // backs but the gate does not is a deposit order too: the ticket bundles the gate's shortfall, so the Max it offers (bounded at the equity
   // the wallet could add) is achievable at every leverage. Independent of fundingMode (which it feeds).
+  // The matcher's requested fee on this order: the Max cap's gate (lib/limits/ticket.ts) charges it, so the deposit's gate must too.
+  const gateQuoteFeeBps = (() => {
+    const probe = feeProbe(positionSize);
+    return probe ? deriveTicketLimits(probe).fee?.requestedBps ?? 0n : 0n;
+  })();
   const growthEquityNow = userAccount && !needsAccount
     ? capital +
       (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
@@ -976,7 +981,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     !mockMode && !!marketLimits.growth && !!userAccount && marginNative > 0n && positionSize > 0n &&
     !isReducingOrder(existingPositionSize, direction, positionSize) &&
     (() => {
-      const g = growthGate({ view: marketLimits.growth as NonNullable<typeof marketLimits.growth>, direction, takerEffQ: existingPositionSize, askQ: positionSize, takerEquity: growthEquityNow });
+      const g = growthGate({ view: marketLimits.growth as NonNullable<typeof marketLimits.growth>, direction, takerEffQ: existingPositionSize, askQ: positionSize, takerEquity: growthEquityNow, quoteFeeBps: gateQuoteFeeBps });
       return !g.closed && g.extraEquityNeeded > 0n;
     })();
   const fundingMode = !mockMode && connected && !accountPending && walletHasTokens && (needsAccount || needsDeposit || exceedsBalance || needsGrowthDeposit);
@@ -1003,7 +1008,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const growthDepositFloor =
     !fundingMode || !hasOrder || !marketLimits.growth || isReducingOrder(existingPositionSize, direction, positionSize)
       ? 0n
-      : growthDepositFloorAtoms({ view: marketLimits.growth, direction, takerEffQ: existingPositionSize, askQ: positionSize, equityNow: growthEquityNow, fundFee });
+      : growthDepositFloorAtoms({ view: marketLimits.growth, direction, takerEffQ: existingPositionSize, askQ: positionSize, equityNow: growthEquityNow, fundFee, quoteFeeBps: gateQuoteFeeBps });
   const marginShort = growthDepositFloor > marginShortEngine ? growthDepositFloor : marginShortEngine;
   const fundNeededAtoms = fundingMode && hasOrder ? fundDepositAtoms(marginShort, fundFee, walletAtaBalance ?? 0n, decimals) : 0n;
   const fundMinAtoms = fundingMode && hasOrder ? marginShort + fundFee : 0n;
@@ -1254,12 +1259,30 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Never on a paused side: there is nothing to reduce to, and the paused label says why.
   const clampTarget =
     !roomUnknown && !sidePaused[direction] && marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
+  // The size box holds a USD or token string that is re-divided by the ticking price and rounded, so one application of the room can
+  // leave the order a hair over it (a tick between Max and the next render, or a rounding up): the clamp must then run AGAIN, one display
+  // step lower, until the order is within the room. It used to fire only when the room changed, so a Max click that drifted over left the
+  // ticket blocked ("Over the max fillable size") with nothing to clear it. Keyed on the size and the price too, never loops: each pass
+  // lowers the string or ends.
+  const clampPasses = useRef(0);
   useEffect(() => {
-    if (clampTarget === null || !livePriceE6 || livePriceE6 <= 0n) return;
-    applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6, lotExp));
+    if (clampTarget === null) {
+      clampPasses.current = 0;
+      return;
+    }
+    if (!livePriceE6 || livePriceE6 <= 0n) return;
+    const base = sizeQToInput(clampTarget, sizeUnit, livePriceE6, lotExp);
+    let next = shrinkSizeInput(base, sizeUnit, clampPasses.current);
+    // Re-applying what the box already holds would change nothing and never run this effect again: take one more step down.
+    while (next === sizeInput && next !== "0.00" && next !== "0") {
+      clampPasses.current += 1;
+      next = shrinkSizeInput(base, sizeUnit, clampPasses.current);
+    }
+    clampPasses.current += 1;
+    applySize(next);
     setClampedToQ(clampTarget);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only when a new clamp is required
-  }, [clampTarget]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a new clamp is required when the room, the size or the price moves
+  }, [clampTarget, sizeInput, livePriceE6, sizeUnit]);
   useEffect(() => {
     if (clampedToQ === null) return;
     const t = setTimeout(() => setClampedToQ(null), 4000);
@@ -2576,7 +2599,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </div>
           {!fundOverWallet && !fundTooSmall && (
             <p data-testid="fund-explain" className="mt-1 text-[11px] leading-snug text-[var(--text-secondary)]">
-              {`${belowImFloor ? `New positions on this market need at least $${usd2(imFloor, decimals).replace(/\.00$/, "")} of margin. ` : ""}Covers ${formatTokenAmount(marginShort, decimals, 2)} ${collateralSymbol} margin + ${formatTokenAmount(fundFee, decimals, 2)} ${collateralSymbol} fee${fundAtoms > marginShort + fundFee ? `, plus ${fundEnteredAtoms > 0n ? `${formatTokenAmount(fundAtoms - marginShort - fundFee, decimals, 2)} ${collateralSymbol} extra that stays available in your account` : `a ${formatTokenAmount(fundAtoms - marginShort - fundFee, decimals, 2)} ${collateralSymbol} cushion for price moves before the fill`}` : ""}, for this ${formatTokenAmount(notionalNative, decimals, 2)} ${collateralSymbol} position${!needsAccount && !vsPosition && availableBalance > 0n ? `; ${formatTokenAmount(availableBalance, decimals, 2)} ${collateralSymbol} already on this market` : ""}. Anything unused stays in your account.`}
+              {`${belowImFloor ? `New positions on this market need at least $${usd2(imFloor, decimals).replace(/\.00$/, "")} of margin. ` : ""}Covers ${formatTokenAmount(marginShort, decimals, 2)} ${collateralSymbol} ${growthDepositFloor > marginShortEngine ? "of the collateral this market requires for this size" : "margin"} + ${formatTokenAmount(fundFee, decimals, 2)} ${collateralSymbol} fee${fundAtoms > marginShort + fundFee ? `, plus ${fundEnteredAtoms > 0n ? `${formatTokenAmount(fundAtoms - marginShort - fundFee, decimals, 2)} ${collateralSymbol} extra that stays available in your account` : `a ${formatTokenAmount(fundAtoms - marginShort - fundFee, decimals, 2)} ${collateralSymbol} cushion for price moves before the fill`}` : ""}, for this ${formatTokenAmount(notionalNative, decimals, 2)} ${collateralSymbol} position${!needsAccount && !vsPosition && availableBalance > 0n ? `; ${formatTokenAmount(availableBalance, decimals, 2)} ${collateralSymbol} already on this market` : ""}. Anything unused stays in your account.`}
             </p>
           )}
           {fundOverWallet && (

@@ -232,3 +232,30 @@ describe("N2 mounted: the deposit floor uses conservative equity (review of #377
     });
   }
 });
+
+describe("r8 (review of #3804, LOW-A): an order the in-market balance backs but the growth gate does not is a deposit order", () => {
+  // 200 long open, 80 USDC: adding 100 at 10x needs ~10 USDC of margin (inside what is free) but the whole 300 position's dynamic IMR
+  // needs more equity than 33. The ticket must bundle the gate's shortfall (a Deposit field and a Deposit button), not offer a plain
+  // order the program refuses. Fails without `|| needsGrowthDeposit` in fundingMode.
+  const CAPITAL = 80_000_000n;
+  const POS = 200n * LOT;
+  const ADD = 100n * LOT;
+  beforeEach(() => {
+    mocks.useUserAccount.mockReturnValue({ idx: 3, account: { capital: CAPITAL, positionSize: POS, entryPrice: 1_000_000n, pnl: 0n, feeCredits: 0n } });
+  });
+
+  it("a deposit is bundled for the gate shortfall, and the deposit label names the collateral the market requires", async () => {
+    const gate = growthGate({ view: view(), direction: "long", takerEffQ: POS, askQ: ADD, takerEquity: CAPITAL });
+    expect(gate.passes).toBe(false);
+    await mount();
+    fireEvent.change(levInput(), { target: { value: "10" } });
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "100" } });
+    await waitFor(() => expect(document.getElementById("first-trade-deposit")).not.toBeNull());
+    const field = document.getElementById("first-trade-deposit") as HTMLInputElement;
+    const quoted = BigInt(Math.round(Number(field.placeholder.replace(/,/g, "")) * 1e6));
+    expect(quoted).toBeGreaterThanOrEqual(gate.extraEquityNeeded);
+    expect(screen.getByTestId("trade-submit").textContent).toMatch(/deposit/i);
+    // LOW-D: the amount is gate equity, not "margin"
+    expect(screen.getByTestId("fund-explain").textContent).toContain("of the collateral this market requires for this size");
+  });
+});
