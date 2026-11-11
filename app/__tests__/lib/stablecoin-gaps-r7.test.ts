@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * r7: widen the v2.2 stablecoin block.
- *  - tickers / names that were not refused (USD+, acUSD, CASH, USX, eUSX, GHO, FRAX, BOLD) or only warned (TUSD, BUSD, USDT0, RLUSD, USDtb, JupUSD);
+ *  - tickers / names that were not refused (USD+, acUSD, eUSX, GHO, FRAX; BOLD / USX / CASH are mint-only since r8, see stablecoin-scope-r8.test.ts) or only warned (TUSD, BUSD, USDT0, RLUSD, USDtb, JupUSD);
  *  - homoglyph / zero-width / fullwidth tickers fold to the real ticker, without false positives on ordinary tokens;
  *  - the newly verified mints;
  *  - sUSDe, USDY and sDAI stay blocked;
@@ -19,7 +19,7 @@ beforeEach(() => __setDevnetV22ForTest(true));
 afterAll(() => __setDevnetV22ForTest(null));
 
 describe("newly refused tickers", () => {
-  it.each(["USD+", "usd+", "USD +", "acUSD", "ACUSD", "CASH", "cash", "USX", "eUSX", "GHO", "FRAX", "BOLD", "TUSD", "BUSD", "USDT0", "RLUSD", "USDtb", "JupUSD", "JUPUSD", "sRLUSD", "wUSDtb"])(
+  it.each(["USD+", "usd+", "USD +", "acUSD", "ACUSD", "eUSX", "GHO", "FRAX", "TUSD", "BUSD", "USDT0", "RLUSD", "USDtb", "JupUSD", "JUPUSD", "sRLUSD", "wUSDtb"])(
     "symbol %s is a hard block",
     (symbol) => {
       expect(stablecoinIdentityVerdict({ symbol })).toBe("block");
@@ -50,7 +50,7 @@ describe("homoglyph / invisible-character tickers", () => {
     ["Cyrillic Ѕ (U+0405) in USDC", "UЅDC"],
     ["Cyrillic С (U+0421) in USDC", "USDС"],
     ["Cyrillic U-less: Cyrillic Т in USDT", "USDТ"],
-    ["Greek Ο in USDe-like CASH? Greek Α in CASH", "CΑSH"],
+    ["Greek Α in FRAX", "FRΑX"],
     ["Cyrillic lower с in usdc", "usdс"],
     ["fullwidth USDC", "ＵＳＤＣ"],
     ["zero-width space inside USDC", "US​DC"],
@@ -79,12 +79,12 @@ describe("homoglyph / invisible-character tickers", () => {
     expect(foldIdentity("BONK")).toBe("BONK");
   });
 
-  it.each(["ТОКЕН", "ΑΛΦΑ", "ドル", "美元", "الدولار", "ДАИ", "БОЛД", "\u{1F680}", "SOL​", "ÉCLAIR", "BONK", "WIF", "JUP", "CASHCAT", "SCASH", "XCASH", "GHOST", "BOLDER", "FRAXIL", "USDUC", "USDP", "USDARK", "JUST", "BUST", "TRUST", "CUSD1", "USDT0X", "USXR", "TUSDC1", "BUSDRIVER"])(
+  it.each(["ТОКЕН", "ΑΛΦΑ", "ドル", "美元", "الدولار", "ДАИ", "БОЛД", "\u{1F680}", "SOL​", "ÉCLAIR", "BONK", "WIF", "JUP", "CASH", "cash", "USX", "BOLD", "CΑSH", "ВOLD", "ＵＳＸ", "CASHCAT", "SCASH", "XCASH", "GHOST", "BOLDER", "FRAXIL", "USDUC", "USDP", "USDARK", "JUST", "BUST", "TRUST", "CUSD1", "USDT0X", "USXR", "TUSDC1", "BUSDRIVER"])(
     "ordinary token %s is NOT a hard block (no false positive)",
     (symbol) => expect(stablecoinIdentityVerdict({ symbol })).not.toBe("block"),
   );
 
-  it.each(["Bold Fox", "Cash Cat", "Ghost", "Frax Fan Club", "Solana Cash Machine", "Frozen Frax", "Dollar Dog", "USD Coin Maxi"])(
+  it.each(["Bold", "Cash", "USX", "Bold Fox", "Cash Cat", "Ghost", "Frax Fan Club", "Solana Cash Machine", "Frozen Frax", "Dollar Dog", "USD Coin Maxi"])(
     "ordinary name %s is NOT a hard block",
     (name) => expect(stablecoinIdentityVerdict({ symbol: "ZZZ", name })).not.toBe("block"),
   );

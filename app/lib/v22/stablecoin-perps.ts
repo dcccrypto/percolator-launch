@@ -47,11 +47,15 @@ export const STABLECOIN_UNVERIFIABLE_REASON =
 /** Normalised (upper-case, alphanumerics only) tickers of the verified USD stables. USDP / USDD / USDL / USDX are left out on purpose: live memecoins use them. */
 const STABLE_TICKERS = ["USDC", "USDT", "PYUSD", "USDS", "FDUSD", "USDE", "USDG", "DAI", "UXD", "USDH", "USDY", "AUSD", "USD1", "HYUSD", "FRXUSD", "RLUSD", "USDTB", "JUPUSD", "USDT0"];
 /**
- * Tickers that are ordinary words or short and so are matched EXACTLY only (no wrapper prefix / bridge suffix: "SCASH", "XCASH", "BBOLD",
- * "GHOST" are other things). Added 2026-11-11: USD+ (Overnight), acUSD (Allbridge cUSD), CASH, USX / eUSX (Solstice), GHO (Aave), FRAX, BOLD (Liquity),
- * TUSD, BUSD. "USD+" is matched on its raw form (normalising would reduce it to the bare "USD"), see isUsdPlus.
+ * Tickers that are ordinary words or short and so are matched EXACTLY only (no wrapper prefix / bridge suffix: "GHOST" is another thing).
+ * Added 2026-11-11: USD+ (Overnight), acUSD (Allbridge cUSD), eUSX (Solstice), GHO (Aave), FRAX, TUSD, BUSD. "USD+" is matched on its raw form
+ * (normalising would reduce it to the bare "USD"), see isUsdPlus.
+ *
+ * r8: BOLD, USX and CASH are deliberately NOT here. They are ordinary words / short tickers that unrelated memecoins use, so they are
+ * blocked BY MINT ONLY: the verified USX and CASH mints are in STABLECOIN_MINT_LIST (Liquity BOLD has no Solana mint). The name phrases
+ * for the bare words are gone for the same reason; the qualified names ("Solstice USX", "Liquity BOLD") are still refused.
  */
-const EXACT_ONLY_TICKERS: ReadonlySet<string> = new Set(["ACUSD", "CASH", "USX", "EUSX", "GHO", "FRAX", "BOLD", "TUSD", "BUSD"]);
+const EXACT_ONLY_TICKERS: ReadonlySet<string> = new Set(["ACUSD", "EUSX", "GHO", "FRAX", "TUSD", "BUSD"]);
 /** Wrapper / bridge prefixes (s = staked, w = wrapped, a = aave / allbridge, ae/ap/ab/ac/aa = Allbridge chains, j/jl = Jupiter lend, ...). */
 const WRAP_PREFIXES = ["W", "S", "B", "A", "X", "J", "JL", "ST", "AE", "AP", "AB", "AC", "AA"];
 /** Bridge suffixes (Portal: et / po / bs / av / so, and the ".e" form which normalises to a trailing E for USDC / USDT only). */
@@ -60,10 +64,10 @@ const STABLE_SYMBOL_RE = new RegExp(`^(?:${WRAP_PREFIXES.join("|")})?(?:${STABLE
 
 const NAME_PHRASES = [
   "usd coin", "usdc", "tether usd", "tether usdt", "usdt", "tether", "paypal usd", "pyusd", "first digital usd", "fdusd", "global dollar", "usdg",
-  "dai", "dai stablecoin", "ethena usde", "usde", "staked usde", "sky dollar", "usds", "world liberty financial usd", "ondo us dollar yield", "usdy",
+  "dai", "dai stablecoin", "savings dai", "ethena usde", "usde", "staked usde", "sky dollar", "usds", "world liberty financial usd", "ondo us dollar yield", "usdy",
   "hubble stablecoin", "usdh hubble stablecoin", "uxd stablecoin", "agora dollar", "hylo usd", "frax usd",
-  "usd+", "overnight usd+", "wrapped cusd", "cusd", "cash", "usx", "solstice usx", "eusx", "solstice eusx", "gho", "aave gho", "frax", "frax dollar", "legacy frax dollar",
-  "bold", "liquity bold", "liquity usd", "tusd", "trueusd", "busd", "binance usd", "binance-peg busd", "usdt0", "rlusd", "ripple usd",
+  "usd+", "overnight usd+", "wrapped cusd", "cusd", "solstice usx", "eusx", "solstice eusx", "gho", "aave gho", "frax", "frax dollar", "legacy frax dollar",
+  "liquity bold", "liquity usd", "tusd", "trueusd", "busd", "binance usd", "binance-peg busd", "usdt0", "rlusd", "ripple usd",
   "usdtb", "ethena usdtb", "jupusd", "jupiter usd",
 ];
 /** A whole-name match: [Wrapped] <phrase> [(parenthetical)...] — "Wrapped USDC (Allbridge from Ethereum)", "USD Coin (Portal from BSC)". */

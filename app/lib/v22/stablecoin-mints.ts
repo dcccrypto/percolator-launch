@@ -12,10 +12,16 @@
  *   SLTL   = solana-labs/token-list `solana.tokenlist.json` (the legacy list; covers the Wormhole/Portal and Allbridge mints)
  *
  * No Solana mint was found for GHO, BOLD, TUSD, BUSD, USDT0, RLUSD or USDtb (Jupiter token search returns only unverified look-alike
- * launches for them, which are deliberately NOT listed): those are covered by the ticker / name rule in ./stablecoin-perps.
+ * launches for them, which are deliberately NOT listed): GHO, TUSD, BUSD, USDT0, RLUSD and USDtb are covered by the ticker / name rule in
+ * ./stablecoin-perps. BOLD, USX and CASH are NOT ticker-blocked (unrelated memecoins use those exact tickers): USX and CASH are blocked by
+ * their verified mint below, and BOLD has no Solana mint so it is not blocked at all until one is verified (only the full name
+ * "Liquity BOLD" / "Liquity USD" is refused).
+ *
+ * 41 entries: 32 (2026-11-10) + 7 (r7, 2026-11-11, #3798) + 2 (r8, 2026-11-11: sUSD, syrupUSDC). The keeper copy
+ * (percolator-oracle-keeper src/cross-cluster/stablecoin-mints.ts) must hold the same 41 addresses.
  *
  * Policy: USD only. EURC and other non-USD fiat stables are NOT blocked. Yield-bearing / NAV-accruing USD tokens (sUSDe, USDY)
- * ARE blocked: their price is a deterministic accrual on a dollar, so a perp on them has no independent underlying.
+ * ARE blocked (sUSDe, USDY, sDAI, and the r8 additions sUSD and syrupUSDC): their price is a deterministic accrual on a dollar, so a perp on them has no independent underlying.
  * Devnet: the app's USDC-like devnet mints (Sim-USDC, Circle devnet USDC) are collateral, never a perp underlying
  * identity (`mainnet_ca`), and were not in the original list, so they are intentionally not here.
  */
@@ -68,4 +74,7 @@ export const STABLECOIN_MINT_LIST: readonly StablecoinMint[] = [
   { address: "JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD", symbol: "JupUSD", name: "Jupiter USD", source: "CG jupusd; JUP stable (verified); CHAIN mint + Metaplex Jupiter USD / JupUSD" },
   { address: "EwxNF8g9UfmsJVcZFTpL9Hx5MCkoQFoJi6XNWzKf1j8e", symbol: "acUSD", name: "Wrapped CUSD (Allbridge from Celo)", source: "SLTL acUSD; CHAIN mint (no Metaplex account)" },
   { address: "FR87nWEUxVgerFGhZM8Y4AggKGLnaXswr1Pd8wZ4kZcp", symbol: "FRAX", name: "Frax (Portal / Wormhole)", source: "SLTL FRAX (Frax (Portal)); CHAIN mint + Metaplex Frax (Wormhole) / FRAX" },
+  // Added 2026-11-11 (r8). Each: getAccountInfo on the Solana public RPC + on-chain metadata, the issuer's docs page, and Jupiter + CoinGecko.
+  { address: "susdabGDNbhrnCa6ncrYo81u4s9GM8ecK2UwMyZiq4X", symbol: "sUSD", name: "Solayer USD (yield-bearing USD)", source: "ISSUER docs.solayer.org/susd/yield-bearing-stablecoin/what-is-susd (Token Address, Token-2022); CG solayer-usd; JUP verified yb; CHAIN Token-2022 metadata Solayer USD / sUSD" },
+  { address: "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj", symbol: "syrupUSDC", name: "Syrup USDC (Maple, yield-bearing USD)", source: "ISSUER docs.maple.finance/integrate/crosschain/syrupusd-crosschain (Solana tab, Token); CG syrupusdc; JUP verified yb; CHAIN SPL mint" },
 ];
