@@ -743,6 +743,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   // Reset form state on market switch (mirrors TradeForm's bug #1a12dab5 fix).
   useEffect(() => {
+    maxPinned.current = null;
     setDirection("long");
     setSizeInput("");
     resetSizeText(); // forget a refused "-5"/"abc" too, or it comes back in the cleared box
@@ -782,8 +783,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   );
 
   /** Set the size WITHOUT clearing the status slot (the ticket's own clamp). */
-  /** True while the size box holds what the Max chip filled: it is then re-pinned to the live Max on every tick (r8). */
-  const maxPinned = useRef(false);
+  /**
+   * r8: the Max pin. Set ONLY by the Max chip; while it holds, the size box is re-pinned to the live Max on every tick. It is valid only
+   * while the user's last size action was Max on the same side, unit and market: `written` is the exact string the pin last put in the box,
+   * so any other writer (a post-submit clear, a market reset, one lot, a % chip) leaves the box different and the pin is dead at once,
+   * and every such writer also clears it explicitly. A leverage change does NOT clear it: the size was Max, so it follows the Max at the
+   * new leverage (Max is a function of leverage); typing, a %, a unit switch, a direction switch, a submit or a market switch end it.
+   */
+  const maxPinned = useRef<{ dir: "long" | "short"; unit: "token" | "usd"; written: string } | null>(null);
   const applySize = useCallback(
     (val: string) => {
       const cleaned = sanitizeDecimalInput(val);
@@ -798,7 +805,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setRefusal(null);
       setResult(null);
       setClampedToQ(null);
-      maxPinned.current = false; // a typed size is the trader's own: Max no longer owns it
+      maxPinned.current = null; // a typed size is the trader's own: Max no longer owns it
       // A finished timeout outcome was about the old size; a running watch stays on screen.
       setPendingTx((p) => (p?.state === "watching" ? p : null));
       applySize(val);
@@ -823,12 +830,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setResult(null);
     setClampedToQ(null);
     setPendingTx((p) => (p?.state === "watching" ? p : null));
+    maxPinned.current = null;
     setSizeUnit("token");
     setSizeInput(oneLot);
     recomputeFromSize(oneLot, "token", leverage);
   }, [livePriceE6, lotExp, leverage, recomputeFromSize]);
 
   const toggleSizeUnit = useCallback(() => {
+    maxPinned.current = null;
     setSizeUnit((prev) => {
       const next = prev === "token" ? "usd" : "token";
       const n = parseFloat(sizeInput);
@@ -871,6 +880,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const setSizePercent = useCallback(
     (pct: number) => {
       if (tradableBalance <= 0n) return;
+      maxPinned.current = null;
       let marginAmount = (tradableBalance * BigInt(pct)) / 100n;
       if (marginAmount === 0n && pct > 0) marginAmount = 1n;
       const marginStr = formatTokenAmount(marginAmount, decimals);
@@ -1283,6 +1293,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       next = shrinkSizeInput(base, sizeUnit, clampPasses.current);
     }
     clampPasses.current += 1;
+    if (maxPinned.current && maxPinned.current.written === sizeInput) maxPinned.current.written = next; // the clamp keeps a live pin alive
     applySize(next);
     setClampedToQ(clampTarget);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new clamp is required when the room, the size or the price moves
@@ -1291,12 +1302,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // the room nor leave it stranded far under. Submit still checks the room (overFillable) on whatever the box holds.
   // Only when the MARKET ROOM is what binds Max (a balance-bound Max does not drift over the room, and keeps filling the whole balance).
   const maxIsRoomBound = !roomUnknownRaw && marketMaxQ !== null && displayMaxQ !== null && displayMaxQ >= marketMaxQ;
-  const pinTargetQ = maxPinned.current && maxIsRoomBound && displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n && !sidePaused[direction]
+  const pin = maxPinned.current;
+  const pinLive = pin !== null && pin.dir === direction && pin.unit === sizeUnit && pin.written === sizeInput;
+  const pinTargetQ = pinLive && maxIsRoomBound && displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n && !sidePaused[direction]
     ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6) : null;
   useLayoutEffect(() => {
     if (pinTargetQ === null || !livePriceE6 || livePriceE6 <= 0n) return;
     const next = sizeQToInput(pinTargetQ, sizeUnit, livePriceE6, lotExp);
-    if (next !== sizeInput) applySize(next);
+    if (next !== sizeInput) {
+      if (maxPinned.current) maxPinned.current.written = next;
+      applySize(next);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-pin when the target, the price or the unit moves
   }, [pinTargetQ, livePriceE6, sizeUnit]);
   useEffect(() => {
@@ -1367,7 +1383,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   });
   // Row 5 (LIMIT): the selected side is paused and the other is open => select the open one.
   useEffect(() => {
-    if (ticketState.autoSelect) setDirection(ticketState.autoSelect);
+    if (ticketState.autoSelect) { maxPinned.current = null; setDirection(ticketState.autoSelect); }
   }, [ticketState.autoSelect]);
   // Row 2: ADL reduce-only moves the ticket to Close when it starts (the Open tab says why).
   const adlWasOn = useRef(false);
@@ -1396,6 +1412,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     snapshotLimitPriceE6?: bigint,
   ) {
     const effectiveSize = snapshotSize ?? positionSize;
+    maxPinned.current = null; // a submit (sent, refused or failed) ends the Max pin: the box is the trader's order now
     // SILENT-1: every exit of this handler before the wallet leaves a visible line (it used to just return).
     if (!marginInput) { setHumanError("Enter an amount to trade. Nothing was sent."); return; }
     if (effectiveSize <= 0n) {
@@ -1430,7 +1447,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
     if (mockMode) {
       setTradePhase("submitting");
-      setTimeout(() => { setTradePhase("confirming"); setMarginInput(""); setSizeInput(""); resetSizeText(); setFundInput(""); }, 800);
+      setTimeout(() => { setTradePhase("confirming"); maxPinned.current = null; setMarginInput(""); setSizeInput(""); resetSizeText(); setFundInput(""); }, 800);
       setTimeout(() => setTradePhase("idle"), 2000);
       return;
     }
@@ -1615,6 +1632,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       recordCloseTx(slabAddress, sig, Date.now(), false, existingPositionSize === 0n ? "Position opened." : sameDirection ? "Position increased." : "Order placed.");
       setEngineLockError(null);
       setMarginInput("");
+      maxPinned.current = null;
       setSizeInput("");
       resetSizeText();
       setFundInput("");
@@ -1787,6 +1805,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           setPendingTx({ sig: timedOutSig, state: outcome });
           if (outcome === "landed") {
             setMarginInput("");
+            maxPinned.current = null;
             setSizeInput("");
             resetSizeText();
             setFundInput("");
@@ -2198,7 +2217,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const roomBound = !roomUnknownRaw && marketMaxQ !== null && displayMaxQ >= marketMaxQ;
       const q = pct === 100 ? (roomBound ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6) : displayMaxQ) : (displayMaxQ * BigInt(pct)) / 100n;
       handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6, lotExp));
-      maxPinned.current = pct === 100 && roomBound;
+      const written = sizeQToInput(q, sizeUnit, livePriceE6, lotExp);
+      maxPinned.current = pct === 100 && roomBound ? { dir: direction, unit: sizeUnit, written: sanitizeDecimalInput(written) } : null;
       return;
     }
     setSizePercent(pct);
@@ -2239,7 +2259,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           sublabel, 40% opacity and can't be selected; the ticket selects the open side. */}
       <div className="mb-3 flex gap-1">
         <button
-          onClick={() => setDirection("long")}
+          onClick={() => { maxPinned.current = null; setDirection("long"); }}
           data-testid="trade-side-long"
           data-side="long"
           data-limits-halted={sidePaused.long ? "true" : undefined}
@@ -2260,7 +2280,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           )}
         </button>
         <button
-          onClick={() => setDirection("short")}
+          onClick={() => { maxPinned.current = null; setDirection("short"); }}
           data-testid="trade-side-short"
           data-side="short"
           data-limits-halted={sidePaused.short ? "true" : undefined}

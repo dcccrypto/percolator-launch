@@ -219,3 +219,83 @@ describe("r8: Max keeps headroom while the room and the mark tick down ~0.05% a 
     });
   }
 });
+
+describe("r8 review MED-1: the Max pin lives only while the last size action was Max on the same side, unit and market", () => {
+  let room = 300n * LOT; // below the growth cap (350) so the mocked fill cap is what binds Max
+  const setup = async (unit: "usd" | "token" = "usd") => {
+    room = 300n * LOT;
+    mocks.useMarketFillCap.mockImplementation(() => ({ maxFillAbs: room, sideRoomQ: () => room }));
+    const r = render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("limits-max-size-inline")).not.toBeNull(), { timeout: 8000 });
+    if (unit === "token") fireEvent.click(screen.getByTitle(/Switch size unit/));
+    await waitFor(() => expect(screen.getByTestId("limits-max-size-inline").getAttribute("data-unit")).toBe(unit));
+    fireEvent.click(screen.getByTestId("limits-max-size-inline"));
+    await waitFor(() => expect(Number(sizeBox().value)).toBeGreaterThan(0));
+    return r;
+  };
+  /** The room grows 1%: a still-pinned Max would follow it up; an unpinned size must stay exactly where the trader left it. */
+  const growRoomTick = async (rerender: (ui: React.ReactElement) => void, n: number) => {
+    room = (room * 101n) / 100n;
+    await act(async () => { rerender(<OrderTicket slabAddress={SLAB} {...tickProp(n)} />); });
+    await act(async () => { rerender(<OrderTicket slabAddress={SLAB} {...tickProp(n + 1)} />); });
+  };
+  afterEach(() => { mocks.useMarketFillCap.mockReturnValue(null); });
+
+  it("CONTROL: a pinned Max follows the room up", async () => {
+    const { rerender } = await setup();
+    const before = sizeBox().value;
+    await growRoomTick(rerender, 1);
+    expect(Number(sizeBox().value)).toBeGreaterThan(Number(before));
+  });
+  it("a % chip after Max ends the pin", async () => {
+    const { rerender } = await setup();
+    fireEvent.click(screen.getAllByTestId("trade-size-preset").find((b) => b.getAttribute("data-percent") === "50")!);
+    const v = sizeBox().value;
+    await growRoomTick(rerender, 1);
+    expect(sizeBox().value).toBe(v);
+  });
+  it("a direction switch ends the pin", async () => {
+    const { rerender } = await setup();
+    fireEvent.click(screen.getByTestId("trade-side-short"));
+    const v = sizeBox().value;
+    await growRoomTick(rerender, 1);
+    expect(sizeBox().value).toBe(v);
+  });
+  it("a unit switch ends the pin", async () => {
+    const { rerender } = await setup();
+    fireEvent.click(screen.getByTitle(/Switch size unit/));
+    const v = sizeBox().value;
+    await growRoomTick(rerender, 1);
+    expect(sizeBox().value).toBe(v);
+  });
+  it("a market switch ends the pin and the emptied box stays empty", async () => {
+    const { rerender } = await setup();
+    await act(async () => { rerender(<OrderTicket slabAddress="So11111111111111111111111111111111111111112" />); });
+    const v = sizeBox().value;
+    await growRoomTick((ui) => rerender(<OrderTicket slabAddress="So11111111111111111111111111111111111111112" {...(ui.props as object)} />), 1);
+    expect(sizeBox().value).toBe(v);
+    expect(Number(sizeBox().value || 0)).toBeLessThan(Number(room) / 1e6 * 0.5);
+  });
+  it("typing ends the pin", async () => {
+    const { rerender } = await setup();
+    fireEvent.change(sizeBox(), { target: { value: "5" } });
+    await growRoomTick(rerender, 1);
+    expect(sizeBox().value).toBe("5");
+  });
+  it("a submit (the confirm is accepted) ends the pin: the next tick never refills the box with Max", async () => {
+    const { rerender } = await setup();
+    await act(async () => { fireEvent.click(submit()); });
+    await act(async () => { mocks.modal.props?.onConfirm(); });
+    const v = sizeBox().value;
+    await growRoomTick(rerender, 1);
+    expect(sizeBox().value).toBe(v);
+  });
+  it("a leverage change keeps a Max pin (documented: Max stays Max at the new leverage)", async () => {
+    const { rerender } = await setup();
+    const lev = screen.getByTestId("trade-leverage-input") as HTMLInputElement;
+    fireEvent.change(lev, { target: { value: "2" } });
+    const before = sizeBox().value;
+    await growRoomTick(rerender, 1);
+    expect(Number(sizeBox().value)).toBeGreaterThan(Number(before));
+  });
+});

@@ -207,9 +207,15 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
-  const net = preview.netResult;
+  const rawNet = preview.netResult;
+  // A net inside half a cent of the collateral unit reads "0.00", neutral: never a red "-0.00" or a green "+0.00".
+  const netNearZero = rawNet !== null && abs(rawNet) * 200n < 10n ** BigInt(decimals);
+  const net = netNearZero ? 0n : rawNet;
   const netColor =
     net === null || net === 0n ? "text-[var(--text-muted)]" : net > 0n ? "text-[var(--long)]" : "text-[var(--short)]";
+  // Est. result is valued from the FILL entry; Est. Account Balance After from the account's RISK entry (a settle may already have moved a
+  // loss out of capital, #3534). When the two differ, say so, or the two rows look inconsistent.
+  const entriesDiffer = entryPrice > 0n && riskEntryPrice != null && riskEntryPrice > 0n && riskEntryPrice !== entryPrice;
 
   const closeBlocked = loading || oracleStale || engineCatchingUp || submitDisabled;
 
@@ -332,10 +338,15 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           ) : (
             <span className={`font-mono font-medium ${netColor}`} data-testid="close-net-result" data-sign={net > 0n ? "positive" : net < 0n ? "negative" : "zero"}>
               {net > 0n ? "+" : net < 0n ? "-" : ""}
-              {formatTokenAmount(abs(net), decimals)} {colSym}
+              {netNearZero ? "0.00" : formatTokenAmount(abs(net), decimals)} {colSym}
             </span>
           )}
         </div>
+        {entriesDiffer && (
+          <p className="-mt-1 text-[9px] leading-relaxed text-[var(--text-dim)]" data-testid="close-net-basis">
+            This result is measured from your fill price. The account balance below starts from what your account already settled, so the two can differ.
+          </p>
+        )}
         <div className="flex justify-between">
           <span className="text-[var(--text-dim)]">Est. PnL (before closing fees):</span>
           {!entryKnown ? (
