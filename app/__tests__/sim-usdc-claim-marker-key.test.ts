@@ -89,9 +89,9 @@ describe('resolveMarkerKey', () => {
     expect(a1.equals(b)).toBe(false);
   });
 
-  it('fails closed (no public fallback) when no key material exists, and ignores too-short env keys', () => {
+  it('fails closed (no public fallback) when no key material exists, and refuses too-short env keys', () => {
     signerRef.current = null;
     expect(() => resolveMarkerKey({} as NodeJS.ProcessEnv)).toThrow(/marker key unavailable/);
-    expect(() => resolveMarkerKey({ SIM_USDC_MARKER_KEY: 'short' } as NodeJS.ProcessEnv)).toThrow(/marker key unavailable/);
+    expect(() => resolveMarkerKey({ SIM_USDC_MARKER_KEY: 'short' } as NodeJS.ProcessEnv)).toThrow(/at least 32/);
   });
 });

@@ -110,4 +110,32 @@ describe("SlabProvider backup poll: one failure counter drives readFailing and t
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); }); // steady cadence again
     expect(getAccountInfo).toHaveBeenCalledTimes(5);
   });
+
+  it("a WebSocket update does not clear readFailing while HTTP reads keep failing (no badge flicker)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const good = { data: new Uint8Array(1024), owner: new PublicKey(ALLOWED_PROGRAM) };
+    getAccountInfo.mockResolvedValueOnce(good);
+    const { SlabProvider, useSlabState } = await import("@/components/providers/SlabProvider");
+    const wrapper: FC<{ children: ReactNode }> = ({ children }) => <SlabProvider slabAddress={SLAB_ADDRESS}>{children}</SlabProvider>;
+    const { result } = renderHook(() => useSlabState(), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(result.current.config).toBeTruthy();
+
+    getAccountInfo.mockRejectedValue(new Error("503"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(result.current.readFailing).toBe(true);
+
+    // The socket keeps delivering (different bytes so the byte-equality short-circuit is not hit).
+    const wsHandler = onAccountChange.mock.calls[0][1] as (info: { data: Uint8Array; owner: PublicKey }) => void;
+    const changed = new Uint8Array(1024);
+    changed[0] = 7;
+    await act(async () => { wsHandler({ data: changed, owner: new PublicKey(ALLOWED_PROGRAM) }); });
+    expect(result.current.readFailing).toBe(true);
+
+    // Only a successful HTTP read clears it.
+    getAccountInfo.mockResolvedValue(good);
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(result.current.readFailing).toBe(false);
+  });
 });

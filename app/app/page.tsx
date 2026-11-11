@@ -121,6 +121,7 @@ export default function Home() {
             ~84% of a phone's width; the srcset serves a right-sized copy and priority preloads it. */}
         <Image
           src="/landing/char-markets.webp"
+          unoptimized
           width={1626}
           height={369}
           priority
@@ -154,6 +155,7 @@ export default function Home() {
       <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
         <Image
           src="/landing/char-trending.webp"
+          unoptimized
           width={1672}
           height={337}
           sizes="(min-width: 640px) min(52vw, 560px), 84vw"
