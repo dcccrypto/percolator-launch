@@ -48,7 +48,7 @@ export function isEntryKnown(
   entryE6: bigint | null | undefined,
   source: EntryPriceSource | null | undefined,
 ): boolean {
-  const trusted = source === "server" || source === "cache" || source === "derived";
+  const trusted = source === "server" || source === "cache";
   return trusted && entryE6 != null && entryE6 > 0n;
 }
 

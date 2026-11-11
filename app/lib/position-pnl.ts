@@ -278,6 +278,9 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
   if (flat) return { ...base, pnlKnown: true, pnlNative: 0n, unrealizedPnl: 0n, riskUnrealizedPnl: 0n, roe: 0 };
   if (effectiveSize === null || resetObligation) return unknown;
   if (resolved.source === "unknown" || resolved.entry <= 0n || markE6 <= 0n) return unknown;
+  // A back-solved entry is built from the portfolio-wide `pnl` (claimable / earlier settled value included), so a long that lost
+  // can read a profit. No recorded entry on this device = entry and PnL unavailable, never an estimate. Risk math keeps `entry`.
+  if (resolved.source === "derived") return unknown;
 
   const valued = valueAtMark({
     effectiveSize,

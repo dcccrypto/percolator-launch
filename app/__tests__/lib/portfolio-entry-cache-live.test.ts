@@ -80,3 +80,34 @@ describe("portfolio row / close dialog use the recorded entry, as the trade page
     expect(p.entry).not.toBe(OPEN);
   });
 });
+
+describe("no saved entry on this device: never a profit on a loss, on any surface adapter", () => {
+  const LONG_LOSS_ONCHAIN_PNL = 1_100_000n; // leftover claimable value on the portfolio, +1.10
+  const params = { slabAddress: SLAB, accountIdx: 0, adlFactors: factors, adlApplicable: true, markE6: MARK, anchorMarkE6: MARK, initialMarginBps: 1000n, maintenanceMarginBps: 500n };
+
+  it("long that lost (entry above mark), pnl scalar positive: Portfolio/close dialog show entry unknown and no PnL", () => {
+    const p = portfolioPositionPnl({ ...snapshot(SIZE, LONG_LOSS_ONCHAIN_PNL), entryCacheWallet: WALLET }, MARK);
+    expect(p.pnlKnown).toBe(false);
+    expect(p.unrealizedPnl).toBeNull();
+    expect(p.roe).toBeNull();
+  });
+
+  it("the dock/badge adapter agrees: no PnL either", () => {
+    const t = terminalPositionPnl({ ...params, account: { positionSize: SIZE, adlABasis: ADL_ONE, pnl: LONG_LOSS_ONCHAIN_PNL, capital: 10_000_000n, owner: OWNER } });
+    expect(t.pnlKnown).toBe(false);
+    expect(t.unrealizedPnl).toBeNull();
+  });
+
+  it("short too", () => {
+    const p = portfolioPositionPnl(snapshot(-SIZE, LONG_LOSS_ONCHAIN_PNL), MARK);
+    expect(p.pnlKnown).toBe(false);
+  });
+
+  it("the entry display helper treats a derived entry as unknown", async () => {
+    const { describeEntryPrice } = await import("@/lib/entry-price-display");
+    const d = describeEntryPrice({ entryE6: 83_081_967n, source: "derived" });
+    expect(d.known).toBe(false);
+    expect(d.text).toBe("—");
+    expect(d.title).toMatch(/Entry unknown on this device/);
+  });
+});

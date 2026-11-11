@@ -341,14 +341,13 @@ describe("one position, every surface, one PnL (#3077)", () => {
     expectAll(f, "+10.00"); // surfaces still agree with EACH OTHER: the divergence was in the inputs
   });
 
-  it("ADL'd position, DERIVED entry (second device): all surfaces read +5.00, marked as an estimate", () => {
+  it("ADL'd position, DERIVED entry (no saved entry on this device): every surface withholds PnL ('--'), no estimate is shown", () => {
     const f = allFigures({ ...BASE, cached: 0n });
-    expectAll(f, "+5.00");
+    expectAll(f, "--");
     expect(f.pos.entryPriceSource).toBe("derived");
-    expect(f.pos.isEstimate).toBe(true);
-    // The estimate is labelled "est." on the bar chip.
+    expect(f.pos.pnlKnown).toBe(false);
     const { container } = render(<PositionsBar />);
-    expect(container.textContent).toContain("est.");
+    expect(container.textContent).not.toContain("est.");
   });
 
   it("NEGATIVE CONTROL: back-solving over RAW basis (the dock's old bug) prints +2.50, not +5.00", () => {
@@ -395,9 +394,9 @@ describe("one position, every surface, one PnL (#3077)", () => {
     expectAll(f, "+5.00");
   });
 
-  it("INVERTED v17 market, derived entry: the estimate is anchored on the un-reinverted mark on every surface", () => {
+  it("INVERTED v17 market, derived entry: PnL is withheld on every surface (no saved entry)", () => {
     const f = allFigures({ ...BASE, rawOnChain: 100_000_000n, invert: 1, cached: 0n });
-    expectAll(f, "+5.00");
+    expectAll(f, "--");
     expect(f.pos.entryPriceSource).toBe("derived");
   });
 
@@ -441,9 +440,9 @@ describe("one position, every surface, one PnL (#3077)", () => {
     expectAll(f, "+5.00");
   });
 
-  it("a loss reads as a loss everywhere (derived, negative on-chain pnl)", () => {
+  it("no saved entry: PnL is withheld everywhere (never a back-solved figure), whatever the on-chain pnl's sign", () => {
     const f = allFigures({ ...BASE, cached: 0n, onChainPnl: -5_000_000n });
-    expectAll(f, "-5.00");
+    expectAll(f, "--");
   });
 });
 

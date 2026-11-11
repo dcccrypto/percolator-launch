@@ -93,6 +93,13 @@ function build(name: string): PortfolioPosition {
 
 const MARK_TEXT = "$1.000000";
 
+/** A position whose open-time entry IS saved on this device (so its PnL is known). */
+function buildKnown(name: string): PortfolioPosition {
+  const { market } = loadPortfolio(name);
+  saveEntryPrice(market, 0, build(name).effectiveEntryPrice, undefined, WALLET);
+  return build(name);
+}
+
 beforeEach(() => {
   localStorage.clear();
   state.positions = [];
@@ -132,13 +139,13 @@ describe("real v18 portfolio bytes → resolved entry", () => {
 const summaryCell = (label: string) => screen.getByText(label).parentElement as HTMLElement;
 
 describe("dashboard Overview (PositionSummary) — Defect 1", () => {
-  it("renders the DERIVED entry instead of a dash", () => {
+  it("a DERIVED entry (nothing saved on this device) is a dash, never a back-solved figure", () => {
     const pos = build("2SewEcvf");
     state.positions = [pos];
     render(<PositionSummary />);
     const cell = summaryCell("Entry:");
-    expect(cell.textContent).toContain(describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: "derived" }).text);
-    expect(cell.textContent).not.toContain("—");
+    expect(cell.textContent).toContain("—");
+    expect(cell.textContent).not.toContain(describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: "cache" }).text);
   });
 
   it("renders the CACHED entry", () => {
@@ -178,14 +185,13 @@ describe("portfolio list (PortfolioPositionsView) — Defect 2", () => {
     expect(screen.getByTestId("pnl-unknown")).toBeInTheDocument();
   });
 
-  it("derived → Entry shows the derived value, PnL renders a number", () => {
+  it("derived (no saved entry) → Entry is a dash with the 'unknown' hint and PnL is unavailable", () => {
     const pos = build("2SewEcvf");
     state.positions = [pos];
     render(<PortfolioPositionsView />);
-    const expected = describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: "derived" });
-    expect(portfolioCell("Entry").textContent).toContain(expected.text);
-    expect(within(portfolioCell("Entry")).getByTitle(expected.title as string)).toBeInTheDocument();
-    expect(screen.queryByTestId("pnl-unknown")).toBeNull();
+    expect(portfolioCell("Entry").textContent).toContain("—");
+    expect(within(portfolioCell("Entry")).getByTitle(/Entry unknown on this device/i)).toBeInTheDocument();
+    expect(screen.getAllByTestId("pnl-unknown").length).toBeGreaterThan(0);
   });
 });
 
@@ -243,14 +249,14 @@ describe("hero / aggregate totals never silently sum an unknown PnL as 0 (#3077 
   });
 
   it("one known + one unknown: the number stays, and the caveat says one position is excluded", () => {
-    state.positions = [build("2SewEcvf"), build("DAC2a44p")];
+    state.positions = [buildKnown("2SewEcvf"), build("DAC2a44p")];
     render(<PortfolioPositionsView />);
     expect(screen.queryByTestId("hero-pnl-unknown")).toBeNull();
     expect(screen.getByTestId("hero-pnl-caveat").textContent).toMatch(/Excludes 1 position /);
   });
 
   it("CONTROL: every position known -> neither '--' nor a caveat", () => {
-    state.positions = [build("2SewEcvf")];
+    state.positions = [buildKnown("2SewEcvf")];
     render(<PortfolioPositionsView />);
     expect(screen.queryByTestId("hero-pnl-unknown")).toBeNull();
     expect(screen.queryByTestId("hero-pnl-caveat")).toBeNull();

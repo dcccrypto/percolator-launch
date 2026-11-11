@@ -129,7 +129,10 @@ describe("every entry-price readout gates on whether the entry resolved", () => 
 
 describe("the helper is an ALLOWLIST (#2671)", () => {
   const ENTRY = 19_400n;
-  it.each<[EntryPriceSource]>([["server"], ["cache"], ["derived"]])("%s → known", (source) => {
+  it("derived → NOT known (a back-solve from the portfolio-wide pnl is never displayed as an entry)", () => {
+    expect(isEntryKnown(1_000_000n, "derived")).toBe(false);
+  });
+  it.each<[EntryPriceSource]>([["server"], ["cache"]])("%s → known", (source) => {
     expect(isEntryKnown(ENTRY, source)).toBe(true);
     expect(displayEntryE6(ENTRY, source)).toBe(ENTRY);
   });
