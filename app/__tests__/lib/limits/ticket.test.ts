@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** deriveTicketLimits: every ticket decision (clamp, halt, same-owner, quote, step-down). */
 import { describe, it, expect } from "vitest";
-import { deriveTicketLimits, sizeQToInput } from "@/lib/limits/ticket";
+import { deriveTicketLimits, maxFillWithHeadroomQ, sizeQToInput } from "@/lib/limits/ticket";
 import { marketLimits, OWNER_A, OWNER_LP } from "./fixtures";
 
 const input = (over: Partial<Parameters<typeof deriveTicketLimits>[0]> = {}) => ({
@@ -108,5 +108,29 @@ describe("sizeQToInput", () => {
     expect(sizeQToInput(LOT, "usd", 65_470_000n, 0, "up")).toBe("65.47");
     // Token mode is exact either way.
     expect(sizeQToInput(LOT, "token", lotPriceE6, 0, "up")).toBe("1");
+  });
+});
+
+describe("r9 MED-2: maxFillWithHeadroomQ never takes headroom below the closing size", () => {
+  it("token units: no closing size keeps the headroom; a Max equal to the close fills the exact close", () => {
+    expect(maxFillWithHeadroomQ(5_000_000n, "token", 1_000_000n)).toBe(4_987_499n);
+    expect(maxFillWithHeadroomQ(234_000n, "token", 1_000_000n, 234_000n)).toBe(234_000n);
+  });
+  it("token units: past the close (a flip) the headroom comes off only the part above it, never below the close", () => {
+    const q = maxFillWithHeadroomQ(5_000_000n, "token", 1_000_000n, 4_999_000n);
+    expect(q).toBe(4_999_000n);
+    const q2 = maxFillWithHeadroomQ(5_000_000n, "token", 1_000_000n, 1_000_000n);
+    expect(q2).toBe(4_987_499n);
+  });
+  it("usd units: a Max equal to the close fills the exact close", () => {
+    expect(maxFillWithHeadroomQ(234_000_000n, "usd", 1_000_000n, 234_000_000n)).toBe(234_000_000n);
+    expect(maxFillWithHeadroomQ(234_000_000n, "usd", 1_000_000n)).toBeLessThan(234_000_000n);
+  });
+  it("lot market: 100 lots closing fills 100 lots, not 99", () => {
+    expect(maxFillWithHeadroomQ(100n, "token", 1_000_000n)).toBe(99n);
+    expect(maxFillWithHeadroomQ(100n, "token", 1_000_000n, 100n)).toBe(100n);
+  });
+  it("a closing size above Max never raises the fill above Max", () => {
+    expect(maxFillWithHeadroomQ(100n, "token", 1_000_000n, 500n)).toBe(100n);
   });
 });

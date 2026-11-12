@@ -60,7 +60,10 @@ export interface ClosePositionFormProps {
    * The close books at the mark; the spread is charged only through the fee channel (already inside the fee estimate where it is on,
    * nothing extra where it is off), so it is never subtracted from the balance preview. Omitted / null = "Not available before the trade".
    */
-  spreadEstimateFor?: (closeAbs: bigint, takerBuys: boolean) => SpreadEstimate | null;
+  spreadEstimateFor?: ((closeAbs: bigint, takerBuys: boolean) => SpreadEstimate | null) & {
+    /** The quote will not arrive (failed read, no matcher, mock): the net then comes from the base-fee estimate, labelled as excluding the spread. */
+    unavailable?: boolean;
+  };
   /** Blocks close + shows the oracle-stale warning (matured oracle / no price — what the chain refuses). */
   oracleStale?: boolean;
   /** Price older than 60 s but the chain would accept the close — shows one calm line, never blocks. */
@@ -196,17 +199,42 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? (Number(pnlNative) / 10 ** decimals) * priceUsd
         : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter, spread };
+    // r8 Council: Est. PnL is mark-to-market from the fill entry and gross of the closing fee + spread, so a trade that loses when closed
+    // could read green. The headline is the NET result: that PnL less the same closing-fee estimate shown below (spread included).
+    // While the spread-inclusive estimate is still loading (a quoter is wired but has not answered) there is no honest net: null.
+    // A quoter that failed or is unavailable will never answer: show the net from the base-fee close estimate, labelled "excl. spread"
+    // (never green: the spread could still turn it into a loss), instead of waiting forever.
+    const spreadMissing = spreadEstimateFor != null && spread === null;
+    const spreadUnavailable = spreadMissing && spreadEstimateFor?.unavailable === true;
+    const feeLoading = spreadMissing && !spreadUnavailable;
+    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee : null;
+
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
   }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
-  const pnlColor =
-    preview.pnl === 0n
+  const rawNet = preview.netResult;
+  // A net inside half a cent of the collateral unit reads "0.00", neutral: never a red "-0.00" or a green "+0.00".
+  // On a coin-margined market (the collateral is the asset itself) the band is half a cent of USD value: half a unit of a 9-decimal coin
+  // is about $1. Otherwise (a stable collateral, or no price) it stays half a cent of the collateral unit.
+  const collateralUsd = (collateralSymbol == null || collateralSymbol === symbol) && priceUsd !== null && priceUsd > 0 ? priceUsd : null;
+  const netNearZero =
+    rawNet !== null &&
+    (collateralUsd !== null
+      ? (Number(abs(rawNet)) / 10 ** decimals) * collateralUsd < 0.005
+      : abs(rawNet) * 200n < 10n ** BigInt(decimals));
+  const net = netNearZero ? 0n : rawNet;
+  // Excluding the spread, a positive figure is not a safe "profit": it stays neutral (a loss is still red).
+  const netColor =
+    net === null || net === 0n || (net > 0n && preview.netExclSpread)
       ? "text-[var(--text-muted)]"
-      : preview.pnl > 0n
+      : net > 0n
         ? "text-[var(--long)]"
         : "text-[var(--short)]";
+  // Est. result is valued from the FILL entry; Est. Account Balance After from the account's RISK entry (a settle may already have moved a
+  // loss out of capital, #3534). When the two differ, say so, or the two rows look inconsistent.
+  const entriesDiffer = entryPrice > 0n && riskEntryPrice != null && riskEntryPrice > 0n && riskEntryPrice !== entryPrice;
 
   const closeBlocked = loading || oracleStale || engineCatchingUp || submitDisabled;
 
@@ -317,13 +345,40 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           </span>
         </div>
         <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">
-          <span className="text-[var(--text-dim)]">Est. PnL:</span>
+          <span className="font-medium text-[var(--text)]">Est. result if closed now:</span>
+          {!entryKnown ? (
+            <span className="font-mono font-medium text-[var(--text-muted)]" title={UNKNOWN_ENTRY_TOOLTIP} data-testid="close-net-unknown">
+              --
+            </span>
+          ) : net === null ? (
+            <span className="font-mono font-medium text-[var(--text-muted)]" title="Waiting for the closing fee and spread estimate" data-testid="close-net-loading">
+              --
+            </span>
+          ) : (
+            <span className={`font-mono font-medium ${netColor}`} data-testid="close-net-result" data-sign={net > 0n ? "positive" : net < 0n ? "negative" : "zero"}>
+              {net > 0n ? "+" : net < 0n ? "-" : ""}
+              {netNearZero ? "0.00" : formatTokenAmount(abs(net), decimals)} {colSym}
+              {preview.netExclSpread && (
+                <span className="ml-1 text-[10px] text-[var(--text-muted)]" title="The spread estimate could not be read, so this result excludes it" data-testid="close-net-excl-spread">
+                  excl. spread
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+        {entriesDiffer && (
+          <p className="-mt-1 text-[9px] leading-relaxed text-[var(--text-dim)]" data-testid="close-net-basis">
+            This result is measured from your fill price. The account balance below starts from what your account already settled, so the two can differ.
+          </p>
+        )}
+        <div className="flex justify-between">
+          <span className="text-[var(--text-dim)]">Est. PnL (before closing fees):</span>
           {!entryKnown ? (
             <span className="font-mono font-medium text-[var(--text-muted)]" title={UNKNOWN_ENTRY_TOOLTIP} data-testid="close-pnl-unknown">
               --
             </span>
           ) : (
-          <span className={`font-mono font-medium ${pnlColor}`}>
+          <span className="font-mono font-medium text-[var(--text-secondary)]" data-testid="close-gross-pnl">
             {preview.pnl > 0n ? "+" : preview.pnl < 0n ? "-" : ""}
             {formatTokenAmount(abs(preview.pnl), decimals)} {colSym}
             {preview.pnlUsd !== null && (

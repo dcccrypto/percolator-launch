@@ -34,7 +34,7 @@ describe("ClosePositionForm balance-after on a settled loss (#3534)", () => {
     const { container } = render(<ClosePositionForm {...props} riskEntryPrice={90_000_000n} />);
     expect(balanceLine(container)).toMatch(/:~10 TEST/);
     // the PnL row is still the honest since-entry figure (a $10 loss), not zeroed
-    expect(container.textContent).toMatch(/Est\. PnL[^A-Za-z]*-?\$?10/);
+    expect(container.textContent).toMatch(/Est\. PnL \(before closing fees\)[^A-Za-z]*-?\$?10/);
   });
   it("CONTROL (old behaviour, no risk entry): the same close reads $0", () => {
     const { container } = render(<ClosePositionForm {...props} />);
