@@ -27,13 +27,13 @@ describe("ClosePositionForm fee preview (#3726)", () => {
   it("CONTROL (the old preview): base fee only, 5.331 USDC", () => {
     render(<ClosePositionForm {...props} />);
     expect(screen.getByText("Trading Fee:")).toBeTruthy();
-    expect(screen.getByText(/5\.331/)).toBeTruthy();
+    expect(screen.getAllByText(/5\.331/).length).toBeGreaterThan(0);
   });
 
   it("with the close-fee estimate: the whole fee, labelled (est.), and the balance after reflects it", () => {
     render(<ClosePositionForm {...props} closeFeeBpsFor={() => 71n} />);
     expect(screen.getByText("Trading Fee (est.):")).toBeTruthy();
-    expect(screen.getByText(/12\.616/)).toBeTruthy(); // 1,777 x 71 bps
+    expect(screen.getAllByText(/12\.616/).length).toBeGreaterThan(0); // 1,777 x 71 bps
     expect(screen.getByText(/487\.38/)).toBeTruthy(); // 500 - 12.6167
   });
 
@@ -46,6 +46,6 @@ describe("ClosePositionForm fee preview (#3726)", () => {
   it("an estimate below the base fee never lowers the fee", () => {
     render(<ClosePositionForm {...props} closeFeeBpsFor={() => 0n} />);
     expect(screen.getByText("Trading Fee:")).toBeTruthy();
-    expect(screen.getByText(/5\.331/)).toBeTruthy();
+    expect(screen.getAllByText(/5\.331/).length).toBeGreaterThan(0);
   });
 });

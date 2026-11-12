@@ -30,6 +30,8 @@ vi.mock("@/hooks/useClosePosition", () => ({
   }),
 }));
 vi.mock("@/hooks/useLivePrice", () => ({ useLivePrice: () => live }));
+// r8: the spread-inclusive fee estimate is loaded (a market whose fee channel is off: the spread is information only, the fee stays the base).
+vi.mock("@/hooks/useSpreadQuoter", () => ({ useSpreadQuoter: () => () => ({ kind: "quote", bps: 5, execPriceE6: null, inFee: false }) }));
 
 import { OrderTicketClosePanel, type OrderTicketClosePanelProps } from "@/components/trade/OrderTicketClosePanel";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
@@ -285,7 +287,7 @@ describe("inline close — PnL / fee / balance after match ClosePositionModal ex
   // 1 SOL long, entry $100, mark $110, capital 50 USDC, fee 30 bps, 50%:
   //   close notional 0.5 × 110 = 55 USDC → fee 0.165 USDC
   //   balance after = 50 (the whole capital stays) + PnL − 0.165
-  const rows = ["Close Size:", "Remaining:", "Est. PnL:", "Trading Fee:", "Est. Account Balance After:"];
+  const rows = ["Close Size:", "Remaining:", "Est. PnL (before closing fees):", "Trading Fee:", "Est. Account Balance After:"];
 
   it("inline numbers are the modal's numbers", () => {
     const p = base();

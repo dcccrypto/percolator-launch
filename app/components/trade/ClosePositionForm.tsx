@@ -196,17 +196,26 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? (Number(pnlNative) / 10 ** decimals) * priceUsd
         : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter, spread };
+    // r8 Council: Est. PnL is mark-to-market from the fill entry and gross of the closing fee + spread, so a trade that loses when closed
+    // could read green. The headline is the NET result: that PnL less the same closing-fee estimate shown below (spread included).
+    // While the spread-inclusive estimate is still loading (a quoter is wired but has not answered) there is no honest net: null.
+    const feeLoading = spreadEstimateFor != null && spread === null;
+    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee : null;
+
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, netResult, feeLoading, feeEstimated, balanceAfter, spread };
   }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
-  const pnlColor =
-    preview.pnl === 0n
-      ? "text-[var(--text-muted)]"
-      : preview.pnl > 0n
-        ? "text-[var(--long)]"
-        : "text-[var(--short)]";
+  const rawNet = preview.netResult;
+  // A net inside half a cent of the collateral unit reads "0.00", neutral: never a red "-0.00" or a green "+0.00".
+  const netNearZero = rawNet !== null && abs(rawNet) * 200n < 10n ** BigInt(decimals);
+  const net = netNearZero ? 0n : rawNet;
+  const netColor =
+    net === null || net === 0n ? "text-[var(--text-muted)]" : net > 0n ? "text-[var(--long)]" : "text-[var(--short)]";
+  // Est. result is valued from the FILL entry; Est. Account Balance After from the account's RISK entry (a settle may already have moved a
+  // loss out of capital, #3534). When the two differ, say so, or the two rows look inconsistent.
+  const entriesDiffer = entryPrice > 0n && riskEntryPrice != null && riskEntryPrice > 0n && riskEntryPrice !== entryPrice;
 
   const closeBlocked = loading || oracleStale || engineCatchingUp || submitDisabled;
 
@@ -317,13 +326,35 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           </span>
         </div>
         <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">
-          <span className="text-[var(--text-dim)]">Est. PnL:</span>
+          <span className="font-medium text-[var(--text)]">Est. result if closed now:</span>
+          {!entryKnown ? (
+            <span className="font-mono font-medium text-[var(--text-muted)]" title={UNKNOWN_ENTRY_TOOLTIP} data-testid="close-net-unknown">
+              --
+            </span>
+          ) : net === null ? (
+            <span className="font-mono font-medium text-[var(--text-muted)]" title="Waiting for the closing fee and spread estimate" data-testid="close-net-loading">
+              --
+            </span>
+          ) : (
+            <span className={`font-mono font-medium ${netColor}`} data-testid="close-net-result" data-sign={net > 0n ? "positive" : net < 0n ? "negative" : "zero"}>
+              {net > 0n ? "+" : net < 0n ? "-" : ""}
+              {netNearZero ? "0.00" : formatTokenAmount(abs(net), decimals)} {colSym}
+            </span>
+          )}
+        </div>
+        {entriesDiffer && (
+          <p className="-mt-1 text-[9px] leading-relaxed text-[var(--text-dim)]" data-testid="close-net-basis">
+            This result is measured from your fill price. The account balance below starts from what your account already settled, so the two can differ.
+          </p>
+        )}
+        <div className="flex justify-between">
+          <span className="text-[var(--text-dim)]">Est. PnL (before closing fees):</span>
           {!entryKnown ? (
             <span className="font-mono font-medium text-[var(--text-muted)]" title={UNKNOWN_ENTRY_TOOLTIP} data-testid="close-pnl-unknown">
               --
             </span>
           ) : (
-          <span className={`font-mono font-medium ${pnlColor}`}>
+          <span className="font-mono font-medium text-[var(--text-secondary)]" data-testid="close-gross-pnl">
             {preview.pnl > 0n ? "+" : preview.pnl < 0n ? "-" : ""}
             {formatTokenAmount(abs(preview.pnl), decimals)} {colSym}
             {preview.pnlUsd !== null && (
@@ -367,7 +398,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           ? "Your freed balance moves back to your wallet after one more approval."
           : "Closing keeps the funds in your trading account. Withdraw to move them to your wallet."}
       </p>
-      {percent >= 100 && entryKnown && preview.pnl > 0n && (
+      {percent >= 100 && entryKnown && net !== null && net > 0n && (
         <p className="mb-4 -mt-3 text-[9px] text-[var(--text-dim)] leading-relaxed" data-testid="close-profit-settles">
           Profit becomes withdrawable once it settles.
         </p>
