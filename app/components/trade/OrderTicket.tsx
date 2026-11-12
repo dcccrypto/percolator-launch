@@ -1304,8 +1304,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const maxIsRoomBound = !roomUnknownRaw && marketMaxQ !== null && displayMaxQ !== null && displayMaxQ >= marketMaxQ;
   const pin = maxPinned.current;
   const pinLive = pin !== null && pin.dir === direction && pin.unit === sizeUnit && pin.written === sizeInput;
-  const pinTargetQ = pinLive && maxIsRoomBound && displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n && !sidePaused[direction]
-    ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6) : null;
+  const pinTargetQ = pinLive && maxIsRoomBound && displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n && !sidePaused[direction] && !showConfirmModal
+    ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6, reduceOnlyMaxQ) : null;
   useLayoutEffect(() => {
     if (pinTargetQ === null || !livePriceE6 || livePriceE6 <= 0n) return;
     const next = sizeQToInput(pinTargetQ, sizeUnit, livePriceE6, lotExp);
@@ -1410,8 +1410,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   async function handleTrade(
     snapshotSize?: bigint,
     snapshotLimitPriceE6?: bigint,
+    snapshotDepositAtoms?: bigint,
   ) {
     const effectiveSize = snapshotSize ?? positionSize;
+    // The confirm screen's deposit is what is signed (the live one can drift while the modal is open).
+    const signedDepositAtoms = snapshotDepositAtoms !== undefined && snapshotDepositAtoms > 0n ? snapshotDepositAtoms : fundAtoms;
+    const signedFundLabel = signedDepositAtoms === fundAtoms ? fundLabel : `${usd2(signedDepositAtoms, decimals)} ${collateralSymbol}`;
     maxPinned.current = null; // a submit (sent, refused or failed) ends the Max pin: the box is the trader's order now
     // SILENT-1: every exit of this handler before the wallet leaves a visible line (it used to just return).
     if (!marginInput) { setHumanError("Enter an amount to trade. Nothing was sent."); return; }
@@ -1495,7 +1499,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         ? (
             await lagRetry(() => fundAndTrade({
               size,
-              depositAtoms: fundAtoms,
+              depositAtoms: signedDepositAtoms,
               // The confirmed worst fill; else built the same way. `> 0n`, not `??`: a 0n here was
               // sent as limit 0, i.e. no slippage limit at all (#3459).
               limitPriceE6:
@@ -1503,7 +1507,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   ? snapshotLimitPriceE6
                   : buildOpenLimitE6(direction === "short" ? -size : size),
               ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
-              amountLabel: fundLabel,
+              amountLabel: signedFundLabel,
               // The race re-opens the wallet, so the button goes back to "Confirm in wallet…".
               onRace: () => { setRaceNote(true); setTradePhase("submitting"); },
               onConfirming: () => setTradePhase("pending"),
@@ -2215,7 +2219,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (roomUnknownRaw && !(displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n)) return;
     if (displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n) {
       const roomBound = !roomUnknownRaw && marketMaxQ !== null && displayMaxQ >= marketMaxQ;
-      const q = pct === 100 ? (roomBound ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6) : displayMaxQ) : (displayMaxQ * BigInt(pct)) / 100n;
+      const q = pct === 100 ? (roomBound ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6, reduceOnlyMaxQ) : displayMaxQ) : (displayMaxQ * BigInt(pct)) / 100n;
       handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6, lotExp));
       const written = sizeQToInput(q, sizeUnit, livePriceE6, lotExp);
       maxPinned.current = pct === 100 && roomBound ? { dir: direction, unit: sizeUnit, written: sanitizeDecimalInput(written) } : null;
@@ -3040,6 +3044,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             void handleTrade(
               snapshot.positionSize,
               snapshot.worstFillPriceE6,
+              snapshot.depositAtoms,
             );
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}
