@@ -133,7 +133,11 @@ describe("useFirstTrade: a confirmed order signs the chain cap, never silently r
     sendTx.mockReset();
     signedFees.length = 0;
     fetchTradeFeeBps.mockReset();
-    fetchTradeFeeBps.mockResolvedValue(135n);
+    // models resolveTradeFeeBps: 135 (+ the confirmed busy rate when passed), capped at the market maximum (700)
+    fetchTradeFeeBps.mockImplementation(async (...a: unknown[]) => {
+      const want = 135n + ((a[3] as { confirmedUtilFeeBps?: bigint }).confirmedUtilFeeBps ?? 0n);
+      return want < 700n ? want : 700n;
+    });
     fresh.mockReset();
     fresh.mockResolvedValue(99n);
     findV17Portfolio.mockReset();
@@ -144,11 +148,32 @@ describe("useFirstTrade: a confirmed order signs the chain cap, never silently r
   for (const [name, existing] of [["first trade (new account)", false], ["returning user (account exists)", true]] as const) {
     describe(name, () => {
       beforeEach(() => { if (existing) findV17Portfolio.mockResolvedValue(Keypair.generate().publicKey); });
-      it("signs the chain cap (135) exactly as before, confirmed or not", async () => {
+      it("recheck NEW-1: signs the chain cap PLUS the confirmed busy rate; non-busy or unconfirmed = exactly the old 135", async () => {
         sendTx.mockResolvedValue("sigOk");
-        await run({ confirmedFeeCap: true, busyGuard: GUARD });
+        await run({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 0n } });
         await run({});
-        expect(signedFees).toEqual([135n, 135n]);
+        await run({ confirmedFeeCap: true, busyGuard: GUARD });
+        await run({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 500n } });
+        await run({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 5_000n } });
+        expect(signedFees).toEqual([135n, 135n, 234n, 635n, 700n]);
+      });
+      it("a 500 bps confirmed busy quote with the rate unchanged lands; a rise above it is refused before the wallet", async () => {
+        sendTx.mockResolvedValue("sigOk");
+        fresh.mockResolvedValue(500n);
+        const { sig, err } = await run({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 500n } });
+        expect(err).toBeNull();
+        expect(sig).toBe("sigOk");
+        expect(signedFees[0]! >= 30n + 100n + 500n).toBe(true);
+        await expect(preSign()!()).resolves.toBeUndefined();
+        fresh.mockResolvedValue(501n);
+        await expect(preSign()!()).rejects.toBeInstanceOf(BusyFeeRoseError);
+      });
+      it("f8-like drift (confirmed 46 bps busy, matcher 23 -> 30): lands", async () => {
+        sendTx.mockResolvedValue("sigOk");
+        fresh.mockResolvedValue(46n);
+        const { err } = await run({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 46n } });
+        expect(err).toBeNull();
+        expect(signedFees[0]! >= 106n).toBe(true);
       });
       it("a confirmed order hands sendTx a preSignCheck; an unconfirmed one does not", async () => {
         sendTx.mockResolvedValue("sigOk");
@@ -182,7 +207,7 @@ describe("useFirstTrade: a confirmed order signs the chain cap, never silently r
         expect(err).toBeInstanceOf(FeeChangedAfterReviewError);
         expect((err as Error).message).toBe("The fee changed while you were reviewing. Review it again. Nothing was charged.");
         expect(sendTx).toHaveBeenCalledTimes(1);
-        expect(signedFees).toEqual([135n]);
+        expect(signedFees).toEqual([234n]);
         expect(fetchTradeFeeBps.mock.calls.some((c) => (c[3] as { withUtilMax?: boolean } | undefined)?.withUtilMax)).toBe(false);
       });
       it("confirmed + 98 and the fresh read shows the busy-side rate rose: the busy-side line", async () => {

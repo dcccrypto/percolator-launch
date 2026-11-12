@@ -157,6 +157,7 @@ function market(lotExp: number): Uint8Array {
   return d;
 }
 
+const MARKET_MAX = 700n;
 const CHAIN_CAP = 135n; // what the live chain read returns (base 30 + worst-case matcher + 5)
 const GUARD = { confirmedBusyFeeBps: 99n, direction: "long" as const, takerEffQ: 0n, sizeQ: 1_000_000n };
 
@@ -168,7 +169,11 @@ describe("useTrade: a confirmed order signs the chain cap, never silently raises
     mocks.sendTxWaiting.mockReset();
     mocks.signedFees.length = 0;
     mocks.fetchTradeFeeBps.mockReset();
-    mocks.fetchTradeFeeBps.mockResolvedValue(CHAIN_CAP);
+    // models resolveTradeFeeBps: base + worst-case matcher + margin (135), plus the confirmed busy rate when one is passed, capped at the market max
+    mocks.fetchTradeFeeBps.mockImplementation(async (_c: unknown, _m: unknown, _x: unknown, o: { confirmedUtilFeeBps?: bigint }) => {
+      const want = CHAIN_CAP + (o.confirmedUtilFeeBps ?? 0n);
+      return want < MARKET_MAX ? want : MARKET_MAX;
+    });
     mocks.fresh.mockReset();
     mocks.fresh.mockResolvedValue(99n);
     slabAddress = new PublicKey(new Uint8Array(32).fill(seq++)).toBase58();
@@ -208,11 +213,37 @@ describe("useTrade: a confirmed order signs the chain cap, never silently raises
   }
   const preSign = () => (mocks.sendTxWaiting.mock.calls[0][0] as { preSignCheck?: () => Promise<void> }).preSignCheck;
 
-  it("signs the chain cap exactly as before (135), with a confirm screen or without", async () => {
+  it("recheck NEW-1: a confirmed order signs the chain cap PLUS the confirmed busy rate; no busy rate or no confirm screen = exactly the old 135", async () => {
     mocks.sendTxWaiting.mockResolvedValue("sig-ok");
-    await runOrder({ confirmedFeeCap: true, busyGuard: GUARD, feeBps: 55n });
-    await runOrder({ feeBps: 55n });
-    expect(mocks.signedFees).toEqual([CHAIN_CAP, CHAIN_CAP]);
+    await runOrder({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 0n } }); // non-busy confirmed order
+    await runOrder({ feeBps: 55n }); // no confirm screen
+    await runOrder({ confirmedFeeCap: true, busyGuard: GUARD }); // 99 bps busy
+    await runOrder({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 500n } });
+    await runOrder({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 5_000n } }); // above the market maximum
+    expect(mocks.signedFees).toEqual([135n, 135n, 234n, 635n, MARKET_MAX]);
+  });
+  it("a 500 bps confirmed busy quote with the rate unchanged lands: the signed cap covers it and the pre-sign read lets it through", async () => {
+    mocks.sendTxWaiting.mockResolvedValue("sig-ok");
+    mocks.fresh.mockResolvedValue(500n);
+    const { sig, err } = await runOrder({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 500n } });
+    expect(err).toBeNull();
+    expect(sig).toBe("sig-ok");
+    expect(mocks.signedFees[0]! >= 30n + 100n + 500n).toBe(true); // base + worst-case matcher + busy: the wrapper's 98 check passes
+    await expect(preSign()!()).resolves.toBeUndefined();
+  });
+  it("a rise above the confirmed 500 bps is refused before the wallet", async () => {
+    mocks.sendTxWaiting.mockResolvedValue("sig-ok");
+    await runOrder({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 500n } });
+    mocks.fresh.mockResolvedValue(501n);
+    await expect(preSign()!()).rejects.toBeInstanceOf(BusyFeeRoseError);
+  });
+  it("f8-like drift (confirm showed 99 bps, the matcher moved 23 -> 30, busy unchanged): lands, not refused", async () => {
+    mocks.sendTxWaiting.mockResolvedValue("sig-ok");
+    mocks.fresh.mockResolvedValue(46n);
+    const { err } = await runOrder({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 46n } });
+    expect(err).toBeNull();
+    expect(mocks.signedFees[0]! >= 30n + 30n + 46n).toBe(true); // 106
+    await expect(preSign()!()).resolves.toBeUndefined();
   });
   it("a confirmed order hands the send a preSignCheck; an unconfirmed one does not (closes etc. are unchanged)", async () => {
     mocks.sendTxWaiting.mockResolvedValue("sig-ok");
@@ -259,7 +290,7 @@ describe("useTrade: a confirmed order signs the chain cap, never silently raises
     expect(err).toBeInstanceOf(FeeChangedAfterReviewError);
     expect((err as Error).message).toBe("The fee changed while you were reviewing. Review it again. Nothing was charged.");
     expect(mocks.sendTxWaiting).toHaveBeenCalledTimes(1);
-    expect(mocks.signedFees).toEqual([CHAIN_CAP]);
+    expect(mocks.signedFees).toEqual([CHAIN_CAP + 99n]);
     expect(mocks.fetchTradeFeeBps.mock.calls.some((c) => (c[3] as { withUtilMax?: boolean } | undefined)?.withUtilMax)).toBe(false);
   });
   it("confirmed + a 98 and the fresh read shows the busy-side rate rose: the busy-side line", async () => {

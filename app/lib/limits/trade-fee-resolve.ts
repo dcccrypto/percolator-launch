@@ -41,14 +41,18 @@ export function utilFeeMaxBpsOf(marketData: Uint8Array, assetIndex = 0): number 
 }
 
 /** Pure: the SDK rule on raw bytes. null when the market cannot be decoded or its base exceeds its maximum. */
-export function resolveTradeFeeBps(i: { marketData: Uint8Array; matcherCtxData: Uint8Array | null; assetIndex?: number; withUtilMax?: boolean }): TradeFeeToSignV22 | null {
+export function resolveTradeFeeBps(i: { marketData: Uint8Array; matcherCtxData: Uint8Array | null; assetIndex?: number; withUtilMax?: boolean; confirmedUtilFeeBps?: bigint }): TradeFeeToSignV22 | null {
   const inputs = readTradeFeeInputsApp(i.marketData, i.assetIndex ?? 0, i.matcherCtxData);
   if (!inputs) return null;
   try {
     // v2.2 QA U-2: after a 98 the cap also covers the asset's utilisation fee at its maximum (the growth record's
     // util_fee_max; 0 when growth is off). The fill still charges only base + the matcher's request + the fee for THIS
     // fill (wrapper RC 6c078a0e handle_trade_cpi: `base + requested + util <= fee_bps` and `<= max_trading_fee_bps`).
-    const utilFeeBps = i.withUtilMax ? utilFeeMaxBpsOf(i.marketData, i.assetIndex ?? 0) : 0;
+    // Council r9 recheck NEW-1: a CONFIRMED order signs room for the busy-side rate the trader confirmed (not the util max a silent raise would
+    // use): base + worst-case matcher + that rate + margin, still bounded by the market's max_trading_fee_bps. With a rate of 0 this is exactly
+    // the old cap.
+    const confirmed = i.confirmedUtilFeeBps !== undefined && i.confirmedUtilFeeBps > 0n ? Number(i.confirmedUtilFeeBps) : 0;
+    const utilFeeBps = i.withUtilMax ? utilFeeMaxBpsOf(i.marketData, i.assetIndex ?? 0) : confirmed;
     return computeTradeFeeBpsToSignV22(inputs, utilFeeBps > 0 ? { utilFeeBps } : {});
   } catch {
     return null;
@@ -63,16 +67,21 @@ export async function fetchTradeFeeBps(
   connection: Pick<Connection, "getMultipleAccountsInfo">,
   market: PublicKey,
   matcherCtx: PublicKey,
-  p: { fallback?: bigint; assetIndex?: number; withUtilMax?: boolean },
+  p: { fallback?: bigint; assetIndex?: number; withUtilMax?: boolean; confirmedUtilFeeBps?: bigint },
 ): Promise<bigint | undefined> {
   try {
     const [m, c] = await connection.getMultipleAccountsInfo([market, matcherCtx], "confirmed");
     if (!m) return p.fallback;
-    const r = resolveTradeFeeBps({ marketData: new Uint8Array(m.data), matcherCtxData: c ? new Uint8Array(c.data) : null, assetIndex: p.assetIndex, withUtilMax: p.withUtilMax });
-    return r ? r.feeBps : p.fallback;
+    const r = resolveTradeFeeBps({ marketData: new Uint8Array(m.data), matcherCtxData: c ? new Uint8Array(c.data) : null, assetIndex: p.assetIndex, withUtilMax: p.withUtilMax, confirmedUtilFeeBps: p.confirmedUtilFeeBps });
+    return r ? r.feeBps : withConfirmedBusy(p.fallback, p.confirmedUtilFeeBps);
   } catch {
-    return p.fallback;
+    return withConfirmedBusy(p.fallback, p.confirmedUtilFeeBps);
   }
+}
+
+/** The legacy fallback (no readable market) plus the confirmed busy-side rate, so an unreadable market still leaves room for it. */
+function withConfirmedBusy(fallback: bigint | undefined, busy: bigint | undefined): bigint | undefined {
+  return fallback !== undefined && busy !== undefined && busy > 0n ? fallback + busy : fallback;
 }
 
 /** 98 GrowthUtilisationFeeNotCovered from the wrapper (or unattributed), in any of the error shapes. */

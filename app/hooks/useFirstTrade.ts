@@ -178,7 +178,11 @@ export function useFirstTrade(slabAddress: string) {
         // Q-1 (v2.2 QA): sign the SDK rule (base + worst-case matcher fee + 5, capped at the market
         // maximum; lib/limits/trade-fee-resolve.ts), else Custom 9 on the first fill. Flag off: unchanged.
         let feeBps = isDevnetV22Enabled()
-          ? await fetchTradeFeeBps(connection, market, lp.matcherCtx, { fallback: p.feeBps ?? wrapperConfigV17?.tradeFeeBps })
+          ? await fetchTradeFeeBps(connection, market, lp.matcherCtx, {
+              fallback: p.feeBps ?? wrapperConfigV17?.tradeFeeBps,
+              // Council r9 recheck NEW-1: room for the confirmed busy-side rate (0 = the old cap exactly).
+              ...(p.confirmedFeeCap && p.busyGuard ? { confirmedUtilFeeBps: p.busyGuard.confirmedBusyFeeBps } : {}),
+            })
           : p.feeBps;
         // Delta review MED-A: after a 98 on a confirmed order, say "busy-side fee rose" only if a fresh read shows it did.
         const explainBusy = p.busyGuard

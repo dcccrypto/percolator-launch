@@ -2682,7 +2682,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             value={`${formatTokenAmount(marginNative, decimals)} ${collateralSymbol}`}
             tooltip="Collateral this order sets aside from your account to back the position, returned (plus or minus PnL) when it closes. Not a fee."
           />
-          {/* Owner decision 2026-11-12 (item 3): the busy-side fee is its own line, not part of the trading fee shown above or of the Entry. */}
+          {/* Owner decision 2026-11-12 (item 3): the busy-side fee has its own line AND is included in the total "Fee (est.)" above (it is not charged on top); it is never part of the Entry. */}
           {busyFee > 0n && (
             <div className="col-span-2" data-testid="ticket-busy-fee">
               <SummaryCell
