@@ -131,6 +131,7 @@ import { v1BlocksOrder } from "@/lib/v21/move/close-only";
 import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
 import { V21_REFRESHING_POSITIONS } from "@/lib/v21/loss-stale-retry";
 import { StatusLine } from "@/components/ui/StatusLine";
+import { BUSY_FEE_LABEL, busyFeeNotice, busyFeeValue } from "@/lib/busy-side-fee";
 import { V22_COPY } from "@/lib/v22/copy";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { recordCloseTx } from "@/lib/last-close-tx";
@@ -430,6 +431,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     feeBaseBps: bigint;
     feeQuoteCharged: boolean;
     feeNotional: bigint;
+    /** Owner decision 2026-11-12 (item 3): the busy-side part, its own line on the confirm screen (0 / 0n = none). */
+    busyFeeBps: bigint;
+    busyFeeAtoms: bigint;
+    busyFixed1x: boolean;
     worstFillPriceE6: bigint;
     riskLeverage: number | null;
     depositAtoms: bigint;
@@ -1228,6 +1233,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     : feeExtrasLabel(ticketFeeForEstimate(ticketLimits));
   const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
   const estFeeHasExtras = feeHasExtras(tradingFeeBps, estFeeBps);
+  // Owner decision 2026-11-12 (item 3): the busy-side part is shown on its own line (and never in the Entry). It stays inside estFee above.
+  const busyFeeBps = ticketFeeForEstimate(ticketLimits)?.utilFeeBps ?? 0n;
+  const busyFee = hasOrder && busyFeeBps > 0n ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, busyFeeBps) : 0n;
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
   const limitsCloseNotice = closeLimitNotice(existingPositionSize, ticketLimits.sideLimits);
 
@@ -1341,6 +1349,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // deployed wrapper (growth_v19::MAX_IMR_BPS = 10_000) the cap bottoms out at exactly 1x. Null on a reduce / close / non-growth market.
   const growthFillCap = ticketLimits.growth?.fillMaxLeverage ?? null;
   const growthCapBelowOne = !mockMode && growthFillCap !== null && growthFillCap < 1;
+  // Max on a busy side forces 1x ("1x (fixed)" in the selector): the case where the separate fee and its notice matter most.
+  const busyFixed1x = busyFee > 0n && selectorMaxLeverage <= 1 && !growthCapBelowOne;
   // Review of #3778 (security, Low): the cap was enforced only by the clamp effect above. Submit also refuses a leverage above the cap
   // for this size, so a render where the effect has not yet lowered the choice can never be signed (the effect then sets it to the cap).
   const leverageOverCap = levCapForSize >= 1 && leverage > Math.floor(levCapForSize * 100) / 100 + 1e-9;
@@ -1600,7 +1610,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       });
       setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
       void Promise.all([measured, execFillP]).then(([change, execFill]) => {
-        const effective = execFill ? effectivePriceE6(execFill, baseFeeBps) : null;
+        const effective = execFill ? effectivePriceE6(execFill, baseFeeBps, busyFeeBps) : null;
         const price = v22Fill ? (effective !== null ? formatLotPriceE6(effective, lotExp) : null) : formatLotPriceE6(submitPriceE6, lotExp);
         const outcome = classifyOrderChange(direction, effectiveSize, change);
         let next: NonNullable<typeof result>;
@@ -1694,7 +1704,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // the fee, the same price the toast and the result line show), so the PnL shown is net of the spread. The BOOKED price is kept
           // beside it for risk math only (liquidation price, equity): the engine's basis is the booked price and the spread already left
           // capital as a fee, so valuing risk from the fill price would count it twice (lib/position-pnl.ts riskEntry).
-          const paid = ef ? effectivePriceE6(ef, baseFeeBps) : null;
+          const paid = ef ? effectivePriceE6(ef, baseFeeBps, busyFeeBps) : null;
           if (ef && paid !== null) applyEntryFill(paid, ef.bookedPriceE6);
           // The fill could not be read (or its price cannot be split from the fee): keep no entry at all (the position panel then shows an
           // unknown one) rather than the mark or the booked price, which is gross of the spread.
@@ -2605,6 +2615,21 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             value={`${formatTokenAmount(marginNative, decimals)} ${collateralSymbol}`}
             tooltip="Collateral this order sets aside from your account to back the position, returned (plus or minus PnL) when it closes. Not a fee."
           />
+          {/* Owner decision 2026-11-12 (item 3): the busy-side fee is its own line, not part of the trading fee shown above or of the Entry. */}
+          {busyFee > 0n && (
+            <div className="col-span-2" data-testid="ticket-busy-fee">
+              <SummaryCell
+                label={BUSY_FEE_LABEL}
+                value={busyFeeValue(busyFeeBps, `${formatTokenAmount(busyFee, decimals)} ${collateralSymbol}`)}
+                tooltip="An extra fee a busy side charges when you open. It is already counted in the total fee above and is not part of your entry price."
+              />
+            </div>
+          )}
+        </div>
+      )}
+      {hasOrder && !roomUnknown && busyFee > 0n && (
+        <div className="mb-2" data-testid="ticket-busy-fee-notice">
+          <StatusLine message={{ kind: "busy-side-fee", variant: "paused", title: "Busy side", body: busyFeeNotice(busyFeeBps, `${formatTokenAmount(busyFee, decimals)} ${collateralSymbol}`, busyFixed1x) }} />
         </div>
       )}
 
@@ -2867,6 +2892,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               feeBaseBps: estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits)),
               feeQuoteCharged: quoteChargedInEstimate,
               feeNotional: (positionSize * oracleE6) / 1_000_000n,
+              busyFeeBps: busyFee > 0n ? busyFeeBps : 0n,
+              busyFeeAtoms: busyFee,
+              busyFixed1x,
               worstFillPriceE6,
               // The account after this trade: the resulting position and the bundled deposit, as
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
@@ -3021,6 +3049,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           tradingFee={confirmFeeNow}
           tradingFeeEstimated={confirmFeeBpsNow > tradingFeeBps}
           quoteInFee={confirmSnapshot.feeQuoteCharged || !!confirmQuoteNow?.inFee}
+          busyFeeBps={confirmSnapshot.busyFeeBps}
+          busyFeeAtoms={confirmSnapshot.busyFeeAtoms}
+          busyFixed1x={confirmSnapshot.busyFixed1x}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
           spreadEstimate={spreadFor(confirmSnapshot.positionSize, direction === "long")}
           accountEquity={userAccount ? capital : null}

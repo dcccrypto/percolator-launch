@@ -14,6 +14,8 @@ import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display"
 import { LiqPriceValue } from "./LiqPriceValue";
 import { orderHeading } from "@/lib/trading";
 import { FIRST_TRADE_COPY } from "@/lib/first-trade";
+import { StatusLine } from "@/components/ui/StatusLine";
+import { BUSY_FEE_LABEL, busyFeeNotice, busyFeeValue } from "@/lib/busy-side-fee";
 import { SPREAD_LABEL, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 
 interface TradeConfirmationModalProps {
@@ -38,6 +40,14 @@ interface TradeConfirmationModalProps {
   tradingFeeEstimated?: boolean;
   /** The fee above already holds the matcher's requested fee (charged quote, or added from the spread quote). Omitted: inferred from `tradingFeeEstimated`. */
   quoteInFee?: boolean;
+  /**
+   * Owner decision 2026-11-12 (item 3): the growth busy-side fee on this open, shown as its OWN line with a notice, never as part of the
+   * entry price. It is still inside `tradingFee` (the total). Omitted / 0: none, nothing is shown.
+   */
+  busyFeeBps?: bigint;
+  busyFeeAtoms?: bigint;
+  /** Leverage was fixed at 1x (Max on a busy side): the notice says so. */
+  busyFixed1x?: boolean;
   /**
    * Worst-acceptable fill price (limit_price_e6) the trade will be signed
    * with, derived from live mark + default slippage bps. Shown so the user
@@ -93,6 +103,9 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   tradingFee,
   tradingFeeEstimated = false,
   quoteInFee,
+  busyFeeBps = 0n,
+  busyFeeAtoms = 0n,
+  busyFixed1x = false,
   worstFillPriceE6,
   spreadEstimate = null,
   accountEquity,
@@ -128,6 +141,8 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   const shownFee = addSpreadToFee
     ? tradingFee + (notional * BigInt(spreadEstimate.kind === "quote" ? spreadEstimate.bps : spreadEstimate.minBps)) / 10_000n
     : tradingFee;
+  const busyAmount = `${formatTokenAmount(busyFeeAtoms, decimals)} ${settleSymbol}`;
+  const hasBusyFee = busyFeeBps > 0n && busyFeeAtoms > 0n;
   const liqDisplay =
     estimatedLiqDisplay ??
     describeLiqPrice({
@@ -326,6 +341,12 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
               {formatTokenAmount(shownFee, decimals)} {settleSymbol}
             </span>
           </div>
+          {hasBusyFee && (
+            <div className="flex justify-between gap-3" data-testid="confirm-busy-fee">
+              <span className="text-[var(--text-secondary)]">{BUSY_FEE_LABEL}:</span>
+              <span className="text-right font-mono font-medium text-[var(--text)]">{busyFeeValue(busyFeeBps, busyAmount)}</span>
+            </div>
+          )}
           <div className="flex justify-between gap-3" data-testid="confirm-spread">
             <span className="text-[var(--text-secondary)]">{SPREAD_LABEL}:</span>
             <span className="text-right font-mono font-medium text-[var(--text)]">
@@ -359,6 +380,12 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             </div>
           )}
         </div>
+
+        {hasBusyFee && (
+          <div className="mb-4" data-testid="confirm-busy-fee-notice">
+            <StatusLine message={{ kind: "busy-side-fee", variant: "paused", title: "Busy side", body: busyFeeNotice(busyFeeBps, busyAmount, busyFixed1x) }} />
+          </div>
+        )}
 
         {/* Risk warning */}
         <div className="mb-6 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 p-3">

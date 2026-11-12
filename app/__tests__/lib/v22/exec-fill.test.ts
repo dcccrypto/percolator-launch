@@ -111,3 +111,60 @@ describe("readExecFill", () => {
     expect(await readExecFill({ getTransaction } as never, clipped.sig, WRAPPER, { market: SWORDCAT }, async () => {})).toBeNull();
   });
 });
+
+import type { ExecFill } from "@/lib/v22/exec-fill";
+import { busyFeeAtoms } from "@/lib/v22/exec-fill";
+
+describe("owner decision 2026-11-12 (item 3): the busy-side fee is not part of the Entry", () => {
+  const BOOKED = 100_000_000n; // 100.0 per unit
+  const Q = 2_000_000n; // 2 units (6 decimals)
+  const NOTIONAL = (Q * BOOKED) / 1_000_000n; // 200,000,000 atoms
+  const bps = (b: bigint) => (NOTIONAL * b) / 10_000n;
+  const fill = (signedQ: bigint, feeBps: bigint, quotedBpsAbove = 23n): ExecFill => ({
+    bookedPriceE6: BOOKED,
+    executedQ: signedQ,
+    feeAtoms: bps(feeBps),
+    notionalAtoms: NOTIONAL,
+    taker: OTHER,
+    quotedPriceE6: signedQ > 0n ? BOOKED + (BOOKED * quotedBpsAbove) / 10_000n : BOOKED - (BOOKED * quotedBpsAbove) / 10_000n,
+    legs: 1,
+  });
+  const SPREAD_PER_UNIT = (bps(23n) * 1_000_000n) / Q; // the 23 bps spread, per unit
+
+  it("long: base 30 + spread 23 + busy 500 bps: Entry = booked + the spread only, not + the 5% busy fee", () => {
+    const f = fill(Q, 30n + 23n + 500n);
+    expect(effectivePriceE6(f, 30n, 500n)).toBe(BOOKED + SPREAD_PER_UNIT);
+    // the old behaviour folded the 5% in (~105.23)
+    expect(effectivePriceE6(f, 30n)).toBe(BOOKED + SPREAD_PER_UNIT + (bps(500n) * 1_000_000n) / Q);
+    expect(busyFeeAtoms(f, 500n)).toBe(bps(500n));
+  });
+  it("short: the Entry moves DOWN by the spread only", () => {
+    const f = fill(-Q, 30n + 23n + 500n);
+    expect(effectivePriceE6(f, 30n, 500n)).toBe(BOOKED - SPREAD_PER_UNIT);
+    expect(effectivePriceE6(f, 30n)).toBeLessThan(BOOKED - SPREAD_PER_UNIT);
+  });
+  it("no busy-side fee (omitted, null, 0): unchanged from before", () => {
+    for (const side of [Q, -Q]) {
+      const f = fill(side, 30n + 23n);
+      const old = effectivePriceE6(f, 30n);
+      expect(effectivePriceE6(f, 30n, undefined)).toBe(old);
+      expect(effectivePriceE6(f, 30n, null)).toBe(old);
+      expect(effectivePriceE6(f, 30n, 0n)).toBe(old);
+    }
+  });
+  it("busy fee with no matcher spread (a market with no quote): Entry = the booked price", () => {
+    const f = { ...fill(Q, 30n + 500n), quotedPriceE6: 0n };
+    expect(effectivePriceE6(f, 30n, 500n)).toBe(BOOKED);
+  });
+  it("the busy rate moved between quote and landing (fee carries 500 bps, the order was quoted at 200): Entry is UNKNOWN, never the fee folded in and never the bare mark", () => {
+    const f = fill(Q, 30n + 23n + 500n);
+    expect(effectivePriceE6(f, 30n, 200n)).toBeNull();
+  });
+  it("the fee is LESS than the quoted busy fee (rate fell): unknown too", () => {
+    const f = fill(Q, 30n + 23n + 100n);
+    expect(effectivePriceE6(f, 30n, 500n)).toBeNull();
+  });
+  it("an unknown base fee is still unknown with a busy fee", () => {
+    expect(effectivePriceE6(fill(Q, 553n), null, 500n)).toBeNull();
+  });
+});

@@ -17,6 +17,7 @@
  */
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { decodeTxEventsV22 } from "@/lib/v22/sdk/v22-fill-events";
+import { requestedFeeBps } from "@/lib/limits/fee-channel";
 
 export interface ExecFill {
   /** Size-weighted BOOKED price (the mark at execution), e6 (per lot on a lot market). NOT what the trader paid: see effectivePriceE6. */
@@ -85,12 +86,40 @@ export function spreadFeeAtoms(f: ExecFill, baseFeeBps: bigint): bigint {
 }
 
 /**
- * The price the trader effectively paid (e6): booked +/- the spread part of the fee spread over the size. Null when the base fee is
- * unknown (no honest split), never the bare mark.
+ * Owner decision 2026-11-12 (item 3): the growth BUSY-SIDE (utilisation) fee is NOT part of the Entry. It is a separate fee the engine
+ * charges on an OPEN only (growth_v19.rs util_fee_on_fill_bps; wrapper handle_trade_cpi), as a rate on the whole fill, on top of the base
+ * fee and the matcher's request, and it is inside the FILL record's `fee_atoms`. The FILL event does NOT carry it separately, so it is
+ * taken from the rate the ticket quoted for THIS order (`busyFeeBps`: the same pure growth formula, on the same notional, that the signed
+ * fee cap was built from). Atoms = notional x bps / 1e4, floored.
  */
-export function effectivePriceE6(f: ExecFill, baseFeeBps: bigint | null | undefined): bigint | null {
+export function busyFeeAtoms(f: ExecFill, busyFeeBps: bigint | null | undefined): bigint {
+  return busyFeeBps != null && busyFeeBps > 0n ? (f.notionalAtoms * busyFeeBps) / 10_000n : 0n;
+}
+
+/**
+ * The price the trader effectively paid (e6): booked +/- the matcher's SPREAD part of the fee spread over the size. Null when the base fee
+ * is unknown (no honest split), never the bare mark.
+ *
+ * `busyFeeBps` (omitted / 0 = none, the old behaviour): the busy-side rate the order was quoted with. Its atoms are taken out of the
+ * per-unit adjustment so the Entry stays the actual fill price and the fee is shown on its own line. The quote is the ticket's read of
+ * the state the engine prices from, so it is exact when the side's utilisation has not moved between the quote and the landing. If it
+ * moved, the residual (fee - base - busy) no longer fits what the matcher could have charged (it would be negative, or above the quoted
+ * spread by more than a bps), and the Entry is treated as UNKNOWN (null) rather than folding the difference into a price.
+ */
+export function effectivePriceE6(f: ExecFill, baseFeeBps: bigint | null | undefined, busyFeeBps?: bigint | null): bigint | null {
   if (baseFeeBps == null || f.executedQ === 0n) return null;
-  const perUnit = (spreadFeeAtoms(f, baseFeeBps) * 1_000_000n) / abs(f.executedQ);
+  let spread = spreadFeeAtoms(f, baseFeeBps);
+  const busy = busyFeeAtoms(f, busyFeeBps);
+  if (busy > 0n) {
+    const oneBp = f.notionalAtoms / 10_000n;
+    const tol = oneBp + 3n; // whole-atom rounding of the engine's fee and of the notional
+    const rest = spread - busy;
+    // The most the matcher's spread can be: its own quote in the event (ceil bps, like the matcher's request), none when it quoted nothing.
+    const maxSpread = f.quotedPriceE6 > 0n ? (f.notionalAtoms * requestedFeeBps(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
+    if (rest < -tol || rest > maxSpread + tol) return null;
+    spread = rest > 0n ? rest : 0n;
+  }
+  const perUnit = (spread * 1_000_000n) / abs(f.executedQ);
   const p = f.executedQ > 0n ? f.bookedPriceE6 + perUnit : f.bookedPriceE6 - perUnit;
   return p > 0n ? p : null;
 }
