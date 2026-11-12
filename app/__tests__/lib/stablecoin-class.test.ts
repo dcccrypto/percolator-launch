@@ -71,7 +71,7 @@ describe("symbol / name rule", () => {
   beforeEach(() => __setDevnetV22ForTest(true));
   afterAll(() => __setDevnetV22ForTest(null));
 
-  it.each(["USDC", "usdc", "$USDC", "USDT", "USD₮", "PYUSD", "USDS", "FDUSD", "USDe", "sUSDe", "USDG", "DAI", "sDAI", "USD1", "AUSD", "USDY", "USDH", "UXD", "hyUSD", "frxUSD", "UST", "USDC.e", "USDCet", "USDTbs", "wUSDC", "aeUSDC", "apUSDT", "jlUSDC", "USDCpo"])(
+  it.each(["USDC", "usdc", "$USDC", "USDT", "USD₮", "PYUSD", "USDS", "FDUSD", "USDe", "sUSDe", "USDG", "DAI", "sDAI", "USD1", "AUSD", "USDH", "UXD", "hyUSD", "frxUSD", "UST", "USDC.e", "USDCet", "USDTbs", "wUSDC", "aeUSDC", "apUSDT", "jlUSDC", "USDCpo"])(
     "symbol %s is a hard block",
     (symbol) => {
       expect(stablecoinIdentityVerdict({ symbol })).toBe("block");

@@ -6,6 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { maxFillWithHeadroomQ } from "@/lib/limits/ticket";
 
 const slow = vi.hoisted(() => ({ on: false, lotExp: 0 }));
 const px = vi.hoisted(() => ({ e6: 1_000_000n, drift: 0n, floor: 0n }));
@@ -147,13 +148,17 @@ describe("r8 council: Buying power and Max stay bounded when the typed order onl
   // opening room on the short side + the long being closed; the wallet (10,000) x leverage is far above it at every leverage here
   const BOUND_Q = ROOM + 234_000n;
   for (const typed of ["0.1", "0.2", ""]) {
-    it(`typed "${typed}" (below the 0.234 position): BP == the Max-click fill, <= the room/collateral bound, monotonic in leverage`, async () => {
+    it(`typed "${typed}" (below the 0.234 position): BP == Max, the Max-click fill == Max less its headroom, <= the room/collateral bound, monotonic in leverage`, async () => {
       const rows = await readings(typed);
       for (const r of rows) {
         const boundUsd = Number(BOUND_Q) / 1e6; // price 1.00
         expect(r.bp, `bp at ${r.lev}x`).toBeLessThanOrEqual(boundUsd + 0.01);
         expect(r.maxQ <= BOUND_Q, `max at ${r.lev}x`).toBe(true);
-        expect(Math.abs(r.bp - r.filled), `BP ${r.bp} vs the Max-click fill ${r.filled} at ${r.lev}x`).toBeLessThan(0.02);
+        // #3809: the Max chip fills the live Max less its tick headroom (maxFillWithHeadroomQ), so the fill sits just under BP, never above.
+        const headroomFill = Number(maxFillWithHeadroomQ(r.maxQ, "usd", 1_000_000n, 234_000n)) / 1e6; // price 1.00, the ticket's USD unit
+        expect(Math.abs(r.filled - headroomFill), `the Max-click fill ${r.filled} vs Max less headroom ${headroomFill} at ${r.lev}x`).toBeLessThan(0.02);
+        expect(r.filled, `the Max-click fill ${r.filled} is not above BP ${r.bp} at ${r.lev}x`).toBeLessThanOrEqual(r.bp + 0.01);
+        expect(r.bp - r.filled, `BP ${r.bp} vs the Max-click fill ${r.filled} at ${r.lev}x: only the headroom apart`).toBeLessThan(r.bp / 400 + 0.03);
         expect(Math.abs(r.bp - Number(r.maxQ) / 1e6), `BP vs the Max label at ${r.lev}x`).toBeLessThan(0.02);
       }
       for (let i = 1; i < rows.length; i++) expect(rows[i].bp).toBeGreaterThanOrEqual(rows[i - 1].bp);

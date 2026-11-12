@@ -486,12 +486,16 @@ export function shrinkSizeInput(size: string, unit: "token" | "usd", steps: numb
  * The size the Max chip fills: the live Max less a small headroom (0.25% plus one display step: a mark tick moves both the room and the order by ~0.05%, so one tick costs ~0.1%), so ordinary mark / room drift between
  * the click and the next ticks cannot put a Max-chosen order over the room (r8 Council: Max went "over the max fillable size" after a
  * tick, 1206.08 vs Max 1205.60). Never above `maxQ`; a Max too small to carry the headroom is returned as is.
+ * `closingQ` is the open position this order closes (0 when it opens or adds): headroom is never taken below it, so a Max bound by the
+ * close fills the exact close (no dust left open) and, past the close (a flip), the headroom comes off only the part above it.
  */
-export function maxFillWithHeadroomQ(maxQ: bigint, unit: "token" | "usd", priceE6: bigint): bigint {
+export function maxFillWithHeadroomQ(maxQ: bigint, unit: "token" | "usd", priceE6: bigint, closingQ = 0n): bigint {
   if (maxQ <= 0n || priceE6 <= 0n) return maxQ;
   const stepQ = unit === "usd" ? (10_000n * 1_000_000n) / priceE6 + 1n : 1n;
   const headroom = maxQ / 400n + stepQ;
-  return maxQ > headroom * 2n ? maxQ - headroom : maxQ;
+  const fill = maxQ > headroom * 2n ? maxQ - headroom : maxQ;
+  const floorQ = closingQ > 0n ? (closingQ < maxQ ? closingQ : maxQ) : 0n;
+  return fill < floorQ ? floorQ : fill;
 }
 
 const ceilDiv = (a: bigint, b: bigint): bigint => (a <= 0n ? a / b : (a + b - 1n) / b);

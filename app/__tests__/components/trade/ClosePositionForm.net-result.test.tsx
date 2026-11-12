@@ -37,7 +37,8 @@ describe("close dialog: net result after closing fees", () => {
     expect(screen.getByText("Est. PnL (before closing fees):")).toBeInTheDocument();
     expect(screen.getByTestId("close-gross-pnl").textContent).toMatch(/^\+1 USDC/);
     expect(screen.getByTestId("close-gross-pnl").className).not.toContain("--long");
-    expect(screen.queryByTestId("close-profit-settles")).toBeNull();
+    // the gross +1.00 is still a profit that has to settle, whatever the net says
+    expect(screen.getByTestId("close-profit-settles")).toBeInTheDocument();
   });
 
   it("a clear winner: positive net, green, with the profit line", () => {
@@ -54,7 +55,7 @@ describe("close dialog: net result after closing fees", () => {
     render(<ClosePositionForm {...props} currentPrice={1_100_000n} spreadEstimateFor={() => null} />);
     expect(screen.queryByTestId("close-net-result")).toBeNull();
     expect(screen.getByTestId("close-net-loading").textContent).toBe("--");
-    expect(screen.queryByTestId("close-profit-settles")).toBeNull();
+    expect(screen.getByTestId("close-profit-settles")).toBeInTheDocument(); // keyed on the gross PnL, which is known
   });
 
   it("an unknown entry shows no net figure", () => {
@@ -117,5 +118,68 @@ describe("close dialog: net result after closing fees", () => {
   it("no helper line when the entries agree", () => {
     render(<ClosePositionForm {...props} riskEntryPrice={1_000_000n} spreadEstimateFor={loaded} />);
     expect(screen.queryByTestId("close-net-basis")).toBeNull();
+  });
+
+  // r9 LOW-1: a quoter that failed / is unavailable never answers, so "loading" would show "--" forever.
+  const unavailable = Object.assign(() => null, { unavailable: true });
+  it("an unavailable spread quoter shows the net from the base-fee estimate, labelled excl. spread, and neutral for a gain", () => {
+    // gross +100, base fee 30 bps of 1,100 = 3.3 -> +96.7
+    render(<ClosePositionForm {...props} currentPrice={1_100_000n} spreadEstimateFor={unavailable} />);
+    expect(screen.queryByTestId("close-net-loading")).toBeNull();
+    const net = screen.getByTestId("close-net-result");
+    expect(net.textContent).toMatch(/^\+96\.7 USDC/);
+    expect(screen.getByTestId("close-net-excl-spread").textContent).toMatch(/excl\. spread/);
+    expect(net.className).not.toContain("--long");
+  });
+  it("an unavailable quoter on a loss is red (never green) and labelled", () => {
+    render(<ClosePositionForm {...props} currentPrice={900_000n} spreadEstimateFor={unavailable} />);
+    const net = screen.getByTestId("close-net-result");
+    expect(net).toHaveAttribute("data-sign", "negative");
+    expect(net.className).toContain("--short");
+    expect(screen.getByTestId("close-net-excl-spread")).toBeInTheDocument();
+  });
+  it("a loaded quote carries no excl. spread label", () => {
+    render(<ClosePositionForm {...props} currentPrice={1_100_000n} spreadEstimateFor={loaded} />);
+    expect(screen.queryByTestId("close-net-excl-spread")).toBeNull();
+  });
+
+  // r9 LOW-2: the settle note follows the gross PnL (what settles), not the net.
+  it("no profit-settles note when the gross PnL is a loss, even with a full close", () => {
+    render(<ClosePositionForm {...props} currentPrice={900_000n} spreadEstimateFor={loaded} />);
+    expect(screen.queryByTestId("close-profit-settles")).toBeNull();
+  });
+
+  // r9 LOW-3: the near-zero band is half a cent of USD value on a coin-collateral market.
+  it("9-decimal coin collateral: a -0.003 SOL net (about $0.45) is shown, not hidden as 0.00", () => {
+    render(
+      <ClosePositionForm
+        {...props}
+        symbol="SOL"
+        collateralSymbol="SOL"
+        decimals={9}
+        priceUsd={150}
+        positionSize={1_000_000_000n}
+        capital={5_000_000_000n}
+        spreadEstimateFor={() => ({ kind: "quote", bps: 0, execPriceE6: null, inFee: false })}
+      />,
+    );
+    const net = screen.getByTestId("close-net-result");
+    expect(net).toHaveAttribute("data-sign", "negative");
+    expect(net.textContent).not.toMatch(/^0\.00 /);
+  });
+  it("9-decimal coin collateral: a net under half a cent of USD still reads 0.00", () => {
+    render(
+      <ClosePositionForm
+        {...props}
+        symbol="SOL"
+        collateralSymbol="SOL"
+        decimals={9}
+        priceUsd={150}
+        positionSize={1_000_000n}
+        capital={5_000_000_000n}
+        spreadEstimateFor={() => ({ kind: "quote", bps: 0, execPriceE6: null, inFee: false })}
+      />,
+    );
+    expect(screen.getByTestId("close-net-result").textContent).toBe("0.00 SOL");
   });
 });
