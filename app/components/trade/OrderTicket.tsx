@@ -1416,16 +1416,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     // The confirm screen's deposit is what is signed (the live one can drift while the modal is open).
     // r9 review LOW-A: a confirm that showed NO deposit signs none. If the live order now needs one (capital moved while the confirm was
     // open), refuse and ask for a fresh review: never sign a deposit the trader did not see.
+    // The live deposit by the SAME rule the confirm snapshot uses (fundingMode && hasOrder): a deposit typed earlier whose box is now hidden
+    // (funding mode ended) is not a live deposit.
+    const liveDepositAtoms = fundingMode && hasOrder ? fundAtoms : 0n;
     const signedDepositAtoms = snapshotDepositAtoms !== undefined ? snapshotDepositAtoms : fundAtoms;
-    const depositAppearedAfterReview = snapshotDepositAtoms === 0n && fundAtoms > 0n;
+    const depositAppearedAfterReview = snapshotDepositAtoms === 0n && liveDepositAtoms > 0n;
+    // The reverse: the confirm showed a deposit but funding mode has ended since, so the plain trade would drop it. Re-review instead.
+    const depositDroppedAfterReview = snapshotDepositAtoms !== undefined && snapshotDepositAtoms > 0n && !fundingMode;
     const signedFundLabel = signedDepositAtoms === fundAtoms ? fundLabel : `${usd2(signedDepositAtoms, decimals)} ${collateralSymbol}`;
     maxPinned.current = null; // a submit (sent, refused or failed) ends the Max pin: the box is the trader's order now
     // SILENT-1: every exit of this handler before the wallet leaves a visible line (it used to just return).
     if (!marginInput) { setHumanError("Enter an amount to trade. Nothing was sent."); return; }
-    if (depositAppearedAfterReview) {
-      setHumanError(`Your balance changed while you were reviewing: this order now needs a deposit of ${fundLabel}. Review it again. Nothing was sent.`);
-      return;
-    }
     if (effectiveSize <= 0n) {
       setHumanError(lotExp > 0 ? "That size is less than one lot here, so there is nothing to send. Enter a larger amount." : "That size is too small to send. Enter a larger amount.");
       return;
@@ -1464,6 +1465,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
     if (!connected) {
       setHumanError("Wallet disconnected. Please reconnect your wallet.");
+      return;
+    }
+    // After every other pre-wallet check (their lines are more specific): the deposit signed must be the one the confirm screen showed.
+    if (depositAppearedAfterReview) {
+      setHumanError(`Your balance changed while you were reviewing: this order now needs a deposit of ${fundLabel}. Review it again. Nothing was sent.`);
+      return;
+    }
+    if (depositDroppedAfterReview) {
+      setHumanError("Your balance changed while you were reviewing: this order no longer needs the deposit you saw. Review it again. Nothing was sent.");
       return;
     }
 

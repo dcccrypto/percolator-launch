@@ -228,3 +228,48 @@ describe("r9 delta LOW-A: a confirm that showed no deposit never signs one", () 
     expect(screen.getByText(/Your balance changed while you were reviewing/)).toBeTruthy();
   });
 });
+
+describe("r9 delta MED: a deposit typed earlier whose box is now hidden does not block a plain trade", () => {
+  it("funding mode ends after a deposit was typed: the confirm shows no deposit and Confirm sends the plain trade", async () => {
+    let cap = 1_000_000n;
+    mocks.useUserAccount.mockImplementation(() => ({ account: { capital: cap, positionSize: 0n, entryPrice: 0n, pnl: 0n, feeCredits: 0n }, idx: 0 }));
+    mocks.fundAndTrade.mockImplementation(() => new Promise(() => {}));
+    const r = render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("limits-max-size-inline")).not.toBeNull(), { timeout: 8000 });
+    fireEvent.change(sizeBox(), { target: { value: "10" } });
+    await act(async () => {});
+    const dep = await screen.findByTestId("deposit-amount-input");
+    fireEvent.change(dep, { target: { value: "5" } });
+    await act(async () => {});
+    cap = 50_000_000n; // capital rises: funding mode ends and the deposit box is hidden, its typed value kept
+    await act(async () => { r.rerender(<OrderTicket slabAddress={SLAB} {...tickProp(1)} />); });
+    await act(async () => { r.rerender(<OrderTicket slabAddress={SLAB} {...tickProp(2)} />); });
+    expect(screen.queryByTestId("deposit-amount-input")).toBeNull();
+    await act(async () => { fireEvent.click(submit()); });
+    await waitFor(() => expect(mocks.modal.props).not.toBeNull());
+    expect(mocks.modal.props!.depositAmount ?? 0n).toBe(0n);
+    await act(async () => { mocks.modal.props!.onConfirm(); });
+    await act(async () => { await new Promise((res) => setTimeout(res, 50)); });
+    expect(screen.queryByText(/Your balance changed while you were reviewing/)).toBeNull();
+    expect(mocks.fundAndTrade).not.toHaveBeenCalled(); // plain trade path (no deposit), not the fund-and-trade path
+  });
+  it("the confirm showed a deposit, then funding mode ended: Confirm refuses (never drops a reviewed deposit silently)", async () => {
+    let cap = 1_000_000n;
+    mocks.useUserAccount.mockImplementation(() => ({ account: { capital: cap, positionSize: 0n, entryPrice: 0n, pnl: 0n, feeCredits: 0n }, idx: 0 }));
+    mocks.fundAndTrade.mockImplementation(() => new Promise(() => {}));
+    const r = render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("limits-max-size-inline")).not.toBeNull(), { timeout: 8000 });
+    fireEvent.change(sizeBox(), { target: { value: "10" } });
+    await act(async () => {});
+    await act(async () => { fireEvent.click(submit()); });
+    await waitFor(() => expect(mocks.modal.props).not.toBeNull());
+    expect(mocks.modal.props!.depositAmount ?? 0n).toBeGreaterThan(0n);
+    cap = 50_000_000n;
+    await act(async () => { r.rerender(<OrderTicket slabAddress={SLAB} {...tickProp(1)} />); });
+    await act(async () => { r.rerender(<OrderTicket slabAddress={SLAB} {...tickProp(2)} />); });
+    await act(async () => { mocks.modal.props!.onConfirm(); });
+    await act(async () => { await new Promise((res) => setTimeout(res, 50)); });
+    expect(mocks.fundAndTrade).not.toHaveBeenCalled();
+    expect(screen.getByText(/no longer needs the deposit you saw/)).toBeTruthy();
+  });
+});
