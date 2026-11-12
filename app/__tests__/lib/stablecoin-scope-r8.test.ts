@@ -60,8 +60,8 @@ describe("BOLD / USX / CASH are mint-only", () => {
 });
 
 describe("sUSDe / USDY / sDAI stay blocked", () => {
-  it("by symbol, name and mint", () => {
-    for (const symbol of ["sUSDe", "USDY", "sDAI", "SDAI", "sdai"]) expect(isStablecoinPerpBlocked(MEMECOIN, { symbol }), symbol).toBe(true);
+  it("by symbol, name and mint (USDY: mint and qualified name only, r9)", () => {
+    for (const symbol of ["sUSDe", "sDAI", "SDAI", "sdai"]) expect(isStablecoinPerpBlocked(MEMECOIN, { symbol }), symbol).toBe(true);
     for (const name of ["Staked USDe", "Ondo US Dollar Yield", "Savings Dai", "savings dai"]) expect(isStablecoinPerpBlocked(MEMECOIN, { symbol: "ZZZ", name }), name).toBe(true);
     for (const addr of ["Eh6XEPhSwoLv5wFApukmnaVSHQ6sAnoD9BmgmwQoN2sN", "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"]) expect(isStablecoinPerpBlocked(addr), addr).toBe(true);
   });

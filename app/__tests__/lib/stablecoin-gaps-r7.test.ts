@@ -4,7 +4,7 @@
  *  - tickers / names that were not refused (USD+, acUSD, eUSX, GHO, FRAX; BOLD / USX / CASH are mint-only since r8, see stablecoin-scope-r8.test.ts) or only warned (TUSD, BUSD, USDT0, RLUSD, USDtb, JupUSD);
  *  - homoglyph / zero-width / fullwidth tickers fold to the real ticker, without false positives on ordinary tokens;
  *  - the newly verified mints;
- *  - sUSDe, USDY and sDAI stay blocked;
+ *  - sUSDe, USDY and sDAI stay blocked (USDY by mint and qualified name only since r9);
  *  - server: no identity is refused, a failed metadata read fails closed, a pool differing from the slab's pinned dex_pool is a mismatch.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -32,8 +32,8 @@ describe("newly refused tickers", () => {
     (name) => expect(stablecoinIdentityVerdict({ symbol: "XYZ", name })).toBe("block"),
   );
 
-  it("keeps sUSDe, USDY and sDAI blocked (symbol, name and mint)", () => {
-    for (const symbol of ["sUSDe", "USDY", "sDAI"]) expect(isStablecoinPerpBlocked(CONTROL, { symbol }), symbol).toBe(true);
+  it("keeps sUSDe, USDY and sDAI blocked (symbol, name and mint; USDY by mint and name only since r9)", () => {
+    for (const symbol of ["sUSDe", "sDAI"]) expect(isStablecoinPerpBlocked(CONTROL, { symbol }), symbol).toBe(true);
     for (const name of ["Staked USDe", "Ondo US Dollar Yield"]) expect(isStablecoinPerpBlocked(CONTROL, { symbol: "ZZZ", name }), name).toBe(true);
     for (const addr of ["Eh6XEPhSwoLv5wFApukmnaVSHQ6sAnoD9BmgmwQoN2sN", "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"]) expect(isStablecoinPerpBlocked(addr), addr).toBe(true);
   });

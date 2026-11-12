@@ -13,8 +13,8 @@
  *
  * No Solana mint was found for GHO, BOLD, TUSD, BUSD, USDT0, RLUSD or USDtb (Jupiter token search returns only unverified look-alike
  * launches for them, which are deliberately NOT listed): GHO, TUSD, BUSD, USDT0, RLUSD and USDtb are covered by the ticker / name rule in
- * ./stablecoin-perps. BOLD, USX and CASH are NOT ticker-blocked (unrelated memecoins use those exact tickers): USX and CASH are blocked by
- * their verified mint below, and BOLD has no Solana mint so it is not blocked at all until one is verified (only the full name
+ * ./stablecoin-perps. BOLD, USX, CASH and (r9) USDY are NOT ticker-blocked (unrelated memecoins use those exact tickers): USX, CASH and USDY
+ * are blocked by their verified mint below, and BOLD has no Solana mint so it is not blocked at all until one is verified (only the full name
  * "Liquity BOLD" / "Liquity USD" is refused).
  *
  * 52 entries: 32 (2026-11-10) + 7 (r7, 2026-11-11, #3798) + 2 (r8, 2026-11-11: sUSD, syrupUSDC) + 11 (r8 Council finding, 2026-11-11: USDu, sUSDu,
