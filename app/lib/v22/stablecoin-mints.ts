@@ -17,11 +17,12 @@
  * their verified mint below, and BOLD has no Solana mint so it is not blocked at all until one is verified (only the full name
  * "Liquity BOLD" / "Liquity USD" is refused).
  *
- * 41 entries: 32 (2026-11-10) + 7 (r7, 2026-11-11, #3798) + 2 (r8, 2026-11-11: sUSD, syrupUSDC). The keeper copy
- * (percolator-oracle-keeper src/cross-cluster/stablecoin-mints.ts) must hold the same 41 addresses.
+ * 52 entries: 32 (2026-11-10) + 7 (r7, 2026-11-11, #3798) + 2 (r8, 2026-11-11: sUSD, syrupUSDC) + 11 (r8 Council finding, 2026-11-11: USDu, sUSDu,
+ * USDGO, USDP, sUSDai, USDv, DUSD, wYLDS, PST, XO, SOFID). The keeper copy
+ * (percolator-oracle-keeper src/cross-cluster/stablecoin-mints.ts) must hold the same 52 addresses.
  *
  * Policy: USD only. EURC and other non-USD fiat stables are NOT blocked. Yield-bearing / NAV-accruing USD tokens (sUSDe, USDY)
- * ARE blocked (sUSDe, USDY, sDAI, and the r8 additions sUSD and syrupUSDC): their price is a deterministic accrual on a dollar, so a perp on them has no independent underlying.
+ * ARE blocked (sUSDe, USDY, sDAI, and the r8 additions sUSD, syrupUSDC, sUSDu, sUSDai, wYLDS and PST): their price is a deterministic accrual on a dollar, so a perp on them has no independent underlying.
  * Devnet: the app's USDC-like devnet mints (Sim-USDC, Circle devnet USDC) are collateral, never a perp underlying
  * identity (`mainnet_ca`), and were not in the original list, so they are intentionally not here.
  */
@@ -77,4 +78,16 @@ export const STABLECOIN_MINT_LIST: readonly StablecoinMint[] = [
   // Added 2026-11-11 (r8). Each: getAccountInfo on the Solana public RPC + on-chain metadata, the issuer's docs page, and Jupiter + CoinGecko.
   { address: "susdabGDNbhrnCa6ncrYo81u4s9GM8ecK2UwMyZiq4X", symbol: "sUSD", name: "Solayer USD (yield-bearing USD)", source: "ISSUER docs.solayer.org/susd/yield-bearing-stablecoin/what-is-susd (Token Address, Token-2022); CG solayer-usd; JUP verified yb; CHAIN Token-2022 metadata Solayer USD / sUSD" },
   { address: "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj", symbol: "syrupUSDC", name: "Syrup USDC (Maple, yield-bearing USD)", source: "ISSUER docs.maple.finance/integrate/crosschain/syrupusd-crosschain (Solana tab, Token); CG syrupusdc; JUP verified yb; CHAIN SPL mint" },
+  // Added 2026-11-11 (r8 Council finding: USDu passed the create wizard). Each: getAccountInfo on the Solana public RPC (SPL / Token-2022 mint) + on-chain metadata where present + Jupiter tokens v2 + the issuer's docs page or CoinGecko platforms.solana.
+  { address: "9ckR7pPPvyPadACDTzLwK2ZAEeUJ3qGSnzPs8bVaHrSy", symbol: "USDu", name: "Unitas USD", source: "ISSUER docs.unitas.so (General Overview, official token table, Solana); CG usdu; JUP stable (verified); CHAIN Token-2022 metadata USDu / USDu" },
+  { address: "9iq5Q33RSiz1WcupHAQKbHBZkpn92UxBG2HfPWAZhMCa", symbol: "sUSDu", name: "Staked USDu (Unitas, yield-bearing USD)", source: "ISSUER docs.unitas.so (General Overview, official token table, Solana); JUP verified; CHAIN Token-2022 metadata Staked USDu / sUSDu" },
+  { address: "72puLt71H93Z9CzHuBRTwFpL4TG3WZUhnoCC7p8gxigu", symbol: "USDGO", name: "USDGO (Anchorage Digital, OSL)", source: "CG usdgo; JUP verified; CHAIN Token-2022 metadata USDGO / USDGO; Solflare / Bitget / Solana Compass list it as the official Solana mint" },
+  { address: "HVbpJAQGNpkgBaYBZQBR1t7yFdvaYVp2vCQQfKKEN4tM", symbol: "USDP", name: "Pax Dollar (Paxos)", source: "ISSUER docs.paxos.com/guides/stablecoin/usdp/mainnet (Solana Mainnet Beta); CG paxos-standard; JUP strict; CHAIN Token-2022 metadata Pax Dollar / USDP" },
+  { address: "sUSDai6Y3GxysDEtA9BVcEFTaog6UZpYUVxJiMhAKYE", symbol: "sUSDai", name: "Staked USDai (USD.AI, yield-bearing USD)", source: "ISSUER docs.usd.ai Contract Addresses page (Solana table, sUSDai OFT); JUP verified; CHAIN Token-2022 metadata Staked USDai / sUSDai" },
+  { address: "USDvUSpnhCr9yBgj3UyVrD239HRUv4RsHwH2FxsWuMk", symbol: "USDv", name: "Solomon USDv", source: "CG solomon-usdv; JUP verified; CHAIN Token-2022 metadata USDv / USDv; Solana Compass news on the Sunrise launch names this mint canonical" },
+  { address: "DUSDt4AeLZHWYmcXnVGYdgAzjtzU5mXUVnTMdnSzAttM", symbol: "DUSD", name: "StandX DUSD", source: "CG standx-dusd; JUP stable (verified); CHAIN Token-2022 metadata DUSD / DUSD" },
+  { address: "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih", symbol: "wYLDS", name: "Hastra Wrapped YLDS (yield-bearing USD)", source: "CG hastra-wrapped-ylds; JUP stable (verified); CHAIN SPL mint (6 decimals); Phantom / Solana Compass list it as Hastra wYLDS" },
+  { address: "59obFNBzyTBGowrkif5uK7ojS58vsuWz3ZCvg6tfZAGw", symbol: "PST", name: "PayFi Strategy Token USDC (yield-bearing USD)", source: "CG payfi-strategy-token-usdc; JUP verified yb; CHAIN SPL mint (6 decimals)" },
+  { address: "xoUSDq85Rjsb6SbUwJyreFgeWQvxdkT7R3c3g7s6p5Y", symbol: "XO", name: "XO Cash (MoonPay / Exodus)", source: "CG xo-cash; JUP verified; CHAIN Token-2022 metadata XO Cash / XO; Solflare lists it as the official Solana contract" },
+  { address: "APhcqtzE73es3KAGiVksZFMLGwJDiAey5qZKUrQHEHfS", symbol: "SOFID", name: "SoFiUSD (SoFi Bank)", source: "CG sofiusd platforms.solana; JUP verified; CHAIN Token-2022 metadata SoFiUSD / SOFID; The Block / Decrypt report the Solana launch" },
 ];

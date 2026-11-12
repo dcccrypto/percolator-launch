@@ -698,7 +698,9 @@ export function PortfolioPositionsView() {
   const computeUsdTotals = () => {
     let depositedUsd = 0;
     let unrealizedPnlUsd = 0;
-    let unknownEntryValueUsd = 0;
+    // r8: the VALUE-side PnL (booked basis): capital + this is the engine's equity. The spread already left capital as a fee, so the
+    // fill-based `unrealizedPnlUsd` (the displayed PnL line) must not be added to capital to form a value.
+    let valuePnlUsd = 0;
     // Losses already taken out of capital. The engine crystallizes a realized
     // loss out of `capital` and resets `pnl` to 0 (percolator/src/v16.rs:9382-9437),
     // so without this line a drained balance has NO explanation anywhere in the
@@ -730,10 +732,10 @@ export function PortfolioPositionsView() {
       // divide by decimals only, same as PositionsDock's pnlUsdRaw and raw
       // capital above (collateral is sim-USDC dollars, no price factor).
       unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;
-      // A position with no recorded entry shows no PnL, but its on-chain value (capital + pnl) still counts in the total.
-      if (!pos.pnlKnown) unknownEntryValueUsd += Number(positionValuePnl(pos)) / divisor;
+      // Booked-basis PnL for every position (a position with no recorded entry shows no PnL, but its on-chain value still counts).
+      valuePnlUsd += Number(positionValuePnl(pos)) / divisor;
     }
-    return { depositedUsd, pendingProfitUsd, unrealizedPnlUsd, realizedLossUsd, realizedNetUsd, realizedRecorded, valueUsd: depositedUsd + pendingProfitUsd + unrealizedPnlUsd + unknownEntryValueUsd };
+    return { depositedUsd, pendingProfitUsd, unrealizedPnlUsd, realizedLossUsd, realizedNetUsd, realizedRecorded, valueUsd: depositedUsd + pendingProfitUsd + valuePnlUsd };
   };
   // Don't compute USD totals until token metadata (decimals) has loaded —
   // using the default 6 decimals for a 9-decimal token inflates values 1000x
@@ -756,7 +758,7 @@ export function PortfolioPositionsView() {
   const liveUsdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? (() => {
         let unrealizedPnlUsd = 0;
-        let unknownEntryValueUsd = 0;
+        let valuePnlUsd = 0;
         let unknownPnlCount = 0;
         for (const pos of activePositions) {
           const decimals = getDecimals(pos);
@@ -766,15 +768,14 @@ export function PortfolioPositionsView() {
           // PnL (no entry / unknown ADL factors) contributes nothing rather
           // than a wrong number. Flat positions are 0 by construction.
           const livePnl = portfolioPositionPnl(pos, liveE6);
-          if (!livePnl.pnlKnown) {
-            unknownPnlCount++;
-            unknownEntryValueUsd += Number(livePnl.riskUnrealizedPnl ?? 0n) / divisor;
-          }
+          if (!livePnl.pnlKnown) unknownPnlCount++;
+          // VALUE uses the booked-basis PnL (riskUnrealizedPnl), the PnL line below the fill-based one.
+          valuePnlUsd += Number(livePnl.riskUnrealizedPnl ?? 0n) / divisor;
           unrealizedPnlUsd += Number(livePnl.unrealizedPnl ?? 0n) / divisor;
         }
         // Deposited and pending-profit totals aren't price-dependent — reuse
         // usdTotals' values rather than re-summing them a second time.
-        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + usdTotals.pendingProfitUsd + unrealizedPnlUsd + unknownEntryValueUsd };
+        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + usdTotals.pendingProfitUsd + valuePnlUsd };
       })()
     : { unrealizedPnlUsd: 0, unknownPnlCount: 0, valueUsd: 0 };
 
