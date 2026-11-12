@@ -112,6 +112,9 @@ describe("order ticket: the busy-side fee is its own line with a notice", () => 
     expect(notice).toContain("This side is busy.");
     expect(notice).toContain("2.00% busy-side fee");
     expect(notice).toContain("It is not part of your entry price.");
+    // r9 review LOW-1: leverage is NOT fixed here (the selector goes above 1x), so the notice must not claim it is.
+    expect(screen.getAllByTestId("trade-leverage-preset").some((b) => Number(b.getAttribute("data-leverage")) > 1)).toBe(true);
+    expect(notice).not.toContain("fixed at 1x");
     // #3553 / item 3: the total fee (253 bps) still includes the busy-side part.
     expect(screen.getByText("Fee (est.)").parentElement?.textContent).toContain("0.126499");
   });

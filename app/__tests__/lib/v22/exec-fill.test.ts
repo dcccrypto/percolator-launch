@@ -164,6 +164,35 @@ describe("owner decision 2026-11-12 (item 3): the busy-side fee is not part of t
     const f = fill(Q, 30n + 23n + 100n);
     expect(effectivePriceE6(f, 30n, 500n)).toBeNull();
   });
+  it("r9 review MED-1: a busy fee charged slightly BELOW the quoted rate is unknown, never a smaller spread (long and short)", () => {
+    for (const side of [Q, -Q]) for (const charged of [480n, 490n, 499n]) {
+      const f = fill(side, 30n + 23n + charged);
+      expect(effectivePriceE6(f, 30n, 500n), `side ${side} charged ${charged}`).toBeNull();
+    }
+  });
+  it("r9 review MED-1: whole-atom rounding still passes (remainder within 0.01 bp + 5 atoms of the quoted spread)", () => {
+    const f = fill(Q, 30n + 23n + 500n);
+    for (const d of [-3n, -1n, 1n, 3n]) expect(effectivePriceE6({ ...f, feeAtoms: f.feeAtoms + d }, 30n, 500n), `atoms ${d}`).not.toBeNull();
+    expect(effectivePriceE6({ ...fill(Q, 30n + 500n), quotedPriceE6: 0n, feeAtoms: bps(530n) - bps(5n) }, 30n, 500n)).toBeNull(); // no quote, 5 bps short
+  });
+  it("r9: REAL devnet fills (r8 rt2..rt5, quote = booked x (1 +/- k bps)) plus a 500 bps busy fee pass the guard; Entry = booked +/- the real spread", () => {
+    // [booked, quoted, fee (base 30 + spread, no busy fee), notional, executedQ sign] from landed SOL/USD fills on devnet
+    const real: Array<[bigint, bigint, bigint, bigint, bigint]> = [
+      [84762126n, 84558696n, 107914n, 19983942n, -1n],
+      [84829950n, 85033542n, 108000n, 19999933n, 1n],
+      [84694357n, 84897624n, 53979n, 9995966n, 1n],
+      [84796038n, 84601007n, 159000n, 29999905n, -1n],
+      [84779078n, 84982548n, 108022n, 20003962n, 1n],
+    ];
+    for (const [booked, quoted, fee, notional, sign] of real) {
+      const q = sign * ((notional * 1_000_000n) / booked);
+      const busy = (notional * 500n) / 10_000n;
+      const f: ExecFill = { bookedPriceE6: booked, executedQ: q, feeAtoms: fee + busy, notionalAtoms: notional, taker: OTHER, quotedPriceE6: quoted, legs: 1 };
+      const withoutBusy: ExecFill = { ...f, feeAtoms: fee };
+      expect(effectivePriceE6(f, 30n, 500n), `booked ${booked}`).toBe(effectivePriceE6(withoutBusy, 30n));
+      expect(effectivePriceE6({ ...f, feeAtoms: fee + (notional * 499n) / 10_000n }, 30n, 500n), `booked ${booked} at 499`).toBeNull();
+    }
+  });
   it("an unknown base fee is still unknown with a busy fee", () => {
     expect(effectivePriceE6(fill(Q, 553n), null, 500n)).toBeNull();
   });

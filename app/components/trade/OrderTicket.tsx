@@ -1421,7 +1421,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     snapshotSize?: bigint,
     snapshotLimitPriceE6?: bigint,
     snapshotDepositAtoms?: bigint,
+    snapshotBusyFeeBps?: bigint,
   ) {
+    // r9 review LOW-2: the Entry split uses the busy-side rate the confirm screen showed, not a live one read at submit.
+    const entryBusyFeeBps = snapshotBusyFeeBps ?? busyFeeBps;
     const effectiveSize = snapshotSize ?? positionSize;
     // The confirm screen's deposit is what is signed (the live one can drift while the modal is open).
     // r9 review LOW-A: a confirm that showed NO deposit signs none. If the live order now needs one (capital moved while the confirm was
@@ -1631,7 +1634,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       });
       setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
       void Promise.all([measured, execFillP]).then(([change, execFill]) => {
-        const effective = execFill ? effectivePriceE6(execFill, baseFeeBps, busyFeeBps) : null;
+        const effective = execFill ? effectivePriceE6(execFill, baseFeeBps, entryBusyFeeBps) : null;
         const price = v22Fill ? (effective !== null ? formatLotPriceE6(effective, lotExp) : null) : formatLotPriceE6(submitPriceE6, lotExp);
         const outcome = classifyOrderChange(direction, effectiveSize, change);
         let next: NonNullable<typeof result>;
@@ -1725,7 +1728,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // the fee, the same price the toast and the result line show), so the PnL shown is net of the spread. The BOOKED price is kept
           // beside it for risk math only (liquidation price, equity): the engine's basis is the booked price and the spread already left
           // capital as a fee, so valuing risk from the fill price would count it twice (lib/position-pnl.ts riskEntry).
-          const paid = ef ? effectivePriceE6(ef, baseFeeBps, busyFeeBps) : null;
+          const paid = ef ? effectivePriceE6(ef, baseFeeBps, entryBusyFeeBps) : null;
           if (ef && paid !== null) applyEntryFill(paid, ef.bookedPriceE6);
           // The fill could not be read (or its price cannot be split from the fee): keep no entry at all (the position panel then shows an
           // unknown one) rather than the mark or the booked price, which is gross of the spread.
@@ -3093,6 +3096,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               snapshot.positionSize,
               snapshot.worstFillPriceE6,
               snapshot.depositAtoms,
+              snapshot.busyFeeBps,
             );
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}
