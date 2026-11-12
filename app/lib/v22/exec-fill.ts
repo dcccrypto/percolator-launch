@@ -85,12 +85,57 @@ export function spreadFeeAtoms(f: ExecFill, baseFeeBps: bigint): bigint {
 }
 
 /**
- * The price the trader effectively paid (e6): booked +/- the spread part of the fee spread over the size. Null when the base fee is
- * unknown (no honest split), never the bare mark.
+ * Owner decision 2026-11-12 (item 3): the growth BUSY-SIDE (utilisation) fee is NOT part of the Entry. It is a separate fee the engine
+ * charges on an OPEN only (growth_v19.rs util_fee_on_fill_bps; wrapper handle_trade_cpi), as a rate on the whole fill, on top of the base
+ * fee and the matcher's request, and it is inside the FILL record's `fee_atoms`. The FILL event does NOT carry it separately, so it is
+ * taken from the rate the ticket quoted for THIS order (`busyFeeBps`: the same pure growth formula, on the same notional, that the signed
+ * fee cap was built from). Atoms = notional x bps / 1e4, floored.
  */
-export function effectivePriceE6(f: ExecFill, baseFeeBps: bigint | null | undefined): bigint | null {
+/**
+ * The matcher's requested spread in whole bps, exactly as the deployed matcher computes it (percolator-match GH#36, 3f6b4b8):
+ * floor(|exec - oracle| x 1e4 / oracle). The wrapper's oracle price for the fill IS the booked price, and the event's quoted price is the
+ * matcher's exec price, so this reproduces the request (the ceil used for the signed fee cap is 1 bp high).
+ */
+export function quotedSpreadBpsFloor(bookedE6: bigint, quotedE6: bigint): bigint {
+  if (bookedE6 <= 0n) return 0n;
+  const d = quotedE6 > bookedE6 ? quotedE6 - bookedE6 : bookedE6 - quotedE6;
+  return (d * 10_000n) / bookedE6;
+}
+
+export function busyFeeAtoms(f: ExecFill, busyFeeBps: bigint | null | undefined): bigint {
+  return busyFeeBps != null && busyFeeBps > 0n ? (f.notionalAtoms * busyFeeBps) / 10_000n : 0n;
+}
+
+/**
+ * The price the trader effectively paid (e6): booked +/- the matcher's SPREAD part of the fee spread over the size. Null when the base fee
+ * is unknown (no honest split), never the bare mark.
+ *
+ * `busyFeeBps` (omitted / 0 = none, the old behaviour): the busy-side rate the order was quoted with. Its atoms are taken out of the
+ * per-unit adjustment so the Entry stays the actual fill price and the fee is shown on its own line. The quote is the ticket's read of
+ * the state the engine prices from, so it is exact when the side's utilisation has not moved between the quote and the landing. If it
+ * moved, the residual (fee - base - busy) no longer matches the matcher's quoted spread (within 0.01 bp + 5 atoms of rounding, either way), and the Entry
+ * is treated as UNKNOWN (null) rather than folding the difference into a price.
+ */
+export function effectivePriceE6(f: ExecFill, baseFeeBps: bigint | null | undefined, busyFeeBps?: bigint | null): bigint | null {
   if (baseFeeBps == null || f.executedQ === 0n) return null;
-  const perUnit = (spreadFeeAtoms(f, baseFeeBps) * 1_000_000n) / abs(f.executedQ);
+  let spread = spreadFeeAtoms(f, baseFeeBps);
+  const busy = busyFeeAtoms(f, busyFeeBps);
+  if (busy > 0n) {
+    // Whole-atom rounding only: the engine floors each fee part and rounds the notional up where the app floors it, and both sides take the
+    // quoted spread as the same ceil bps. A 0.01 bp + 5 atom slack covers that; a 1 bp slack let a real 1 bp busy-fee drift through.
+    const tol = f.notionalAtoms / 1_000_000n + 5n;
+    const rest = spread - busy;
+    // What the matcher's spread IS: the deployed matcher requests floor(|quoted - booked| x 1e4 / booked) bps (quotedSpreadBpsFloor; checked on
+    // live devnet fills r8 rt2..rt5: fee - base = notional x that / 1e4 within 2 atoms); none when it quoted nothing. r9 review MED-1: the
+    // remainder must match that within the rounding slack on BOTH sides. A one-sided bound let a busy-side fee charged BELOW the quoted rate
+    // (utilisation fell between the quote and the landing, or a partial fill) pass as a smaller spread, understating a long's Entry
+    // (overstating a short's) by up to the whole spread. Any mismatch: Entry unknown, never a guess.
+    const expectedSpread = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsFloor(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
+    const off = rest > expectedSpread ? rest - expectedSpread : expectedSpread - rest;
+    if (off > tol) return null;
+    spread = rest > 0n ? rest : 0n;
+  }
+  const perUnit = (spread * 1_000_000n) / abs(f.executedQ);
   const p = f.executedQ > 0n ? f.bookedPriceE6 + perUnit : f.bookedPriceE6 - perUnit;
   return p > 0n ? p : null;
 }

@@ -111,3 +111,100 @@ describe("readExecFill", () => {
     expect(await readExecFill({ getTransaction } as never, clipped.sig, WRAPPER, { market: SWORDCAT }, async () => {})).toBeNull();
   });
 });
+
+import type { ExecFill } from "@/lib/v22/exec-fill";
+import { busyFeeAtoms } from "@/lib/v22/exec-fill";
+
+describe("owner decision 2026-11-12 (item 3): the busy-side fee is not part of the Entry", () => {
+  const BOOKED = 100_000_000n; // 100.0 per unit
+  const Q = 2_000_000n; // 2 units (6 decimals)
+  const NOTIONAL = (Q * BOOKED) / 1_000_000n; // 200,000,000 atoms
+  const bps = (b: bigint) => (NOTIONAL * b) / 10_000n;
+  const fill = (signedQ: bigint, feeBps: bigint, quotedBpsAbove = 23n): ExecFill => ({
+    bookedPriceE6: BOOKED,
+    executedQ: signedQ,
+    feeAtoms: bps(feeBps),
+    notionalAtoms: NOTIONAL,
+    taker: OTHER,
+    quotedPriceE6: signedQ > 0n ? BOOKED + (BOOKED * quotedBpsAbove) / 10_000n : BOOKED - (BOOKED * quotedBpsAbove) / 10_000n,
+    legs: 1,
+  });
+  const SPREAD_PER_UNIT = (bps(23n) * 1_000_000n) / Q; // the 23 bps spread, per unit
+
+  it("long: base 30 + spread 23 + busy 500 bps: Entry = booked + the spread only, not + the 5% busy fee", () => {
+    const f = fill(Q, 30n + 23n + 500n);
+    expect(effectivePriceE6(f, 30n, 500n)).toBe(BOOKED + SPREAD_PER_UNIT);
+    // the old behaviour folded the 5% in (~105.23)
+    expect(effectivePriceE6(f, 30n)).toBe(BOOKED + SPREAD_PER_UNIT + (bps(500n) * 1_000_000n) / Q);
+    expect(busyFeeAtoms(f, 500n)).toBe(bps(500n));
+  });
+  it("short: the Entry moves DOWN by the spread only", () => {
+    const f = fill(-Q, 30n + 23n + 500n);
+    expect(effectivePriceE6(f, 30n, 500n)).toBe(BOOKED - SPREAD_PER_UNIT);
+    expect(effectivePriceE6(f, 30n)).toBeLessThan(BOOKED - SPREAD_PER_UNIT);
+  });
+  it("no busy-side fee (omitted, null, 0): unchanged from before", () => {
+    for (const side of [Q, -Q]) {
+      const f = fill(side, 30n + 23n);
+      const old = effectivePriceE6(f, 30n);
+      expect(effectivePriceE6(f, 30n, undefined)).toBe(old);
+      expect(effectivePriceE6(f, 30n, null)).toBe(old);
+      expect(effectivePriceE6(f, 30n, 0n)).toBe(old);
+    }
+  });
+  it("busy fee with no matcher spread (a market with no quote): Entry = the booked price", () => {
+    const f = { ...fill(Q, 30n + 500n), quotedPriceE6: 0n };
+    expect(effectivePriceE6(f, 30n, 500n)).toBe(BOOKED);
+  });
+  it("the busy rate moved between quote and landing (fee carries 500 bps, the order was quoted at 200): Entry is UNKNOWN, never the fee folded in and never the bare mark", () => {
+    const f = fill(Q, 30n + 23n + 500n);
+    expect(effectivePriceE6(f, 30n, 200n)).toBeNull();
+  });
+  it("the fee is LESS than the quoted busy fee (rate fell): unknown too", () => {
+    const f = fill(Q, 30n + 23n + 100n);
+    expect(effectivePriceE6(f, 30n, 500n)).toBeNull();
+  });
+  it("r9 review MED-1: a busy fee charged slightly BELOW the quoted rate is unknown, never a smaller spread (long and short)", () => {
+    for (const side of [Q, -Q]) for (const charged of [480n, 490n, 499n]) {
+      const f = fill(side, 30n + 23n + charged);
+      expect(effectivePriceE6(f, 30n, 500n), `side ${side} charged ${charged}`).toBeNull();
+    }
+  });
+  it("r9 review MED-1: whole-atom rounding still passes (remainder within 0.01 bp + 5 atoms of the quoted spread)", () => {
+    const f = fill(Q, 30n + 23n + 500n);
+    for (const d of [-3n, -1n, 1n, 3n]) expect(effectivePriceE6({ ...f, feeAtoms: f.feeAtoms + d }, 30n, 500n), `atoms ${d}`).not.toBeNull();
+    expect(effectivePriceE6({ ...fill(Q, 30n + 500n), quotedPriceE6: 0n, feeAtoms: bps(530n) - bps(5n) }, 30n, 500n)).toBeNull(); // no quote, 5 bps short
+  });
+  it("r9: REAL devnet fills (r8 rt2..rt5, matcher floor bps) plus a 500 bps busy fee pass the guard; Entry = booked +/- the real spread", () => {
+    // [booked, quoted, fee (base 30 + spread, no busy fee), notional, executedQ sign] from landed SOL/USD fills on devnet
+    const real: Array<[bigint, bigint, bigint, bigint, bigint]> = [
+      [84762126n, 84558696n, 107914n, 19983942n, -1n],
+      [84829950n, 85033542n, 108000n, 19999933n, 1n],
+      [84694357n, 84897624n, 53979n, 9995966n, 1n],
+      [84796038n, 84601007n, 159000n, 29999905n, -1n],
+      [84779078n, 84982548n, 108022n, 20003962n, 1n],
+    ];
+    for (const [booked, quoted, fee, notional, sign] of real) {
+      const q = sign * ((notional * 1_000_000n) / booked);
+      const busy = (notional * 500n) / 10_000n;
+      const f: ExecFill = { bookedPriceE6: booked, executedQ: q, feeAtoms: fee + busy, notionalAtoms: notional, taker: OTHER, quotedPriceE6: quoted, legs: 1 };
+      const withoutBusy: ExecFill = { ...f, feeAtoms: fee };
+      expect(effectivePriceE6(f, 30n, 500n), `booked ${booked}`).toBe(effectivePriceE6(withoutBusy, 30n));
+      expect(effectivePriceE6({ ...f, feeAtoms: fee + (notional * 499n) / 10_000n }, 30n, 500n), `booked ${booked} at 499`).toBeNull();
+    }
+  });
+  it("r9 delta LOW-A: at a price whose ratio is 93.99 bps the matcher requests floor = 93 bps, and an honest busy-side Entry is known (nearest would expect 94 and null it)", () => {
+    const booked = 107_000_000n;
+    const quoted = 107_000_000n + 1_005_799n; // |d| x 1e4 / booked = 93.99 -> the matcher requests floor = 93 bps
+    const notional = 200_000_000n;
+    const q = (notional * 1_000_000n) / booked;
+    const fee = (notional * 30n) / 10_000n + (notional * 93n) / 10_000n + (notional * 500n) / 10_000n;
+    const f: ExecFill = { bookedPriceE6: booked, executedQ: q, feeAtoms: fee, notionalAtoms: notional, taker: OTHER, quotedPriceE6: quoted, legs: 1 };
+    const p = effectivePriceE6(f, 30n, 500n);
+    expect(p).not.toBeNull();
+    expect(p).toBe(booked + (((notional * 93n) / 10_000n) * 1_000_000n) / q);
+  });
+  it("an unknown base fee is still unknown with a busy fee", () => {
+    expect(effectivePriceE6(fill(Q, 553n), null, 500n)).toBeNull();
+  });
+});
