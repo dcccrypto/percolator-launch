@@ -175,7 +175,7 @@ describe("owner decision 2026-11-12 (item 3): the busy-side fee is not part of t
     for (const d of [-3n, -1n, 1n, 3n]) expect(effectivePriceE6({ ...f, feeAtoms: f.feeAtoms + d }, 30n, 500n), `atoms ${d}`).not.toBeNull();
     expect(effectivePriceE6({ ...fill(Q, 30n + 500n), quotedPriceE6: 0n, feeAtoms: bps(530n) - bps(5n) }, 30n, 500n)).toBeNull(); // no quote, 5 bps short
   });
-  it("r9: REAL devnet fills (r8 rt2..rt5, quote = booked x (1 +/- k bps)) plus a 500 bps busy fee pass the guard; Entry = booked +/- the real spread", () => {
+  it("r9: REAL devnet fills (r8 rt2..rt5, matcher floor bps) plus a 500 bps busy fee pass the guard; Entry = booked +/- the real spread", () => {
     // [booked, quoted, fee (base 30 + spread, no busy fee), notional, executedQ sign] from landed SOL/USD fills on devnet
     const real: Array<[bigint, bigint, bigint, bigint, bigint]> = [
       [84762126n, 84558696n, 107914n, 19983942n, -1n],
@@ -192,6 +192,17 @@ describe("owner decision 2026-11-12 (item 3): the busy-side fee is not part of t
       expect(effectivePriceE6(f, 30n, 500n), `booked ${booked}`).toBe(effectivePriceE6(withoutBusy, 30n));
       expect(effectivePriceE6({ ...f, feeAtoms: fee + (notional * 499n) / 10_000n }, 30n, 500n), `booked ${booked} at 499`).toBeNull();
     }
+  });
+  it("r9 delta LOW-A: at a price whose ratio is 93.99 bps the matcher requests floor = 93 bps, and an honest busy-side Entry is known (nearest would expect 94 and null it)", () => {
+    const booked = 107_000_000n;
+    const quoted = 107_000_000n + 1_005_799n; // |d| x 1e4 / booked = 93.99 -> the matcher requests floor = 93 bps
+    const notional = 200_000_000n;
+    const q = (notional * 1_000_000n) / booked;
+    const fee = (notional * 30n) / 10_000n + (notional * 93n) / 10_000n + (notional * 500n) / 10_000n;
+    const f: ExecFill = { bookedPriceE6: booked, executedQ: q, feeAtoms: fee, notionalAtoms: notional, taker: OTHER, quotedPriceE6: quoted, legs: 1 };
+    const p = effectivePriceE6(f, 30n, 500n);
+    expect(p).not.toBeNull();
+    expect(p).toBe(booked + (((notional * 93n) / 10_000n) * 1_000_000n) / q);
   });
   it("an unknown base fee is still unknown with a busy fee", () => {
     expect(effectivePriceE6(fill(Q, 553n), null, 500n)).toBeNull();

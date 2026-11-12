@@ -91,11 +91,15 @@ export function spreadFeeAtoms(f: ExecFill, baseFeeBps: bigint): bigint {
  * taken from the rate the ticket quoted for THIS order (`busyFeeBps`: the same pure growth formula, on the same notional, that the signed
  * fee cap was built from). Atoms = notional x bps / 1e4, floored.
  */
-/** The matcher's quoted spread in whole bps, rounded to nearest (its quote is booked x (1 +/- k/1e4) for a whole k, so the exact ratio is k plus a hair). */
-export function quotedSpreadBpsNearest(bookedE6: bigint, quotedE6: bigint): bigint {
+/**
+ * The matcher's requested spread in whole bps, exactly as the deployed matcher computes it (percolator-match GH#36, 3f6b4b8):
+ * floor(|exec - oracle| x 1e4 / oracle). The wrapper's oracle price for the fill IS the booked price, and the event's quoted price is the
+ * matcher's exec price, so this reproduces the request (the ceil used for the signed fee cap is 1 bp high).
+ */
+export function quotedSpreadBpsFloor(bookedE6: bigint, quotedE6: bigint): bigint {
   if (bookedE6 <= 0n) return 0n;
   const d = quotedE6 > bookedE6 ? quotedE6 - bookedE6 : bookedE6 - quotedE6;
-  return (d * 20_000n + bookedE6) / (2n * bookedE6);
+  return (d * 10_000n) / bookedE6;
 }
 
 export function busyFeeAtoms(f: ExecFill, busyFeeBps: bigint | null | undefined): bigint {
@@ -121,13 +125,12 @@ export function effectivePriceE6(f: ExecFill, baseFeeBps: bigint | null | undefi
     // quoted spread as the same ceil bps. A 0.01 bp + 5 atom slack covers that; a 1 bp slack let a real 1 bp busy-fee drift through.
     const tol = f.notionalAtoms / 1_000_000n + 5n;
     const rest = spread - busy;
-    // What the matcher's spread IS: the matcher quotes booked x (1 +/- k bps) for a whole k and requests k bps (live devnet fills, r8 rt2..rt5:
-    // fee - base = notional x k / 1e4 within 2 atoms, where k = |quoted - booked| / booked ROUNDED; the ceil used for the signed cap is 1 bp
-    // high); none when
-    // it quoted nothing. r9 review MED-1: the remainder must match that within the rounding slack on BOTH sides. A one-sided bound let a
-    // busy-side fee charged BELOW the quoted rate (utilisation fell between the quote and the landing, or a partial fill) pass as a smaller
-    // spread, understating a long's Entry (overstating a short's) by up to the whole spread. Any mismatch: Entry unknown, never a guess.
-    const expectedSpread = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsNearest(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
+    // What the matcher's spread IS: the deployed matcher requests floor(|quoted - booked| x 1e4 / booked) bps (quotedSpreadBpsFloor; checked on
+    // live devnet fills r8 rt2..rt5: fee - base = notional x that / 1e4 within 2 atoms); none when it quoted nothing. r9 review MED-1: the
+    // remainder must match that within the rounding slack on BOTH sides. A one-sided bound let a busy-side fee charged BELOW the quoted rate
+    // (utilisation fell between the quote and the landing, or a partial fill) pass as a smaller spread, understating a long's Entry
+    // (overstating a short's) by up to the whole spread. Any mismatch: Entry unknown, never a guess.
+    const expectedSpread = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsFloor(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
     const off = rest > expectedSpread ? rest - expectedSpread : expectedSpread - rest;
     if (off > tol) return null;
     spread = rest > 0n ? rest : 0n;
