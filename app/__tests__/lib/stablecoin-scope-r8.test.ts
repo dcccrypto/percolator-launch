@@ -27,9 +27,9 @@ describe("r8 new mints", () => {
     expect(isStablecoinPerpBlocked(`  ${addr}\n`)).toBe(true);
     expect(new PublicKey(addr).toBase58()).toBe(addr);
   });
-  it("the list has 41 unique entries", () => {
-    expect(STABLECOIN_MINT_LIST.length).toBe(41);
-    expect(new Set(STABLECOIN_MINT_LIST.map((m) => m.address)).size).toBe(41);
+  it("the list has 52 unique entries", () => {
+    expect(STABLECOIN_MINT_LIST.length).toBe(52);
+    expect(new Set(STABLECOIN_MINT_LIST.map((m) => m.address)).size).toBe(52);
   });
 });
 
