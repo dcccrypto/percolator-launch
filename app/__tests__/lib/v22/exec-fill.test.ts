@@ -208,3 +208,52 @@ describe("owner decision 2026-11-12 (item 3): the busy-side fee is not part of t
     expect(effectivePriceE6(fill(Q, 553n), null, 500n)).toBeNull();
   });
 });
+
+describe("r9 Risk LOW: the residual check runs whenever a busy rate was quoted, including 0", () => {
+  const BOOKED = 100_000_000n;
+  const Q = 2_000_000n;
+  const NOTIONAL = (Q * BOOKED) / 1_000_000n;
+  const bps = (b: bigint) => (NOTIONAL * b) / 10_000n;
+  const fill = (signedQ: bigint, feeBps: bigint, quotedBps = 23n): ExecFill => ({
+    bookedPriceE6: BOOKED, executedQ: signedQ, feeAtoms: bps(feeBps), notionalAtoms: NOTIONAL, taker: OTHER, legs: 1,
+    quotedPriceE6: signedQ > 0n ? BOOKED + (BOOKED * quotedBps) / 10_000n : BOOKED - (BOOKED * quotedBps) / 10_000n,
+  });
+  it("quoted 0 but the engine charged 1-2 bps of busy fee (inside the +2 bp margin): Entry is UNKNOWN, not the fee folded in (long and short)", () => {
+    for (const side of [Q, -Q]) for (const extra of [1n, 2n]) {
+      const f = fill(side, 30n + 23n + extra);
+      expect(effectivePriceE6(f, 30n, 0n), `side ${side} extra ${extra}`).toBeNull();
+    }
+  });
+  it("without a quoted rate (a market that cannot charge one: omitted / null) the old behaviour is unchanged", () => {
+    const f = fill(Q, 30n + 23n + 2n);
+    expect(effectivePriceE6(f, 30n)).not.toBeNull();
+    expect(effectivePriceE6(f, 30n, null)).toBe(effectivePriceE6(f, 30n));
+  });
+  it("quoted 0 and no busy fee charged: the same Entry as before (whole-atom rounding passes)", () => {
+    const f = fill(Q, 30n + 23n);
+    expect(effectivePriceE6(f, 30n, 0n)).toBe(effectivePriceE6(f, 30n));
+    expect(effectivePriceE6({ ...f, feeAtoms: f.feeAtoms + 3n }, 30n, 0n)).not.toBeNull();
+    expect(effectivePriceE6({ ...fill(Q, 30n), quotedPriceE6: 0n }, 30n, 0n)).toBe(BOOKED); // no matcher quote, no spread
+  });
+  it("REAL devnet fills (r8 rt2..rt5 and the council opens) still produce an Entry with a quoted 0", () => {
+    const real: Array<[bigint, bigint, bigint, bigint, bigint]> = [
+      [84762126n, 84558696n, 107914n, 19983942n, -1n],
+      [84829950n, 85033542n, 108000n, 19999933n, 1n],
+      [84694357n, 84897624n, 53979n, 9995966n, 1n],
+      [84796038n, 84601007n, 159000n, 29999905n, -1n],
+      [84779078n, 84982548n, 108022n, 20003962n, 1n],
+    ];
+    for (const [booked, quoted, fee, notional, sign] of real) {
+      const q = sign * ((notional * 1_000_000n) / booked);
+      const f: ExecFill = { bookedPriceE6: booked, executedQ: q, feeAtoms: fee, notionalAtoms: notional, taker: OTHER, quotedPriceE6: quoted, legs: 1 };
+      expect(effectivePriceE6(f, 30n, 0n), `booked ${booked}`).toBe(effectivePriceE6(f, 30n));
+      expect(effectivePriceE6(f, 30n, 0n)).not.toBeNull();
+    }
+    for (const fx of [open, close]) {
+      const f = execFillFromLogs(fx.logMessages, SOL_WRAPPER, { market: SOL_MARKET, taker: SOL_PORTFOLIO })!;
+      expect(effectivePriceE6(f, BASE_BPS, 0n)).toBe(effectivePriceE6(f, BASE_BPS));
+      expect(effectivePriceE6(f, BASE_BPS, 0n)).not.toBeNull();
+    }
+  });
+});
+

@@ -53,6 +53,6 @@ describe("U-2: the fee cap after a 98", () => {
   });
 
   it("both trade hooks send through the retry", () => {
-    for (const f of ["hooks/useTrade.ts", "hooks/useFirstTrade.ts"]) expect(readFileSync(path.join(__dirname, "../../..", f), "utf8")).toContain("sendWithUtilFeeRetry(async (raised) =>");
+    for (const f of ["hooks/useTrade.ts", "hooks/useFirstTrade.ts"]) expect(readFileSync(path.join(__dirname, "../../..", f), "utf8")).toMatch(/sendWithConfirmedFeeCap\(async \(raised\) =>/);
   });
 });

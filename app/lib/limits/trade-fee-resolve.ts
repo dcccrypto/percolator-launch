@@ -102,6 +102,35 @@ export async function sendWithUtilFeeRetry<T>(send: (raised: boolean) => Promise
   }
 }
 
+/**
+ * Council r9 Attacker A: an order that came through the confirm screen is never silently re-signed at a raised cap (that could charge a
+ * busy-side fee the confirm never showed). A 98 for it is one refusal that asks for a new review; the first refusal is the pre-sign
+ * simulation, so nothing was sent. `explain` is a FRESH read of the order's busy-side bps: only when it shows the rate rose does the line say
+ * so (`BusyFeeRoseError`); otherwise the line is generic (devnet's matcher fee is adaptive, so a 98 does not prove the busy rate moved).
+ * Without a confirm screen (`confirmedCap` false: closes, other callers) the silent raise-and-retry stands.
+ */
+export async function sendWithConfirmedFeeCap<T>(
+  send: (raised: boolean) => Promise<T>,
+  confirmedCap: boolean,
+  explain?: () => Promise<Error | null>,
+): Promise<T> {
+  if (!confirmedCap) return sendWithUtilFeeRetry(send);
+  try {
+    return await send(false);
+  } catch (e) {
+    if (isUtilFeeNotCovered(e)) throw (await explain?.().catch(() => null)) ?? new FeeChangedAfterReviewError(e);
+    throw e;
+  }
+}
+
+/** The signed cap no longer covers the fee the engine asks for, and a fresh read does not show the busy-side rate rising. */
+export class FeeChangedAfterReviewError extends Error {
+  constructor(cause: unknown) {
+    super("The fee changed while you were reviewing. Review it again. Nothing was charged.", { cause });
+    this.name = "FeeChangedAfterReviewError";
+  }
+}
+
 /** base + matcher + utilisation fee exceeds the market's maximum for this order: nothing can be signed that passes. */
 export class UtilFeeOverMaxError extends Error {
   constructor(cause: unknown) {

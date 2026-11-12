@@ -15,6 +15,8 @@ interface ClosePositionModalProps {
   entryPrice: bigint;
   /** #3534: the risk entry the balance-after is valued from (see ClosePositionForm). Omitted = `entryPrice`. */
   riskEntryPrice?: bigint;
+  /** r9: the busy-side fee paid when the position was opened (atoms, whole position); null / omitted = unknown. */
+  busyOpenFeeAtoms?: bigint | null;
   currentPrice: bigint;
   capital: bigint;
   /** Index asset symbol for position size (e.g. "SOL") */
@@ -72,6 +74,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   positionSize,
   entryPrice,
   riskEntryPrice,
+  busyOpenFeeAtoms,
   currentPrice,
   capital,
   symbol,
@@ -194,6 +197,8 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           positionSize={positionSize}
           entryPrice={entryPrice}
           riskEntryPrice={riskEntryPrice}
+          busyOpenFeeAtoms={busyOpenFeeAtoms}
+          busyFeeMayApply={closeFeeBpsFor.busyFeeMayApply === true}
           currentPrice={currentPrice}
           capital={capital}
           symbol={symbol}

@@ -100,9 +100,9 @@ describe("the opening device does not flicker to unknown before the size is meas
 describe("every consumer of the cached entry checks the size (withdraw pre-check, snapshot fallback)", () => {
   it("getCurrentEntry: the booked basis for the matching size, zeros for another size or none", () => {
     saveEntryPrice(SLAB, 0, 100_400_000n, 2, WALLET, 1_000_000n, { bookedPriceE6: 100_000_000n });
-    expect(getCurrentEntry(SLAB, 0, WALLET, 1_000_000n)).toEqual({ entryE6: 100_400_000n, riskEntryE6: 100_000_000n });
-    expect(getCurrentEntry(SLAB, 0, WALLET, 1_800_000n)).toEqual({ entryE6: 0n, riskEntryE6: 0n });
-    expect(getCurrentEntry(SLAB, 1, WALLET, 1_000_000n)).toEqual({ entryE6: 0n, riskEntryE6: 0n });
+    expect(getCurrentEntry(SLAB, 0, WALLET, 1_000_000n)).toEqual({ entryE6: 100_400_000n, riskEntryE6: 100_000_000n, busyFeeAtoms: null });
+    expect(getCurrentEntry(SLAB, 0, WALLET, 1_800_000n)).toEqual({ entryE6: 0n, riskEntryE6: 0n, busyFeeAtoms: null });
+    expect(getCurrentEntry(SLAB, 1, WALLET, 1_000_000n)).toEqual({ entryE6: 0n, riskEntryE6: 0n, busyFeeAtoms: null });
   });
   it("a snapshot that says 'cache' does not stand in for a record this device no longer holds", () => {
     const row = { ...snap(1_000_000n), entryPriceSource: "cache" as const, effectiveEntryPrice: 100_000_000n };

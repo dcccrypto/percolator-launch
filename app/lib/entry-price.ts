@@ -28,6 +28,13 @@ interface EntryRecord {
    */
   bookedPriceE6?: string;
   /**
+   * r9 Risk MED: the growth BUSY-SIDE (utilisation) fee paid when this position was opened, in collateral atoms, TOTAL for the position
+   * `sizeQ` describes ("0" = measured: none was paid). It is not part of the Entry (#3810), so the close dialog's net result would miss it.
+   * Blends on an add (prior share + this fill's) and scales with size on a reduce (busyFeeAfterTrade). Absent = unknown (an older record, a
+   * fill whose fee could not be split, or a trade whose prior amount was unknown): never read as zero on a market that can charge one.
+   */
+  busyFeeAtoms?: string;
+  /**
    * The save made the moment a fill landed, BEFORE the position's size is measured on chain (so it has no `sizeQ`). It is the opening
    * device's own entry for a short window (PENDING_ENTRY_WINDOW_MS); the measured save replaces it (or the window ends and it stops counting).
    */
@@ -68,12 +75,13 @@ export function saveEntryPrice(
   leverage?: number,
   wallet?: string,
   sizeQ?: bigint,
-  opts?: { bookedPriceE6?: bigint; pending?: boolean },
+  opts?: { bookedPriceE6?: bigint; pending?: boolean; busyFeeAtoms?: bigint | null },
 ): void {
   try {
     const record: EntryRecord = {
       entryPriceE6: entryPriceE6.toString(),
       ...(opts?.bookedPriceE6 != null && opts.bookedPriceE6 > 0n && opts.bookedPriceE6 !== entryPriceE6 ? { bookedPriceE6: opts.bookedPriceE6.toString() } : {}),
+      ...(opts?.busyFeeAtoms != null && opts.busyFeeAtoms >= 0n ? { busyFeeAtoms: opts.busyFeeAtoms.toString() } : {}),
       ...(opts?.pending && (sizeQ == null || sizeQ === 0n) ? { pending: true } : {}),
       ...(leverage != null && Number.isFinite(leverage) && leverage > 0 ? { leverage } : {}),
       ...(sizeQ != null && sizeQ !== 0n ? { sizeQ: sizeQ.toString() } : {}),
@@ -125,6 +133,8 @@ export interface SavedEntry {
   sizeQ: bigint | null;
   /** The engine's basis price for the same position (== entryPriceE6 when the record has none). */
   bookedPriceE6: bigint;
+  /** The busy-side fee paid at open for the WHOLE position `sizeQ` (atoms); null = unknown (see EntryRecord.busyFeeAtoms). */
+  busyFeeAtoms: bigint | null;
   /** A fresh size-less save from the fill that has not been measured yet (see EntryRecord.pending). Always false once the window has passed. */
   pending: boolean;
 }
@@ -167,9 +177,16 @@ export function getSavedEntry(slab: string, accountIdx: number, wallet?: string)
     } catch {
       bookedPriceE6 = entryPriceE6;
     }
+    let busyFeeAtoms: bigint | null = null;
+    try {
+      const b = record.busyFeeAtoms != null ? BigInt(record.busyFeeAtoms) : null;
+      busyFeeAtoms = b !== null && b >= 0n ? b : null;
+    } catch {
+      busyFeeAtoms = null;
+    }
     const sized = sizeQ !== null && sizeQ !== 0n;
     const fresh = typeof record.timestamp === "number" && Date.now() - record.timestamp >= 0 && Date.now() - record.timestamp < PENDING_ENTRY_WINDOW_MS;
-    return { entryPriceE6, leverage, sizeQ: sized ? sizeQ : null, bookedPriceE6, pending: !sized && record.pending === true && fresh };
+    return { entryPriceE6, leverage, sizeQ: sized ? sizeQ : null, bookedPriceE6, busyFeeAtoms, pending: !sized && record.pending === true && fresh };
   } catch {
     return null;
   }
@@ -185,10 +202,10 @@ export function getCurrentEntry(
   accountIdx: number,
   wallet: string | undefined,
   effectiveSizeQ: bigint | null,
-): { entryE6: bigint; riskEntryE6: bigint } {
+): { entryE6: bigint; riskEntryE6: bigint; busyFeeAtoms: bigint | null } {
   const saved = getSavedEntry(slab, accountIdx, wallet);
-  if (!saved || !entryRecordCurrent(saved, effectiveSizeQ)) return { entryE6: 0n, riskEntryE6: 0n };
-  return { entryE6: saved.entryPriceE6, riskEntryE6: saved.bookedPriceE6 };
+  if (!saved || !entryRecordCurrent(saved, effectiveSizeQ)) return { entryE6: 0n, riskEntryE6: 0n, busyFeeAtoms: null };
+  return { entryE6: saved.entryPriceE6, riskEntryE6: saved.bookedPriceE6, busyFeeAtoms: saved.busyFeeAtoms };
 }
 
 const absQ = (q: bigint): bigint => (q < 0n ? -q : q);
@@ -228,6 +245,45 @@ export function entryAfterTrade(a: {
   if (after <= before) return saved.entryPriceE6;
   if (fillPriceE6 <= 0n) return null;
   return (before * saved.entryPriceE6 + (after - before) * fillPriceE6) / after;
+}
+
+/**
+ * The busy-side fee (atoms) to save with the entry after a trade, mirroring `entryAfterTrade` (same validity rules for reduce / add):
+ *   - flat after                     → null
+ *   - opened from flat, or flipped   → this fill's busy fee (null when it is unknown)
+ *   - reduced                        → the prior amount scaled to the remaining size (a per-unit amount keeps its rate)
+ *   - added                          → the prior amount scaled to the size before the add, plus this fill's busy fee
+ * Null whenever the prior amount, the record or this fill's amount is unknown: unknown is never counted as zero.
+ */
+export function busyFeeAfterTrade(a: {
+  beforeQ: bigint;
+  afterQ: bigint;
+  saved: Pick<SavedEntry, "entryPriceE6" | "sizeQ" | "busyFeeAtoms"> | null;
+  fillBusyFeeAtoms: bigint | null;
+}): bigint | null {
+  const { beforeQ, afterQ, saved, fillBusyFeeAtoms } = a;
+  if (afterQ === 0n) return null;
+  const opened = beforeQ === 0n || (beforeQ > 0n) !== (afterQ > 0n);
+  if (opened) {
+    if (fillBusyFeeAtoms === null || fillBusyFeeAtoms < 0n) return null;
+    // A flip: the fill's busy-side fee is charged on the WHOLE fill, but only the part that opens the new side belongs to the new position
+    // (lib/trade-book.ts applyFill gives it `fee x openQ / |q|`), so the closing part's share is not carried (it would be subtracted twice).
+    if (beforeQ !== 0n) {
+      const fillQ = absQ(afterQ - beforeQ);
+      return fillQ === 0n ? null : (fillBusyFeeAtoms * absQ(afterQ) + fillQ / 2n) / fillQ;
+    }
+    return fillBusyFeeAtoms;
+  }
+  if (!saved || saved.entryPriceE6 <= 0n || saved.sizeQ === null || saved.busyFeeAtoms === null) return null;
+  if ((saved.sizeQ > 0n) !== (beforeQ > 0n) || absQ(beforeQ) > absQ(saved.sizeQ)) return null;
+  const before = absQ(beforeQ);
+  const after = absQ(afterQ);
+  const savedSize = absQ(saved.sizeQ);
+  const half = savedSize / 2n;
+  const priorBefore = (saved.busyFeeAtoms * before + half) / savedSize;
+  if (after <= before) return (priorBefore * after + before / 2n) / before;
+  if (fillBusyFeeAtoms === null || fillBusyFeeAtoms < 0n) return null;
+  return priorBefore + fillBusyFeeAtoms;
 }
 
 /** Clear saved entry price (call when position is fully closed). */

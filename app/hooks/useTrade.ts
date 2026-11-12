@@ -45,8 +45,9 @@ import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
 import { recordFeeRaise, type FeeRaise } from "@/lib/v22/fee-raise-note";
 import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/lib/position-change";
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
-import { fetchTradeFeeBps, sendWithUtilFeeRetry } from "@/lib/limits/trade-fee-resolve";
+import { fetchTradeFeeBps, sendWithConfirmedFeeCap } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { BusyFeeRoseError, assertBusyFeeNotRisen, readFreshBusyFeeBps, type BusyGuard } from "@/lib/v22/fresh-busy-fee";
 import { levGuardExists } from "@/lib/v22/lev-guard";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
 import { planTradeRefresh, sendMultiAssetOrder, sendWithRefreshRetry } from "@/lib/v22/trade-refresh-wire";
@@ -325,6 +326,16 @@ export function useTrade(slabAddress: string) {
        * Omitted => the market's base trade fee (the only value accepted without it).
        */
       feeBps?: bigint;
+      /**
+       * Council r9 Attacker A: the order came through the confirm screen. The cap signed is unchanged (the chain cap), but a 98 is never
+       * answered by silently raising it and re-signing: it is one refusal that asks for a new review. Omitted = the silent retry (closes).
+       */
+      confirmedFeeCap?: boolean;
+      /**
+       * Delta review MED-A: the busy-side rate the confirm screen showed. Immediately before the wallet is asked to sign (after any wait), the
+       * busy-side fee for this order is re-read; higher than this refuses with nothing signed. Unreadable: proceeds on the chain cap.
+       */
+      busyGuard?: BusyGuard;
       /** UX WP-2: called while the app waits for the market (no prompt yet): true / false. */
       onWaiting?: (waiting: boolean) => void;
       /** UX WP-3: the ticket's "Stop" ends the wait loop (no prompt was opened). */
@@ -733,6 +744,7 @@ export function useTrade(slabAddress: string) {
           // (lib/compute-budget.ts). Also used by closes (useClosePosition calls trade()).
           const sendTrade = (ixs: TransactionInstruction[], kind: MultiAssetSendKind = "order") => sendTxWaiting({
             connection, wallet, instructions: ixs,
+            ...(params.busyGuard ? { preSignCheck: () => assertBusyFeeNotRisen(params.busyGuard, () => readFreshBusyFeeBps(connection, programId, slabPk, params.busyGuard as BusyGuard)) } : {}),
             onWaiting: params.onWaiting,
             abortSignal: params.abortSignal,
             keepWaiting: params.keepWaiting,
@@ -807,7 +819,12 @@ export function useTrade(slabAddress: string) {
           };
           const sendOrder = (): Promise<string> =>
             isV17Market && isDevnetV22Enabled()
-              ? sendWithUtilFeeRetry(async (raised) => { if (raised) await withRaisedFee(); return sendOrderOnce(); })
+              ? sendWithConfirmedFeeCap(async (raised) => { if (raised) await withRaisedFee(); return sendOrderOnce(); }, params.confirmedFeeCap === true, params.busyGuard
+                ? async () => {
+                    const fresh = await readFreshBusyFeeBps(connection, programId, slabPk, params.busyGuard as BusyGuard);
+                    return fresh !== null && fresh > (params.busyGuard as BusyGuard).confirmedBusyFeeBps ? new BusyFeeRoseError(fresh) : null;
+                  }
+                : undefined)
               : sendOrderOnce();
           // Devnet v2.1: the order goes ALONE (no push / crank / refresh prefix): TradeCpi accrues
           // the market itself. A Custom(121) EngineLossStale (insurance does not yet cover the

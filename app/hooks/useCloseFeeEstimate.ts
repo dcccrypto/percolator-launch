@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { closeFeeBps } from "@/lib/limits/estimated-fee";
 import type { MarketLimits } from "@/hooks/useMarketLimits";
 import type { TicketLimitsInput } from "@/lib/limits/ticket";
+import { marketMayChargeBusyFee } from "@/lib/v22/busy-fee";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 
@@ -45,17 +46,20 @@ export function useCloseFeeEstimate(
   baseFeeBps: bigint,
   markE6: bigint,
   limits?: MarketLimits | null,
-): (closeAbs: bigint) => bigint {
+): ((closeAbs: bigint) => bigint) & { busyFeeMayApply: boolean } {
   const { slabAddress } = useSlabState();
   const { publicKey } = useWalletCompat();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const own = useMarketLimits(mockMode || limits ? null : slabAddress);
   const marketLimits = limits ?? own;
-  return useCallback(
+  const fn = useCallback(
     (closeAbs: bigint) => {
       if (mockMode || positionSize === 0n) return baseFeeBps;
       return closeFeeBps(baseFeeBps, closeOrderInput(marketLimits, positionSize, closeAbs, publicKey ? publicKey.toBytes() : null, markE6));
     },
     [mockMode, positionSize, baseFeeBps, markE6, marketLimits, publicKey],
   );
+  // r9: can the position being closed have paid a growth busy-side fee when it was opened? (the close dialog's net result needs to know)
+  const busyFeeMayApply = !mockMode && marketMayChargeBusyFee(marketLimits);
+  return useMemo(() => Object.assign((closeAbs: bigint) => fn(closeAbs), { busyFeeMayApply }), [fn, busyFeeMayApply]);
 }

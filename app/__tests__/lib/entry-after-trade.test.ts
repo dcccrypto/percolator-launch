@@ -90,13 +90,13 @@ describe("saved entry record carries the position size", () => {
 
   it("round-trips entry, leverage and signed size", () => {
     saveEntryPrice(SLAB, 0, 1_100_000n, 3, W, -80n);
-    expect(getSavedEntry(SLAB, 0, W)).toEqual({ entryPriceE6: 1_100_000n, leverage: 3, sizeQ: -80n, bookedPriceE6: 1_100_000n, pending: false });
+    expect(getSavedEntry(SLAB, 0, W)).toEqual({ entryPriceE6: 1_100_000n, leverage: 3, sizeQ: -80n, bookedPriceE6: 1_100_000n, busyFeeAtoms: null, pending: false });
     expect(getEntryPrice(SLAB, 0, W)).toBe(1_100_000n);
   });
 
   it("an older record without a size reads sizeQ null; a missing or bad record reads null", () => {
     saveEntryPrice(SLAB, 0, 1_000_000n, undefined, W);
-    expect(getSavedEntry(SLAB, 0, W)).toEqual({ entryPriceE6: 1_000_000n, leverage: null, sizeQ: null, bookedPriceE6: 1_000_000n, pending: false });
+    expect(getSavedEntry(SLAB, 0, W)).toEqual({ entryPriceE6: 1_000_000n, leverage: null, sizeQ: null, bookedPriceE6: 1_000_000n, busyFeeAtoms: null, pending: false });
     expect(getSavedEntry(SLAB, 1, W)).toBeNull();
     store.set(`perc:entry:${SLAB}:2:${W}`, "{not json");
     expect(getSavedEntry(SLAB, 2, W)).toBeNull();

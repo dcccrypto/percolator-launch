@@ -6,6 +6,7 @@ import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/format";
 import { SPREAD_LABEL, feeBpsWithSpread, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
+import { busyFeeShareAtoms } from "@/lib/v22/busy-fee";
 import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
 /**
@@ -37,6 +38,17 @@ export interface ClosePositionFormProps {
    * is valued from the booked price while Est. PnL, from the price paid, is net of it).
    */
   riskEntryPrice?: bigint;
+  /**
+   * r9 Risk MED: the growth busy-side (utilisation) fee paid when the position was opened, in collateral atoms for the WHOLE position (the
+   * saved entry's `busyFeeAtoms`, current record only). It is not in the Entry (#3810), so the net result subtracts the closed part's share
+   * and shows it as its own row. null / omitted = unknown.
+   */
+  busyOpenFeeAtoms?: bigint | null;
+  /**
+   * This market can charge a busy-side fee at open (a growth market). With the amount unknown a positive net is then neutral and tagged
+   * "excl. busy-side fee" (never a green profit that the realised result could contradict). false / omitted = as before.
+   */
+  busyFeeMayApply?: boolean;
   currentPrice: bigint;
   capital: bigint;
   /** Index asset symbol for position size (e.g. "SOL"). */
@@ -110,6 +122,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   positionSize,
   entryPrice,
   riskEntryPrice,
+  busyOpenFeeAtoms = null,
+  busyFeeMayApply = false,
   currentPrice: liveCurrentPrice,
   capital,
   symbol,
@@ -211,10 +225,15 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     // closed part was opened (the fill Entry holds the spread, not the base fee). Leaving it out let a trade that loses overall read green
     // when the mark sat just above the closing costs. Estimated on the booked (risk) entry the engine charged it on, for the closed part.
     const openFee = riskBasis > 0n && tradingFeeBps > 0n ? (((closeAbs * riskBasis) / 1_000_000n) * tradingFeeBps) / 10_000n : 0n;
-    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee - openFee : null;
+    // r9 Risk MED: the busy-side fee paid at open (not in the Entry since #3810) is part of the realised result. Known: the closed part's share.
+    // Unknown on a market that can charge one: the net stands but is "excl. busy-side fee" (never green).
+    const busyKnown = busyOpenFeeAtoms !== null && busyOpenFeeAtoms >= 0n;
+    const busyOpenFee = busyKnown ? busyFeeShareAtoms(busyOpenFeeAtoms, closeAbs, absPosition) : 0n;
+    const netExclBusy = !busyKnown && busyFeeMayApply;
+    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee - openFee - busyOpenFee : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
-  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals]);
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, busyOpenFee, netExclBusy, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
+  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals, busyOpenFeeAtoms, busyFeeMayApply]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
@@ -231,7 +250,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   const net = netNearZero ? 0n : rawNet;
   // Excluding the spread, a positive figure is not a safe "profit": it stays neutral (a loss is still red).
   const netColor =
-    net === null || net === 0n || (net > 0n && preview.netExclSpread)
+    net === null || net === 0n || (net > 0n && (preview.netExclSpread || preview.netExclBusy))
       ? "text-[var(--text-muted)]"
       : net > 0n
         ? "text-[var(--long)]"
@@ -367,6 +386,11 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
                   excl. spread
                 </span>
               )}
+              {preview.netExclBusy && (
+                <span className="ml-1 text-[10px] text-[var(--text-muted)]" title="This position may have paid a busy-side fee when it was opened, and the amount is not recorded on this device, so this result excludes it" data-testid="close-net-excl-busy">
+                  excl. busy-side fee
+                </span>
+              )}
             </span>
           )}
         </div>
@@ -406,6 +430,14 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
             <span className="text-[var(--text-dim)]">Opening fee (base, paid when you opened, est.):</span>
             <span className="font-mono font-medium text-[var(--text-secondary)]">
               −{formatTokenAmount(preview.openFee, decimals)} {colSym}
+            </span>
+          </div>
+        )}
+        {entryKnown && preview.busyOpenFee > 0n && (
+          <div className="flex justify-between" data-testid="close-busy-open-fee">
+            <span className="text-[var(--text-dim)]">Busy-side fee (paid when you opened):</span>
+            <span className="font-mono font-medium text-[var(--text-secondary)]">
+              −{formatTokenAmount(preview.busyOpenFee, decimals)} {colSym}
             </span>
           </div>
         )}
