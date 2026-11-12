@@ -568,7 +568,11 @@ export function useTrade(slabAddress: string) {
         // matcher fee + 5, capped at the market maximum), read from the market + the LP's matcher
         // context right now (lib/limits/trade-fee-resolve.ts). Flag off: unchanged.
         const signedFeeBps = isDevnetV22Enabled() && isV17Market
-          ? await fetchTradeFeeBps(connection, slabPk, matcherCtx, { fallback: params.feeBps ?? wrapperConfigV17?.tradeFeeBps })
+          ? await fetchTradeFeeBps(connection, slabPk, matcherCtx, {
+              fallback: params.feeBps ?? wrapperConfigV17?.tradeFeeBps,
+              // Council r9 recheck NEW-1: a confirmed order signs room for the busy-side rate it confirmed (0 = the old cap exactly).
+              ...(params.confirmedFeeCap && params.busyGuard ? { confirmedUtilFeeBps: params.busyGuard.confirmedBusyFeeBps } : {}),
+            })
           : params.feeBps;
 
         // v18: TradeCpi/BatchTradeCpi bind both portfolios' identity + accountB's matcher
