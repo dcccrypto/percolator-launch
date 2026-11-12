@@ -103,36 +103,31 @@ export async function sendWithUtilFeeRetry<T>(send: (raised: boolean) => Promise
 }
 
 /**
- * Council r9 Attacker A: an order that came through the confirm screen signs EXACTLY the cap the trader reviewed. A 98 for it is not retried
- * at a silently raised cap (that could charge a busy-side fee the confirm never showed): it is a refusal that asks for a new review. The
- * first refusal is the pre-sign simulation, so nothing was sent. Without a confirm screen (`confirmedCap` false) the silent retry stands.
+ * Council r9 Attacker A: an order that came through the confirm screen is never silently re-signed at a raised cap (that could charge a
+ * busy-side fee the confirm never showed). A 98 for it is one refusal that asks for a new review; the first refusal is the pre-sign
+ * simulation, so nothing was sent. `explain` is a FRESH read of the order's busy-side bps: only when it shows the rate rose does the line say
+ * so (`BusyFeeRoseError`); otherwise the line is generic (devnet's matcher fee is adaptive, so a 98 does not prove the busy rate moved).
+ * Without a confirm screen (`confirmedCap` false: closes, other callers) the silent raise-and-retry stands.
  */
-export async function sendWithConfirmedFeeCap<T>(send: (raised: boolean) => Promise<T>, confirmedCap: boolean): Promise<T> {
+export async function sendWithConfirmedFeeCap<T>(
+  send: (raised: boolean) => Promise<T>,
+  confirmedCap: boolean,
+  explain?: () => Promise<Error | null>,
+): Promise<T> {
   if (!confirmedCap) return sendWithUtilFeeRetry(send);
   try {
     return await send(false);
   } catch (e) {
-    if (isUtilFeeNotCovered(e)) throw new FeeChangedAfterReviewError(e, "busy-side fee");
-    if (isFeeCapRefused(e)) throw new FeeChangedAfterReviewError(e, "market maker's fee");
+    if (isUtilFeeNotCovered(e)) throw (await explain?.().catch(() => null)) ?? new FeeChangedAfterReviewError(e);
     throw e;
   }
 }
 
-/** 9 InvalidInstruction from the wrapper: the signed cap does not cover base + the matcher's requested fee (requested_fee_permitted). */
-export function isFeeCapRefused(e: unknown): boolean {
-  const code = (e as { code?: unknown } | null)?.code;
-  if (code === 9) return true;
-  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-  return /custom program error: 0x9\b|"Custom":9\b|Custom\(9\)/.test(msg);
-}
-
-/** The signed cap no longer covers the fee the engine now asks for: says WHAT moved, and that nothing was charged. */
+/** The signed cap no longer covers the fee the engine asks for, and a fresh read does not show the busy-side rate rising. */
 export class FeeChangedAfterReviewError extends Error {
-  readonly what: "busy-side fee" | "market maker's fee";
-  constructor(cause: unknown, what: "busy-side fee" | "market maker's fee" = "busy-side fee") {
-    super(`The ${what} changed while you were reviewing: it is now higher than the one you saw. Review it again. Nothing was charged.`, { cause });
+  constructor(cause: unknown) {
+    super("The fee changed while you were reviewing. Review it again. Nothing was charged.", { cause });
     this.name = "FeeChangedAfterReviewError";
-    this.what = what;
   }
 }
 

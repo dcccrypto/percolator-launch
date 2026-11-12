@@ -316,6 +316,10 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   if ((err as { name?: string } | null)?.name === "FeeChangedAfterReviewError") {
     return m("fee-changed-after-review", "paused", "Fee changed", (err as Error).message);
   }
+  // Delta review MED-A: a fresh read right before signing showed the busy-side rate above the confirmed one (nothing was sent).
+  if ((err as { name?: string } | null)?.name === "BusyFeeRoseError") {
+    return m("busy-fee-rose", "paused", "Fee changed", (err as Error).message);
+  }
   if ((err as { name?: string } | null)?.name === "UtilFeeOverMaxError") {
     return m("side-too-busy", "paused", "Side too busy", (err as Error).message);
   }

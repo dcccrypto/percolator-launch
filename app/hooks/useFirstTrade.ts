@@ -46,6 +46,7 @@ import { signedPositionForAsset } from "@/lib/limits/decode";
 import { readU64LE } from "@/lib/u64le";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { fetchTradeFeeBps, sendWithConfirmedFeeCap } from "@/lib/limits/trade-fee-resolve";
+import { BusyFeeRoseError, assertBusyFeeNotRisen, readFreshBusyFeeBps, type BusyGuard } from "@/lib/v22/fresh-busy-fee";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { levGuardExists } from "@/lib/v22/lev-guard";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
@@ -90,8 +91,10 @@ export interface FundAndTradeParams {
   depositAtoms: bigint;
   limitPriceE6: bigint;
   feeBps?: bigint;
-  /** Council r9 Attacker A: `feeBps` is the cap the confirm screen showed: sign exactly it, and refuse (not silently raise) on a 98. */
+  /** Council r9 Attacker A: the order came through the confirm screen: a 98 is one refusal asking for a new review, never a silent raise. */
   confirmedFeeCap?: boolean;
+  /** Delta review MED-A: the confirmed busy-side rate; re-read fresh right before the wallet opens, refused (nothing signed) if now higher. */
+  busyGuard?: BusyGuard;
   /** "12.50 USDC" for the deposit-failure line. */
   amountLabel: string;
   /** The id race happened: the UI labels the extra prompt. */
@@ -174,11 +177,16 @@ export function useFirstTrade(slabAddress: string) {
         const lpId = await fetchPortfolioIdentity(connection, lp.accountB);
         // Q-1 (v2.2 QA): sign the SDK rule (base + worst-case matcher fee + 5, capped at the market
         // maximum; lib/limits/trade-fee-resolve.ts), else Custom 9 on the first fill. Flag off: unchanged.
-        let feeBps = p.confirmedFeeCap && p.feeBps !== undefined
-          ? p.feeBps
-          : isDevnetV22Enabled()
+        let feeBps = isDevnetV22Enabled()
           ? await fetchTradeFeeBps(connection, market, lp.matcherCtx, { fallback: p.feeBps ?? wrapperConfigV17?.tradeFeeBps })
           : p.feeBps;
+        // Delta review MED-A: after a 98 on a confirmed order, say "busy-side fee rose" only if a fresh read shows it did.
+        const explainBusy = p.busyGuard
+          ? async (): Promise<Error | null> => {
+              const fresh = await readFreshBusyFeeBps(connection, programId, market, p.busyGuard as BusyGuard);
+              return fresh !== null && fresh > (p.busyGuard as BusyGuard).confirmedBusyFeeBps ? new BusyFeeRoseError(fresh) : null;
+            }
+          : undefined;
         // v2.2 QA U-2: on a 98 the body is rebuilt ONCE with the cap that covers the utilisation fee (sendWithUtilFeeRetry).
         let feeRaise: FeeRaise | null = null;
         const raiseFee = async (): Promise<void> => {
@@ -222,6 +230,7 @@ export function useFirstTrade(slabAddress: string) {
               computeUnitsFromSim: { cap: kind === "order" ? o.cap : MAX_TX_COMPUTE_UNITS },
               onProgress: p.onConfirming,
               ...(kind === "order" ? { selfHeal } : {}),
+              ...(p.busyGuard ? { preSignCheck: () => assertBusyFeeNotRisen(p.busyGuard, () => readFreshBusyFeeBps(connection, programId, market, p.busyGuard as BusyGuard)) } : {}),
             });
           if (!isDevnetV22Enabled() || !slabRaw) return send(body);
           const multiAsset = (marketAssetSlots(slabRaw) ?? 1) > 1;
@@ -267,7 +276,7 @@ export function useFirstTrade(slabAddress: string) {
             sendWithConfirmedFeeCap(async (raised) => {
               if (raised) await raiseFee();
               return sendRefreshed(buildFundAndTradeIxs(ixp(existing), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }), existing, { cap: FUND_AND_TRADE_CU_CAP });
-            }, p.confirmedFeeCap === true),
+            }, p.confirmedFeeCap === true, explainBusy),
           );
           recordFeeRaise(signature, feeRaise);
           recordPositionChange(
@@ -300,7 +309,7 @@ export function useFirstTrade(slabAddress: string) {
               sendWithConfirmedFeeCap(async (raised) => {
                 if (raised) await raiseFee();
                 return sendRefreshed(buildIxs(), null, { signers: [kp], cap: FIRST_TRADE_CU_CAP });
-              }, p.confirmedFeeCap === true),
+              }, p.confirmedFeeCap === true, explainBusy),
             );
             // A brand-new portfolio holds no position before this transaction.
             recordFeeRaise(signature, feeRaise);

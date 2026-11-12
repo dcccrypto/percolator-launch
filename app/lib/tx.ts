@@ -113,6 +113,11 @@ export interface SendTxParams {
    * need ~13k more CU; a single-leg batch on asset 1 needs 216k > the 200k default).
    */
   computeUnitsFromSim?: CuSizing;
+  /**
+   * Runs on every attempt immediately before the wallet is asked to sign (after planning, the CU simulation and any wait). Throwing refuses
+   * the order with nothing signed (the busy-side fee guard, lib/v22/fresh-busy-fee.ts).
+   */
+  preSignCheck?: () => Promise<void>;
   /** Test/diagnostic hook: the limit sendTx set and the consumed CU it was sized from. */
   onComputeUnits?: (r: { limit: number; consumed: number | null }) => void;
   onVaultLpRepair?: (result: VaultLpRepairResult) => void;
@@ -803,6 +808,7 @@ export async function sendTx({
   onSeniorDrawRepair,
   computeUnitsFromSim,
   onComputeUnits,
+  preSignCheck,
 }: SendTxParams): Promise<string> {
   if (!wallet.publicKey || (!wallet.signTransaction && !wallet.signAndSendTransaction)) {
     throw new Error("Wallet not connected");
@@ -1058,6 +1064,8 @@ export async function sendTx({
       if (abortSignal?.aborted) {
         throw new TxCancelledError();
       }
+      // Last gate before the wallet: a caller's check (the busy-side fee has not risen since the confirm screen). Nothing is signed if it throws.
+      if (preSignCheck) await preSignCheck();
       // ================================================================
       // PERC-8388: Use signAndSendTransaction when available.
       // This is the definitive fix for Lighthouse/Blowfish injection.

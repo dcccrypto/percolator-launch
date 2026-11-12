@@ -231,10 +231,10 @@ describe("Attacker A: the order signs what the confirm screen showed", () => {
     expect(mocks.trade).toHaveBeenCalledTimes(1);
     expect(mocks.trade.mock.calls[0][0]).toMatchObject({ confirmedFeeCap: true });
   });
-  // Review MED-1: the cap is built from the reviewed terms whatever the P2 flag: base 30 + the 23 bps quote + the 200 bps busy-side fee + the
-  // 2 bp margin = 255, signed exactly (never the chain read).
+  // Delta review MED-A: the cap signed is NOT rebuilt from the reviewed total (the matcher fee is adaptive): the ticket passes no cap of its own
+  // with P2 off (the hook signs the chain cap, as before) and the live P2 cap with P2 on; what it adds is the busy-side guard.
   for (const [name, charged] of [["P2 OFF (the deployed configuration)", false], ["P2 ON", true]] as const) {
-    it(`${name}: the order signs the reviewed total + margin (255 bps), not the chain cap`, async () => {
+    it(`${name}: the order carries the confirmed busy-side rate and side for the fresh pre-sign read, and no rebuilt 255 bps cap`, async () => {
       mocks.charged = charged;
       mocks.utilBps = 200n;
       mocks.change = { beforeQ: 0n, afterQ: FILLED };
@@ -245,9 +245,23 @@ describe("Attacker A: the order signs what the confirm screen showed", () => {
       await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
       await confirmClick();
       expect(mocks.trade).toHaveBeenCalledTimes(1);
-      expect(mocks.trade.mock.calls[0][0]).toMatchObject({ confirmedFeeCap: true, feeBps: 255n });
+      const p = mocks.trade.mock.calls[0][0];
+      expect(p).toMatchObject({ confirmedFeeCap: true, busyGuard: { confirmedBusyFeeBps: 200n, direction: "long", takerEffQ: 0n } });
+      expect(p.busyGuard.sizeQ).toBe(p.size);
+      expect(p.feeBps).not.toBe(255n);
     });
   }
+  it("short: the guard carries the short side", async () => {
+    mocks.utilBps = 46n;
+    mocks.change = { beforeQ: 0n, afterQ: -FILLED };
+    withPosition(0n);
+    render(<OrderTicket slabAddress={SLAB} />);
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-side-short")); });
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    await confirmClick();
+    expect(mocks.trade.mock.calls[0][0].busyGuard).toMatchObject({ confirmedBusyFeeBps: 46n, direction: "short" });
+  });
 });
 
 describe("Attacker B: the side is the reviewed one", () => {
@@ -357,8 +371,8 @@ describe("review LOW-3: the ticket quotes a busy rate of 0 (not null) on a growt
   });
 });
 
-describe("review MED-1: the fund-and-trade path (no account yet) also signs the reviewed cap and is flagged confirmed", () => {
-  it("fundAndTrade gets feeBps 255 and confirmedFeeCap: true", async () => {
+describe("delta review MED-A: the fund-and-trade path (no account yet) is flagged confirmed and carries the busy-side guard", () => {
+  it("fundAndTrade gets confirmedFeeCap: true and the confirmed busy-side rate", async () => {
     mocks.utilBps = 200n;
     mocks.fund.mockResolvedValue({ signature: SIG, portfolio: WALLET, prompts: 1, created: true });
     mocks.useUserAccount.mockReturnValue(null); // no trading account on this market yet
@@ -369,6 +383,6 @@ describe("review MED-1: the fund-and-trade path (no account yet) also signs the 
     await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
     await confirmClick();
     expect(mocks.fund).toHaveBeenCalledTimes(1);
-    expect(mocks.fund.mock.calls[0][0]).toMatchObject({ feeBps: 255n, confirmedFeeCap: true });
+    expect(mocks.fund.mock.calls[0][0]).toMatchObject({ confirmedFeeCap: true, busyGuard: { confirmedBusyFeeBps: 200n, direction: "long" } });
   });
 });

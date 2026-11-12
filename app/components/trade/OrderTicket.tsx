@@ -86,7 +86,7 @@ import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
 import { saveEntryPrice, clearEntryPrice, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
-import { confirmDriftRefusal, confirmedFeeCapBps, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
+import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
@@ -436,8 +436,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     busyFeeBps: bigint;
     busyFeeAtoms: bigint;
     busyFixed1x: boolean;
-    /** Review MED-1: the total fee (bps: base + quote + busy-side) the ticket's Fee cell showed when the confirm opened. */
-    feeTotalBps: bigint;
     /** Council r9 Attacker A / B: the side, the leverage and the signed fee cap the trader reviewed: what is signed, and refused if they moved. */
     direction: "long" | "short";
     leverage: number;
@@ -1442,8 +1440,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const busyMayApply = marketMayChargeBusyFee(marketLimits);
     const entryBusyFeeBps = snapshotBusyFeeBps ?? busyFeeBps;
     const entryBusyQuoted: bigint | null = busyMayApply || entryBusyFeeBps > 0n ? entryBusyFeeBps : null;
-    // Council r9 Attacker A: sign the cap the confirm screen showed (a live one is only the fallback for a caller with no confirm).
-    const feeCapToSign: bigint | undefined = confirmed ? confirmed.signedFeeBps : ticketLimits.fee?.channel.enabled ? ticketLimits.fee.signedFeeBps : undefined;
+    // The cap signed is what it was before (the P2 fee-channel cap when on, else the hook's chain cap). Council r9 Attacker A is answered by
+    // `confirmedFeeCap` (no silent raise on a 98) and `busyGuard` (a fresh read of the busy-side rate right before the wallet).
+    const feeCapToSign: bigint | undefined = ticketLimits.fee?.channel.enabled ? ticketLimits.fee.signedFeeBps : undefined;
+    const busyGuard = confirmed
+      ? { confirmedBusyFeeBps: confirmed.busyFeeBps, direction, takerEffQ: existingPositionSize, sizeQ: snapshotSize ?? positionSize }
+      : undefined;
     const effectiveSize = snapshotSize ?? positionSize;
     // The confirm screen's deposit is what is signed (the live one can drift while the modal is open).
     // r9 review LOW-A: a confirm that showed NO deposit signs none. If the live order now needs one (capital moved while the confirm was
@@ -1514,7 +1516,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const drift = confirmDriftRefusal(confirmed, {
         direction,
         leverage,
-        signedFeeBps: confirmedFeeCapBps(estFeeBps, 0, engineView?.maxTradingFeeBps), // the total fee the order would be charged now (the market maximum clamps both sides): it must still fit under the reviewed cap
         busyFeeBps: busyFee > 0n ? busyFeeBps : 0n,
       });
       if (drift) { setHumanError(drift); return; }
@@ -1567,7 +1568,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   ? snapshotLimitPriceE6
                   : buildOpenLimitE6(direction === "short" ? -size : size),
               ...(feeCapToSign !== undefined ? { feeBps: feeCapToSign } : {}),
-              ...(confirmed ? { confirmedFeeCap: true } : {}),
+              ...(confirmed ? { confirmedFeeCap: true, busyGuard } : {}),
               amountLabel: signedFundLabel,
               // The race re-opens the wallet, so the button goes back to "Confirm in wallet…".
               onRace: () => { setRaceNote(true); setTradePhase("submitting"); },
@@ -1598,7 +1599,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 // P2 fee channel: sign base + the quote's fee (the taker's consent cap); only when
                 // the protocol enabled the channel for this asset — else the base fee as before.
                 ...(feeCapToSign !== undefined ? { feeBps: feeCapToSign } : {}),
-                ...(confirmed ? { confirmedFeeCap: true } : {}),
+                ...(confirmed ? { confirmedFeeCap: true, busyGuard } : {}),
                 // UX WP-2: the app waits for the market (no prompt) instead of failing.
                 // Only "waiting" steps back to "submitting": sendTxWaiting also calls onWaiting(false)
                 // after the send confirmed, which must not undo "Confirming…" (#49).
@@ -2961,7 +2962,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               busyFeeBps: busyFee > 0n ? busyFeeBps : 0n,
               busyFeeAtoms: busyFee,
               busyFixed1x,
-              feeTotalBps: estFeeBps,
               direction,
               leverage,
               worstFillPriceE6,
@@ -3142,9 +3142,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               snapshot.worstFillPriceE6,
               snapshot.depositAtoms,
               snapshot.busyFeeBps,
-              // Council r9 review MED-1: the cap is built from the terms the confirm showed (its refreshed total fee + the usual margin),
-              // whatever the P2 flag, and signed exactly.
-              { direction: snapshot.direction, leverage: snapshot.leverage, signedFeeBps: confirmedFeeCapBps(confirmFeeBpsNow > snapshot.feeTotalBps ? confirmFeeBpsNow : snapshot.feeTotalBps, feeMarginBps, engineView?.maxTradingFeeBps), busyFeeBps: snapshot.busyFeeBps },
+              { direction: snapshot.direction, leverage: snapshot.leverage, busyFeeBps: snapshot.busyFeeBps },
             );
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}
