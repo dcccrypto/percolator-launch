@@ -112,6 +112,7 @@ export const CloseFlow: FC<{
       lotExp={pos.lotExp ?? 0}
       entryPrice={closePnl.pnlKnown ? closePnl.entry : 0n}
       riskEntryPrice={closePnl.pnlKnown ? closePnl.riskEntry : 0n}
+      busyOpenFeeAtoms={closePnl.busyFeePaidAtoms ?? null}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}
       symbol={symbol}

@@ -102,6 +102,29 @@ export async function sendWithUtilFeeRetry<T>(send: (raised: boolean) => Promise
   }
 }
 
+/**
+ * Council r9 Attacker A: an order that came through the confirm screen signs EXACTLY the cap the trader reviewed. A 98 for it is not retried
+ * at a silently raised cap (that could charge a busy-side fee the confirm never showed): it is a refusal that asks for a new review. The
+ * first refusal is the pre-sign simulation, so nothing was sent. Without a confirm screen (`confirmedCap` false) the silent retry stands.
+ */
+export async function sendWithConfirmedFeeCap<T>(send: (raised: boolean) => Promise<T>, confirmedCap: boolean): Promise<T> {
+  if (!confirmedCap) return sendWithUtilFeeRetry(send);
+  try {
+    return await send(false);
+  } catch (e) {
+    if (isUtilFeeNotCovered(e)) throw new FeeChangedAfterReviewError(e);
+    throw e;
+  }
+}
+
+/** The signed cap no longer covers the busy-side fee the engine now asks for. */
+export class FeeChangedAfterReviewError extends Error {
+  constructor(cause: unknown) {
+    super("The busy-side fee changed while you were reviewing: it is now higher than the one you saw. Review it again. Nothing was sent.", { cause });
+    this.name = "FeeChangedAfterReviewError";
+  }
+}
+
 /** base + matcher + utilisation fee exceeds the market's maximum for this order: nothing can be signed that passes. */
 export class UtilFeeOverMaxError extends Error {
   constructor(cause: unknown) {

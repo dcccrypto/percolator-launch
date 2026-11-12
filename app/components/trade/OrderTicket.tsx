@@ -85,7 +85,8 @@ import { formatTokenAmount, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
-import { saveEntryPrice, clearEntryPrice, entryAfterTrade, entryRecordCurrent, getSavedEntry } from "@/lib/entry-price";
+import { saveEntryPrice, clearEntryPrice, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
+import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
@@ -111,7 +112,7 @@ import { sizeWithLots } from "@/lib/v22/growth-room";
 import { growthDepositFloorAtoms, growthGate } from "@/lib/v22/growth-gate";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { feeBpsWithSpread } from "@/lib/v22/spread-estimate";
-import { effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
+import { busyFeeAtoms, effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
 import { recordFill, saveBook } from "@/lib/trade-book";
 import { recordRealized } from "@/lib/realized-pnl";
 import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
@@ -435,6 +436,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     busyFeeBps: bigint;
     busyFeeAtoms: bigint;
     busyFixed1x: boolean;
+    /** Council r9 Attacker A / B: the side, the leverage and the signed fee cap the trader reviewed: what is signed, and refused if they moved. */
+    direction: "long" | "short";
+    leverage: number;
+    signedFeeBps: bigint | null;
     worstFillPriceE6: bigint;
     riskLeverage: number | null;
     depositAtoms: bigint;
@@ -606,6 +611,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const cachedExistingEntryPrice = savedExistingCurrent ? savedExistingEntry.entryPriceE6 : 0n;
   // The engine's basis for that fill (booked price), for risk math: the spread is already out of capital as a fee.
   const cachedExistingBookedPrice = savedExistingCurrent ? savedExistingEntry.bookedPriceE6 : 0n;
+  // r9: the busy-side fee paid when that position was opened (atoms, whole position); null = unknown (shown as such by the close panel).
+  const existingBusyFeePaidAtoms = savedExistingCurrent ? savedExistingEntry.busyFeeAtoms : null;
   // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math — same
   // fix as PositionsDock/usePortfolio's identical call sites (an unguarded
   // u64::MAX-class account.pnl can poison the derived entry/liq/margin math
@@ -1393,8 +1400,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   });
   // Row 5 (LIMIT): the selected side is paused and the other is open => select the open one.
   useEffect(() => {
-    if (ticketState.autoSelect) { maxPinned.current = null; setDirection(ticketState.autoSelect); }
-  }, [ticketState.autoSelect]);
+    // Council r9 Attacker B: never flip the side under an open confirm screen (the trader is reviewing THIS side).
+    if (ticketState.autoSelect && !showConfirmModal) { maxPinned.current = null; setDirection(ticketState.autoSelect); }
+  }, [ticketState.autoSelect, showConfirmModal]);
   // Row 2: ADL reduce-only moves the ticket to Close when it starts (the Open tab says why).
   const adlWasOn = useRef(false);
   useEffect(() => {
@@ -1422,9 +1430,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     snapshotLimitPriceE6?: bigint,
     snapshotDepositAtoms?: bigint,
     snapshotBusyFeeBps?: bigint,
+    confirmed?: ConfirmedTerms,
   ) {
     // r9 review LOW-2: the Entry split uses the busy-side rate the confirm screen showed, not a live one read at submit.
+    // r9 Risk LOW: a rate is QUOTED (0 included) on a market that can charge a busy-side fee; elsewhere none (the old behaviour).
+    const busyMayApply = marketMayChargeBusyFee(marketLimits);
     const entryBusyFeeBps = snapshotBusyFeeBps ?? busyFeeBps;
+    const entryBusyQuoted: bigint | null = busyMayApply || entryBusyFeeBps > 0n ? entryBusyFeeBps : null;
+    // Council r9 Attacker A: sign the cap the confirm screen showed (a live one is only the fallback for a caller with no confirm).
+    const feeCapToSign: bigint | undefined = confirmed ? confirmed.signedFeeBps ?? undefined : ticketLimits.fee?.channel.enabled ? ticketLimits.fee.signedFeeBps : undefined;
     const effectiveSize = snapshotSize ?? positionSize;
     // The confirm screen's deposit is what is signed (the live one can drift while the modal is open).
     // r9 review LOW-A: a confirm that showed NO deposit signs none. If the live order now needs one (capital moved while the confirm was
@@ -1490,6 +1504,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return;
     }
 
+    // Council r9 Attacker A / B: the side, leverage, busy-side fee and fee cap signed are the reviewed ones, or nothing is sent.
+    if (confirmed) {
+      const drift = confirmDriftRefusal(confirmed, {
+        direction,
+        leverage,
+        signedFeeBps: ticketLimits.fee?.channel.enabled ? ticketLimits.fee.signedFeeBps : null,
+        busyFeeBps: busyFee > 0n ? busyFeeBps : 0n,
+      });
+      if (drift) { setHumanError(drift); return; }
+    }
+
     setHumanError(null);
     setRefusal(null);
     setResult(null);
@@ -1536,7 +1561,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 snapshotLimitPriceE6 !== undefined && snapshotLimitPriceE6 > 0n
                   ? snapshotLimitPriceE6
                   : buildOpenLimitE6(direction === "short" ? -size : size),
-              ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
+              ...(feeCapToSign !== undefined ? { feeBps: feeCapToSign } : {}),
+              ...(confirmed ? { confirmedFeeCap: true } : {}),
               amountLabel: signedFundLabel,
               // The race re-opens the wallet, so the button goes back to "Confirm in wallet…".
               onRace: () => { setRaceNote(true); setTradePhase("submitting"); },
@@ -1566,7 +1592,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 size,
                 // P2 fee channel: sign base + the quote's fee (the taker's consent cap); only when
                 // the protocol enabled the channel for this asset — else the base fee as before.
-                ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
+                ...(feeCapToSign !== undefined ? { feeBps: feeCapToSign } : {}),
+                ...(confirmed ? { confirmedFeeCap: true } : {}),
                 // UX WP-2: the app waits for the market (no prompt) instead of failing.
                 // Only "waiting" steps back to "submitting": sendTxWaiting also calls onWaiting(false)
                 // after the send confirmed, which must not undo "Confirming…" (#49).
@@ -1634,7 +1661,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       });
       setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
       void Promise.all([measured, execFillP]).then(([change, execFill]) => {
-        const effective = execFill ? effectivePriceE6(execFill, baseFeeBps, entryBusyFeeBps) : null;
+        // Council r9 Attacker C: a fee raise for this signature means the fee charged is not the one quoted: no price is claimed.
+        const effective = execFill && !raisedFee ? effectivePriceE6(execFill, baseFeeBps, entryBusyQuoted) : null;
         const price = v22Fill ? (effective !== null ? formatLotPriceE6(effective, lotExp) : null) : formatLotPriceE6(submitPriceE6, lotExp);
         const outcome = classifyOrderChange(direction, effectiveSize, change);
         let next: NonNullable<typeof result>;
@@ -1678,7 +1706,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // (applied below once read); the mark is never the entry of a v2.2 fill.
       const markFillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
       // `fillPriceE6` is the entry the surfaces show (the price paid); `bookedPriceE6` the engine's basis for the same fill (risk math only).
-      const applyEntryFill = (fillPriceE6: bigint, bookedPriceE6: bigint = fillPriceE6) => {
+      const applyEntryFill = (fillPriceE6: bigint, bookedPriceE6: bigint = fillPriceE6, fillBusyFeeAtoms: bigint | null = 0n) => {
       if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
         const slab = slabAddress;
@@ -1691,7 +1719,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         if (existingPositionSize === 0n) {
           // r8: this save has no size yet (it is measured below). It is flagged pending so the opening device keeps showing it in the
           // meantime; the measured save replaces it, and once the short window passes an unmeasured one stops counting.
-          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet, undefined, { bookedPriceE6, pending: true });
+          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet, undefined, { bookedPriceE6, pending: true, busyFeeAtoms: fillBusyFeeAtoms });
         } else {
           clearEntryPrice(slab, entryIdx, wallet);
         }
@@ -1718,7 +1746,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // The saved leverage describes the order that opened the position (PositionPanel's
           // "Order Lev."), so an add or a reduce keeps it.
           const lev = opened ? orderLeverage : prior?.leverage ?? undefined;
-          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ, { bookedPriceE6: nextBooked });
+          const nextBusy = busyFeeAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillBusyFeeAtoms });
+          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ, { bookedPriceE6: nextBooked, busyFeeAtoms: nextBusy });
         });
       }
       };
@@ -1728,8 +1757,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // the fee, the same price the toast and the result line show), so the PnL shown is net of the spread. The BOOKED price is kept
           // beside it for risk math only (liquidation price, equity): the engine's basis is the booked price and the spread already left
           // capital as a fee, so valuing risk from the fill price would count it twice (lib/position-pnl.ts riskEntry).
-          const paid = ef ? effectivePriceE6(ef, baseFeeBps, entryBusyFeeBps) : null;
-          if (ef && paid !== null) applyEntryFill(paid, ef.bookedPriceE6);
+          const paid = ef && !raisedFee ? effectivePriceE6(ef, baseFeeBps, entryBusyQuoted) : null;
+          // The busy-side fee paid, from the same quoted rate the split used (its residual check passed): kept with the entry for the close dialogs.
+          if (ef && paid !== null) applyEntryFill(paid, ef.bookedPriceE6, busyFeeAtoms(ef, entryBusyQuoted));
           // The fill could not be read (or its price cannot be split from the fee): keep no entry at all (the position panel then shows an
           // unknown one) rather than the mark or the booked price, which is gross of the spread.
           else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
@@ -2212,6 +2242,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             accountPending={accountPending}
             entryPriceE6={existingRecordedEntryKnown ? existingEntryPriceE6 : 0n}
             riskEntryPriceE6={existingRecordedEntryKnown ? existingRiskEntryE6 : 0n}
+            busyOpenFeeAtoms={existingBusyFeePaidAtoms}
             capital={capital}
             symbol={baseTicker}
             collateralSymbol={collateralSymbol}
@@ -2919,6 +2950,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               busyFeeBps: busyFee > 0n ? busyFeeBps : 0n,
               busyFeeAtoms: busyFee,
               busyFixed1x,
+              direction,
+              leverage,
+              signedFeeBps: ticketLimits.fee?.channel.enabled ? ticketLimits.fee.signedFeeBps : null,
               worstFillPriceE6,
               // The account after this trade: the resulting position and the bundled deposit, as
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
@@ -3097,6 +3131,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               snapshot.worstFillPriceE6,
               snapshot.depositAtoms,
               snapshot.busyFeeBps,
+              { direction: snapshot.direction, leverage: snapshot.leverage, signedFeeBps: snapshot.signedFeeBps, busyFeeBps: snapshot.busyFeeBps },
             );
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}

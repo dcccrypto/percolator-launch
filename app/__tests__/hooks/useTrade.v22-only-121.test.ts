@@ -117,6 +117,7 @@ vi.mock("@/lib/limits/trade-fee-resolve", async (orig) => ({
   ...((await orig()) as Record<string, unknown>),
   fetchTradeFeeBps: vi.fn(async () => 30n),
   sendWithUtilFeeRetry: async (send: (raised: boolean) => Promise<string>) => send(false),
+  sendWithConfirmedFeeCap: async (send: (raised: boolean) => Promise<string>) => send(false),
 }));
 
 import { useTrade } from "@/hooks/useTrade";

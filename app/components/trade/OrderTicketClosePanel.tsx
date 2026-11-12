@@ -32,6 +32,8 @@ export interface OrderTicketClosePanelProps {
   entryPriceE6: bigint;
   /** #3534: the risk entry the close preview's balance-after is valued from. Omitted = `entryPriceE6`. */
   riskEntryPriceE6?: bigint;
+  /** r9: the busy-side fee paid when the position was opened (atoms, whole position); null / omitted = unknown. */
+  busyOpenFeeAtoms?: bigint | null;
   capital: bigint;
   symbol: string;
   collateralSymbol: string;
@@ -88,6 +90,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   accountPending = false,
   entryPriceE6,
   riskEntryPriceE6,
+  busyOpenFeeAtoms,
   capital,
   symbol,
   collateralSymbol,
@@ -232,6 +235,8 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         lotExp={lotExp}
         entryPrice={entryPriceE6}
         riskEntryPrice={riskEntryPriceE6}
+        busyOpenFeeAtoms={busyOpenFeeAtoms}
+        busyFeeMayApply={closeFeeBpsFor.busyFeeMayApply === true}
         currentPrice={currentPriceE6}
         capital={capital}
         symbol={symbol}

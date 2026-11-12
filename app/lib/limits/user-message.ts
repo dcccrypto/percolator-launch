@@ -312,6 +312,10 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   }
   // v2.2 QA U-2 / P-3b: base + matcher + utilisation fee is over the market's maximum for this size (a second 98 after
   // the cap was raised): one true line, no "Try again" loop.
+  // Council r9 Attacker A: the order was confirmed at one busy-side fee and the engine now asks for more: review again, never a silent raise.
+  if ((err as { name?: string } | null)?.name === "FeeChangedAfterReviewError") {
+    return m("fee-changed-after-review", "paused", "Fee changed", (err as Error).message);
+  }
   if ((err as { name?: string } | null)?.name === "UtilFeeOverMaxError") {
     return m("side-too-busy", "paused", "Side too busy", (err as Error).message);
   }

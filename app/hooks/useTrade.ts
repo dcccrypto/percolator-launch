@@ -45,7 +45,7 @@ import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
 import { recordFeeRaise, type FeeRaise } from "@/lib/v22/fee-raise-note";
 import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/lib/position-change";
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
-import { fetchTradeFeeBps, sendWithUtilFeeRetry } from "@/lib/limits/trade-fee-resolve";
+import { fetchTradeFeeBps, sendWithConfirmedFeeCap } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { levGuardExists } from "@/lib/v22/lev-guard";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
@@ -325,6 +325,11 @@ export function useTrade(slabAddress: string) {
        * Omitted => the market's base trade fee (the only value accepted without it).
        */
       feeBps?: bigint;
+      /**
+       * Council r9 Attacker A: `feeBps` is the cap the confirm screen showed. Sign exactly it (no chain re-resolve that could differ) and never
+       * raise it silently on a 98: the order is refused so the trader reviews the higher busy-side fee. Omitted = the silent retry (closes).
+       */
+      confirmedFeeCap?: boolean;
       /** UX WP-2: called while the app waits for the market (no prompt yet): true / false. */
       onWaiting?: (waiting: boolean) => void;
       /** UX WP-3: the ticket's "Stop" ends the wait loop (no prompt was opened). */
@@ -556,7 +561,9 @@ export function useTrade(slabAddress: string) {
         // requested fee (else Custom 9 on every fill). Flag on: the SDK rule (base + worst-case
         // matcher fee + 5, capped at the market maximum), read from the market + the LP's matcher
         // context right now (lib/limits/trade-fee-resolve.ts). Flag off: unchanged.
-        const signedFeeBps = isDevnetV22Enabled() && isV17Market
+        const signedFeeBps = params.confirmedFeeCap && params.feeBps !== undefined
+          ? params.feeBps
+          : isDevnetV22Enabled() && isV17Market
           ? await fetchTradeFeeBps(connection, slabPk, matcherCtx, { fallback: params.feeBps ?? wrapperConfigV17?.tradeFeeBps })
           : params.feeBps;
 
@@ -807,7 +814,7 @@ export function useTrade(slabAddress: string) {
           };
           const sendOrder = (): Promise<string> =>
             isV17Market && isDevnetV22Enabled()
-              ? sendWithUtilFeeRetry(async (raised) => { if (raised) await withRaisedFee(); return sendOrderOnce(); })
+              ? sendWithConfirmedFeeCap(async (raised) => { if (raised) await withRaisedFee(); return sendOrderOnce(); }, params.confirmedFeeCap === true)
               : sendOrderOnce();
           // Devnet v2.1: the order goes ALONE (no push / crank / refresh prefix): TradeCpi accrues
           // the market itself. A Custom(121) EngineLossStale (insurance does not yet cover the

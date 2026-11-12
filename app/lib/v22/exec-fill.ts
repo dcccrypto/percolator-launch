@@ -120,7 +120,11 @@ export function effectivePriceE6(f: ExecFill, baseFeeBps: bigint | null | undefi
   if (baseFeeBps == null || f.executedQ === 0n) return null;
   let spread = spreadFeeAtoms(f, baseFeeBps);
   const busy = busyFeeAtoms(f, busyFeeBps);
-  if (busy > 0n) {
+  // r9 Risk LOW: the residual check runs whenever a busy rate was QUOTED, 0 included (`busyFeeBps != null`), not only when it was positive.
+  // A ticket that quoted 0 on a growth market where the engine then charged 1-2 bps (inside the +2 bp signed margin) used to fold those
+  // atoms into the Entry unchecked. Callers pass `null` / omit the rate on a market that can never charge one (no growth record), which keeps
+  // the old behaviour exactly there (the close path never quotes one either). Narrowest rule: it keys on what the ticket knew, not on the fill.
+  if (busyFeeBps != null) {
     // Whole-atom rounding only: the engine floors each fee part and rounds the notional up where the app floors it, and both sides take the
     // quoted spread as the same ceil bps. A 0.01 bp + 5 atom slack covers that; a 1 bp slack let a real 1 bp busy-fee drift through.
     const tol = f.notionalAtoms / 1_000_000n + 5n;

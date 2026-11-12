@@ -87,6 +87,8 @@ export interface PositionPnlInput {
    * count the spread twice. Omitted = the cached entry is the basis.
    */
   cachedRiskEntryE6?: bigint | null;
+  /** r9: the growth busy-side fee paid at open (atoms, whole position) saved with the cached entry; null/omitted = unknown. */
+  cachedBusyFeeAtoms?: bigint | null;
   /**
    * r8: what the cached entry was saved for. Given, the cached entry counts only while the ADL-effective size measured on chain still
    * equals `sizeQ` (or it is the opening device's fresh pending save): a change from another device must not leave a stale entry showing
@@ -127,6 +129,12 @@ export interface PositionPnl {
   riskEntry: bigint;
   /** True when `riskEntry` is the settled back-solve rather than `entry`. */
   riskEntrySettled: boolean;
+  /**
+   * r9: the growth busy-side fee paid when the position was opened (atoms, whole position), from the CURRENT cached record. Null/absent =
+   * unknown (older record, entry not from the cache, or not recorded): the close dialog then cannot call a positive net a profit on a market
+   * that charges one.
+   */
+  busyFeePaidAtoms?: bigint | null;
   /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed (needs a RECORDED entry: server or cache). */
   pnlKnown: boolean;
   /**
@@ -287,6 +295,7 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     isEstimate: resolved.source === "derived",
     riskEntry,
     riskEntrySettled: settledEntry !== null,
+    busyFeePaidAtoms: resolved.source === "cache" && cacheCurrent ? input.cachedBusyFeeAtoms ?? null : null,
     riskKnown:
       flat || (effectiveSize !== null && !resetObligation && resolved.source !== "unknown" && resolved.entry > 0n && markE6 > 0n),
     liquidationPriceE6:
@@ -353,6 +362,8 @@ export function lookupKnownEntries(
   serverEntryE6: bigint | null;
   cachedEntryE6: bigint;
   cachedRiskEntryE6: bigint;
+  /** The busy-side fee paid at open (atoms, whole position); null = unknown. */
+  cachedBusyFeeAtoms: bigint | null;
   /** What the cached entry was saved for (r8); `null` when nothing is cached. Feed it to `computePositionPnl` with the entry. */
   cachedEntryCheck: EntryCheck | null;
 } {
@@ -361,6 +372,7 @@ export function lookupKnownEntries(
     serverEntryE6: null, // TODO(indexer#211): server-authoritative entry slots in here
     cachedEntryE6: saved?.entryPriceE6 ?? 0n,
     cachedRiskEntryE6: saved?.bookedPriceE6 ?? 0n,
+    cachedBusyFeeAtoms: saved?.busyFeeAtoms ?? null,
     cachedEntryCheck: saved ? { sizeQ: saved.sizeQ, pending: saved.pending } : null,
   };
 }
@@ -389,15 +401,15 @@ export interface PortfolioPnlSource {
  * back-solved `derived` entry (from the portfolio-wide `pnl`, leftovers included) while the trade page, which reads
  * the cache on every render, showed the recorded one. Re-reading here makes every surface resolve the same entry.
  */
-function liveCachedEntry(pos: PortfolioPnlSource): { entryE6: bigint; riskEntryE6: bigint; check: EntryCheck | null } {
+function liveCachedEntry(pos: PortfolioPnlSource): { entryE6: bigint; riskEntryE6: bigint; busyFeeAtoms: bigint | null; check: EntryCheck | null } {
   if (pos.entryCacheWallet && pos.slabAddress !== undefined && pos.idx !== undefined) {
     const live = getSavedEntry(pos.slabAddress, pos.idx, pos.entryCacheWallet);
-    if (live) return { entryE6: live.entryPriceE6, riskEntryE6: live.bookedPriceE6, check: { sizeQ: live.sizeQ, pending: live.pending } };
+    if (live) return { entryE6: live.entryPriceE6, riskEntryE6: live.bookedPriceE6, busyFeeAtoms: live.busyFeeAtoms, check: { sizeQ: live.sizeQ, pending: live.pending } };
   }
   // This device holds no record for the position (it was cleared by a trade here): a snapshot's older cache hit must not stand in for
   // it, or the size check would be skipped. Only a row with no cache key to read (no slab / idx / wallet) keeps its own resolved entry.
-  if (pos.entryCacheWallet && pos.slabAddress !== undefined && pos.idx !== undefined) return { entryE6: 0n, riskEntryE6: 0n, check: null };
-  return { entryE6: pos.entryPriceSource === "cache" ? pos.effectiveEntryPrice : 0n, riskEntryE6: 0n, check: null };
+  if (pos.entryCacheWallet && pos.slabAddress !== undefined && pos.idx !== undefined) return { entryE6: 0n, riskEntryE6: 0n, busyFeeAtoms: null, check: null };
+  return { entryE6: pos.entryPriceSource === "cache" ? pos.effectiveEntryPrice : 0n, riskEntryE6: 0n, busyFeeAtoms: null, check: null };
 }
 
 /** Live-mark PnL for a polled `PortfolioPosition` - what the bar, card, hero totals and metrics all call. */
@@ -415,6 +427,7 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
     serverEntryE6: pos.entryPriceSource === "server" ? pos.effectiveEntryPrice : null,
     cachedEntryE6: cachedLive.entryE6,
     cachedRiskEntryE6: cachedLive.riskEntryE6,
+    cachedBusyFeeAtoms: cachedLive.busyFeeAtoms,
     cachedEntryCheck: cachedLive.check,
     onChainPnl: pos.account?.pnl ?? 0n,
     initialMarginBps: pos.initialMarginBps,
@@ -469,7 +482,7 @@ export function terminalPositionPnl(args: {
     anchorMarkE6: args.anchorMarkE6,
     serverEntryE6: known.serverEntryE6,
     cachedEntryE6: onChainEntry > 0n ? onChainEntry : known.cachedEntryE6,
-    ...(onChainEntry > 0n ? {} : { cachedRiskEntryE6: known.cachedRiskEntryE6, cachedEntryCheck: known.cachedEntryCheck }),
+    ...(onChainEntry > 0n ? {} : { cachedRiskEntryE6: known.cachedRiskEntryE6, cachedBusyFeeAtoms: known.cachedBusyFeeAtoms, cachedEntryCheck: known.cachedEntryCheck }),
     onChainPnl: account.pnl,
     initialMarginBps: args.initialMarginBps,
     maintenanceMarginBps: args.maintenanceMarginBps,

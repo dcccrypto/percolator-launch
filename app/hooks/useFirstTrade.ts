@@ -45,7 +45,7 @@ import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/
 import { signedPositionForAsset } from "@/lib/limits/decode";
 import { readU64LE } from "@/lib/u64le";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
-import { fetchTradeFeeBps, sendWithUtilFeeRetry } from "@/lib/limits/trade-fee-resolve";
+import { fetchTradeFeeBps, sendWithConfirmedFeeCap } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { levGuardExists } from "@/lib/v22/lev-guard";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
@@ -90,6 +90,8 @@ export interface FundAndTradeParams {
   depositAtoms: bigint;
   limitPriceE6: bigint;
   feeBps?: bigint;
+  /** Council r9 Attacker A: `feeBps` is the cap the confirm screen showed: sign exactly it, and refuse (not silently raise) on a 98. */
+  confirmedFeeCap?: boolean;
   /** "12.50 USDC" for the deposit-failure line. */
   amountLabel: string;
   /** The id race happened: the UI labels the extra prompt. */
@@ -172,7 +174,9 @@ export function useFirstTrade(slabAddress: string) {
         const lpId = await fetchPortfolioIdentity(connection, lp.accountB);
         // Q-1 (v2.2 QA): sign the SDK rule (base + worst-case matcher fee + 5, capped at the market
         // maximum; lib/limits/trade-fee-resolve.ts), else Custom 9 on the first fill. Flag off: unchanged.
-        let feeBps = isDevnetV22Enabled()
+        let feeBps = p.confirmedFeeCap && p.feeBps !== undefined
+          ? p.feeBps
+          : isDevnetV22Enabled()
           ? await fetchTradeFeeBps(connection, market, lp.matcherCtx, { fallback: p.feeBps ?? wrapperConfigV17?.tradeFeeBps })
           : p.feeBps;
         // v2.2 QA U-2: on a 98 the body is rebuilt ONCE with the cap that covers the utilisation fee (sendWithUtilFeeRetry).
@@ -260,10 +264,10 @@ export function useFirstTrade(slabAddress: string) {
           const beforeInfo = await connection.getAccountInfo(existing, "confirmed").catch(() => null);
           const beforeQ = beforeInfo ? signedPositionForAsset(new Uint8Array(beforeInfo.data), 0, marketId) : null;
           const signature = await withPresignWait(() =>
-            sendWithUtilFeeRetry(async (raised) => {
+            sendWithConfirmedFeeCap(async (raised) => {
               if (raised) await raiseFee();
               return sendRefreshed(buildFundAndTradeIxs(ixp(existing), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }), existing, { cap: FUND_AND_TRADE_CU_CAP });
-            }),
+            }, p.confirmedFeeCap === true),
           );
           recordFeeRaise(signature, feeRaise);
           recordPositionChange(
@@ -293,10 +297,10 @@ export function useFirstTrade(slabAddress: string) {
           ];
           try {
             const signature = await withPresignWait(() =>
-              sendWithUtilFeeRetry(async (raised) => {
+              sendWithConfirmedFeeCap(async (raised) => {
                 if (raised) await raiseFee();
                 return sendRefreshed(buildIxs(), null, { signers: [kp], cap: FIRST_TRADE_CU_CAP });
-              }),
+              }, p.confirmedFeeCap === true),
             );
             // A brand-new portfolio holds no position before this transaction.
             recordFeeRaise(signature, feeRaise);
