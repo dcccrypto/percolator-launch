@@ -71,6 +71,12 @@ vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 vi.mock("@/lib/userAccountScan", async (orig) => ({ ...(await orig<object>()), getPortfolioRawSnapshot: () => null }));
 vi.mock("@/lib/close-trading-account", async (orig) => ({ ...(await orig<object>()), isPortfolioClosable: () => ({ closable: false }) }));
 vi.mock("@/hooks/useClosePosition", () => ({ useClosePosition: () => ({ closePosition: vi.fn(), prewarmClose: vi.fn(), loading: false, error: null }) }));
+// Council r9 Trader MED: Max on a busy side now fixes leverage at 1x (OrderTicket.max-busy-fixed-1x.test.tsx). This file is about the
+// room / collateral bounds of Buying power and Max at every leverage, so it prices the order with no busy-side part.
+vi.mock("@/lib/limits/estimated-fee", async (orig) => {
+  const m = await orig<typeof import("@/lib/limits/estimated-fee")>();
+  return { ...m, ticketFeeForEstimate: (l: Parameters<typeof m.ticketFeeForEstimate>[0]) => { const f = m.ticketFeeForEstimate(l); return f ? { ...f, utilFeeBps: 0n } : f; } };
+});
 vi.mock("@/hooks/useLivePrice", () => ({ useLivePrice: () => ({ priceE6: px.e6, priceUsd: Number(px.e6) / 1e6 }) }));
 vi.mock("@/hooks/useNftWrappedPosition", () => ({ useNftWrappedPosition: () => null }));
 

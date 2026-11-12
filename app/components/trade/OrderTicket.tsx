@@ -802,7 +802,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
    * and every such writer also clears it explicitly. A leverage change does NOT clear it: the size was Max, so it follows the Max at the
    * new leverage (Max is a function of leverage); typing, a %, a unit switch, a direction switch, a submit or a market switch end it.
    */
-  const maxPinned = useRef<{ dir: "long" | "short"; unit: "token" | "usd"; written: string } | null>(null);
+  const maxPinned = useRef<{ dir: "long" | "short"; unit: "token" | "usd"; written: string; /** Council r9 Trader: Max chose a size that pays a busy-side fee, so leverage is fixed at 1x and Max fills what 1x allows. */ busy1x?: boolean } | null>(null);
   const applySize = useCallback(
     (val: string) => {
       const cleaned = sanitizeDecimalInput(val);
@@ -1319,8 +1319,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const maxIsRoomBound = !roomUnknownRaw && marketMaxQ !== null && displayMaxQ !== null && displayMaxQ >= marketMaxQ;
   const pin = maxPinned.current;
   const pinLive = pin !== null && pin.dir === direction && pin.unit === sizeUnit && pin.written === sizeInput;
-  const pinTargetQ = pinLive && maxIsRoomBound && displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n && !sidePaused[direction] && !showConfirmModal
-    ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6, reduceOnlyMaxQ) : null;
+  // Council r9 Trader MED (owner decision 3): Max on a busy side keeps 1x, whatever the wallet holds. Set by the Max chip when the size it chose
+  // pays a busy-side fee; it lasts while that Max size stands (a typed size, a % chip, a side switch or a submit end it with the pin).
+  const maxFixed1x = pinLive && pin !== null && pin.busy1x === true;
+  const pinTargetQ = pinLive && (maxIsRoomBound || maxFixed1x) && displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n && !sidePaused[direction] && !showConfirmModal
+    ? maxIsRoomBound ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6, reduceOnlyMaxQ) : displayMaxQ : null;
   useLayoutEffect(() => {
     if (pinTargetQ === null || !livePriceE6 || livePriceE6 <= 0n) return;
     const next = sizeQToInput(pinTargetQ, sizeUnit, livePriceE6, lotExp);
@@ -1344,6 +1347,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     maxLeverage,
     ticketLimits.stepDown?.maxLeverageAtSize ?? Number.POSITIVE_INFINITY,
     ticketLimits.growth?.fillMaxLeverage ?? Number.POSITIVE_INFINITY,
+    maxFixed1x ? 1 : Number.POSITIVE_INFINITY,
   );
   useEffect(() => {
     if (levCapForSize >= 1 && leverage > levCapForSize) updateLeverage(Math.floor(levCapForSize * 100) / 100);
@@ -2283,7 +2287,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const q = pct === 100 ? (roomBound ? maxFillWithHeadroomQ(displayMaxQ, sizeUnit, livePriceE6, reduceOnlyMaxQ) : displayMaxQ) : (displayMaxQ * BigInt(pct)) / 100n;
       handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6, lotExp));
       const written = sizeQToInput(q, sizeUnit, livePriceE6, lotExp);
-      maxPinned.current = pct === 100 && roomBound ? { dir: direction, unit: sizeUnit, written: sanitizeDecimalInput(written) } : null;
+      // Council r9 Trader MED: does the size Max chose pay a busy-side fee (this side, this size)? Then Max is fixed at 1x and refills at 1x
+      // (the cap clamp above lowers the leverage; the pin follows the 1x Max). A typed size or another chip is never forced.
+      const probe = pct === 100 ? feeProbe(q) : null;
+      let busyAtMax = 0n;
+      if (probe) { try { busyAtMax = ticketFeeForEstimate(deriveTicketLimits(probe))?.utilFeeBps ?? 0n; } catch { busyAtMax = 0n; } }
+      const busy1x = pct === 100 && busyAtMax > 0n;
+      maxPinned.current = pct === 100 && (roomBound || busy1x) ? { dir: direction, unit: sizeUnit, written: sanitizeDecimalInput(written), ...(busy1x ? { busy1x: true } : {}) } : null;
       return;
     }
     setSizePercent(pct);

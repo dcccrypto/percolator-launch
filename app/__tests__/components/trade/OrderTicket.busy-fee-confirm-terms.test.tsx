@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   quoteBps: 23,
   utilBps: 0n,
   charged: false,
+  priceE6: 1_200_000n,
+  priceListeners: new Set<() => void>(),
   auto: null as null | "long" | "short",
 }));
 
@@ -48,13 +50,16 @@ vi.mock("@/hooks/useOracleFreshness", () => ({ useOracleFreshness: () => ({ isSt
 vi.mock("@/hooks/useEngineFreshness", () => ({ useEngineFreshness: () => ({ engineStale: false }) }));
 vi.mock("@/hooks/usePrivySafe", () => ({ usePrivyLogin: () => vi.fn(), usePrivyAvailable: () => false }));
 vi.mock("@/hooks/useWalletAdapterAvailable", () => ({ useWalletAdapterAvailable: () => true }));
-vi.mock("@/hooks/useLivePrice", () => ({ useLivePrice: () => ({ priceE6: 1_200_000n, priceUsd: 1.2 }) }));
+vi.mock("@/hooks/useLivePrice", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return { useLivePrice: () => { const p = useSyncExternalStore((l) => { mocks.priceListeners.add(l); return () => mocks.priceListeners.delete(l); }, () => mocks.priceE6); return { priceE6: p, priceUsd: Number(p) / 1e6 }; } };
+});
 vi.mock("@/hooks/useMarketInfo", () => ({ useMarketInfo: () => ({ market: { symbol: "SOL-PERP", max_leverage: 10 } }) }));
 vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
 vi.mock("@/lib/v22/flag", async (orig) => ({ ...(await orig<object>()), isDevnetV22Enabled: () => true }));
 vi.mock("@/lib/priceStore/priceStore", async (orig) => ({
   ...(await orig<object>()),
-  getLivePriceSnapshot: () => ({ priceUsd: 1.2, priceE6: 1_200_000n }),
+  getLivePriceSnapshot: () => ({ priceUsd: Number(mocks.priceE6) / 1e6, priceE6: mocks.priceE6 }),
 }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccountIdle: () => null, getMockUserAccount: () => null }));
 vi.mock("gsap", () => ({ default: { fromTo: vi.fn() } }));
@@ -91,9 +96,10 @@ beforeEach(() => {
   mocks.utilBps = 0n;
   mocks.charged = false;
   mocks.auto = null;
+  mocks.priceE6 = 1_200_000n;
   mocks.trade.mockResolvedValue(SIG);
   mocks.useWalletCompat.mockReturnValue({ publicKey: WALLET, connected: true });
-  mocks.useConnectionCompat.mockReturnValue({ connection: { tag: "conn", getTransaction: mocks.getTransaction } });
+  mocks.useConnectionCompat.mockReturnValue({ connection: { tag: "conn", getTransaction: mocks.getTransaction, getTokenAccountBalance: vi.fn(async () => ({ value: { amount: "0", decimals: 6 } })), getAccountInfo: vi.fn(async () => null) } });
   mocks.useSlabState.mockReturnValue({ accounts: [], config: { collateralMint: MINT, decimals: 6 }, header: null, refresh: mocks.refresh, programId: WALLET, raw: new Uint8Array(modeFixtures().market) });
   mocks.useEngineState.mockReturnValue({ engine: null, params: { initialMarginBps: 1000n, maintenanceMarginBps: 500n, tradingFeeBps: 30n }, insuranceBalance: 1_000_000n, totalOI: 0n, hasData: true });
 });
@@ -151,7 +157,7 @@ describe("Skeptic E: Max on a busy side with leverage capped at 1x", () => {
     mocks.utilBps = 200n;
     withPosition(0n);
     render(<OrderTicket slabAddress={SLAB} />);
-    fireEvent.click(screen.getAllByTestId("trade-size-preset").find((b) => b.getAttribute("data-percent") === "100")!);
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } }); // a typed size, not Max
     expect(screen.queryByText((_, el) => el?.tagName === "P" && (el.textContent ?? "").endsWith("(fixed)"))).toBeNull();
     expect(screen.getByTestId("ticket-busy-fee-notice").textContent).not.toContain("fixed at 1x");
   });
