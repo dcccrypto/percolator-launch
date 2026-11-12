@@ -25,6 +25,9 @@ const mocks = vi.hoisted(() => ({
   charged: false,
   priceE6: 1_200_000n,
   priceListeners: new Set<() => void>(),
+  fund: vi.fn(),
+  growthRoom: null as null | "known" | "none",
+  effArgs: [] as Array<bigint | null | undefined>,
   auto: null as null | "long" | "short",
 }));
 
@@ -44,6 +47,15 @@ vi.mock("@/lib/limits/ticket-state", async (orig) => {
   const m = await orig<typeof import("@/lib/limits/ticket-state")>();
   return { ...m, deriveTicketState: (i: Parameters<typeof m.deriveTicketState>[0]) => { const s = m.deriveTicketState(i); return mocks.auto ? { ...s, autoSelect: mocks.auto } : s; } };
 });
+vi.mock("@/hooks/useMarketLimits", async (orig) => {
+  const m = await orig<typeof import("@/hooks/useMarketLimits")>();
+  return { ...m, useMarketLimits: (...a: Parameters<typeof m.useMarketLimits>) => { const r = m.useMarketLimits(...a); return mocks.growthRoom ? { ...r, growthRoom: mocks.growthRoom } : r; } };
+});
+vi.mock("@/lib/v22/exec-fill", async (orig) => {
+  const m = await orig<typeof import("@/lib/v22/exec-fill")>();
+  return { ...m, effectivePriceE6: (...a: Parameters<typeof m.effectivePriceE6>) => { mocks.effArgs.push(a[2]); return m.effectivePriceE6(...a); } };
+});
+vi.mock("@/hooks/useFirstTrade", () => ({ useFirstTrade: () => ({ fundAndTrade: mocks.fund, loading: false }) }));
 vi.mock("@/hooks/useMarketFillCap", () => ({ useMarketFillCap: () => null }));
 vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => null }));
 vi.mock("@/hooks/useOracleFreshness", () => ({ useOracleFreshness: () => ({ isStale: false, stale: false }) }));
@@ -96,6 +108,8 @@ beforeEach(() => {
   mocks.utilBps = 0n;
   mocks.charged = false;
   mocks.auto = null;
+  mocks.growthRoom = null;
+  mocks.effArgs.length = 0;
   mocks.priceE6 = 1_200_000n;
   mocks.trade.mockResolvedValue(SIG);
   mocks.useWalletCompat.mockReturnValue({ publicKey: WALLET, connected: true });
@@ -217,6 +231,23 @@ describe("Attacker A: the order signs what the confirm screen showed", () => {
     expect(mocks.trade).toHaveBeenCalledTimes(1);
     expect(mocks.trade.mock.calls[0][0]).toMatchObject({ confirmedFeeCap: true });
   });
+  // Review MED-1: the cap is built from the reviewed terms whatever the P2 flag: base 30 + the 23 bps quote + the 200 bps busy-side fee + the
+  // 2 bp margin = 255, signed exactly (never the chain read).
+  for (const [name, charged] of [["P2 OFF (the deployed configuration)", false], ["P2 ON", true]] as const) {
+    it(`${name}: the order signs the reviewed total + margin (255 bps), not the chain cap`, async () => {
+      mocks.charged = charged;
+      mocks.utilBps = 200n;
+      mocks.change = { beforeQ: 0n, afterQ: FILLED };
+      mocks.getTransaction.mockResolvedValue({ meta: { err: null, logMessages: openLogs(200n).logs } });
+      withPosition(0n);
+      render(<OrderTicket slabAddress={SLAB} />);
+      fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+      await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+      await confirmClick();
+      expect(mocks.trade).toHaveBeenCalledTimes(1);
+      expect(mocks.trade.mock.calls[0][0]).toMatchObject({ confirmedFeeCap: true, feeBps: 255n });
+    });
+  }
 });
 
 describe("Attacker B: the side is the reviewed one", () => {
@@ -300,5 +331,44 @@ describe("Attacker C: a fee raise for the signature leaves the Entry unknown", (
     await confirmClick();
     await flush();
     expect(getSavedEntry(SLAB, 0, W)).not.toBeNull();
+  });
+});
+
+describe("review LOW-3: the ticket quotes a busy rate of 0 (not null) on a growth market", () => {
+  const openOnce = async () => {
+    const { logs } = openLogs(0n);
+    mocks.change = { beforeQ: 0n, afterQ: FILLED };
+    mocks.getTransaction.mockResolvedValue({ meta: { err: null, logMessages: logs } });
+    await openConfirm();
+    await confirmClick();
+    await flush();
+  };
+  it("growth market, 0 quoted: effectivePriceE6 gets 0n", async () => {
+    mocks.growthRoom = "known";
+    await openOnce();
+    expect(mocks.effArgs.length).toBeGreaterThan(0);
+    expect(mocks.effArgs.every((a) => a === 0n)).toBe(true);
+  });
+  it("market with no growth record: null (the old behaviour)", async () => {
+    mocks.growthRoom = "none";
+    await openOnce();
+    expect(mocks.effArgs.length).toBeGreaterThan(0);
+    expect(mocks.effArgs.every((a) => a === null)).toBe(true);
+  });
+});
+
+describe("review MED-1: the fund-and-trade path (no account yet) also signs the reviewed cap and is flagged confirmed", () => {
+  it("fundAndTrade gets feeBps 255 and confirmedFeeCap: true", async () => {
+    mocks.utilBps = 200n;
+    mocks.fund.mockResolvedValue({ signature: SIG, portfolio: WALLET, prompts: 1, created: true });
+    mocks.useUserAccount.mockReturnValue(null); // no trading account on this market yet
+    mocks.useConnectionCompat.mockReturnValue({ connection: { tag: "conn", getTransaction: mocks.getTransaction, getTokenAccountBalance: vi.fn(async () => ({ value: { amount: "1000000000", decimals: 6 } })), getAccountInfo: vi.fn(async () => null) } });
+    render(<OrderTicket slabAddress={SLAB} />);
+    await act(async () => {});
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    await confirmClick();
+    expect(mocks.fund).toHaveBeenCalledTimes(1);
+    expect(mocks.fund.mock.calls[0][0]).toMatchObject({ feeBps: 255n, confirmedFeeCap: true });
   });
 });

@@ -112,16 +112,27 @@ export async function sendWithConfirmedFeeCap<T>(send: (raised: boolean) => Prom
   try {
     return await send(false);
   } catch (e) {
-    if (isUtilFeeNotCovered(e)) throw new FeeChangedAfterReviewError(e);
+    if (isUtilFeeNotCovered(e)) throw new FeeChangedAfterReviewError(e, "busy-side fee");
+    if (isFeeCapRefused(e)) throw new FeeChangedAfterReviewError(e, "market maker's fee");
     throw e;
   }
 }
 
-/** The signed cap no longer covers the busy-side fee the engine now asks for. */
+/** 9 InvalidInstruction from the wrapper: the signed cap does not cover base + the matcher's requested fee (requested_fee_permitted). */
+export function isFeeCapRefused(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (code === 9) return true;
+  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return /custom program error: 0x9\b|"Custom":9\b|Custom\(9\)/.test(msg);
+}
+
+/** The signed cap no longer covers the fee the engine now asks for: says WHAT moved, and that nothing was charged. */
 export class FeeChangedAfterReviewError extends Error {
-  constructor(cause: unknown) {
-    super("The busy-side fee changed while you were reviewing: it is now higher than the one you saw. Review it again. Nothing was sent.", { cause });
+  readonly what: "busy-side fee" | "market maker's fee";
+  constructor(cause: unknown, what: "busy-side fee" | "market maker's fee" = "busy-side fee") {
+    super(`The ${what} changed while you were reviewing: it is now higher than the one you saw. Review it again. Nothing was charged.`, { cause });
     this.name = "FeeChangedAfterReviewError";
+    this.what = what;
   }
 }
 

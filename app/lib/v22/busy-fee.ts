@@ -26,12 +26,25 @@ export function busyFeeShareAtoms(totalAtoms: bigint, closeAbs: bigint, position
   return (totalAtoms * closeAbs + positionAbs / 2n) / positionAbs;
 }
 
+/**
+ * Council r9 review MED-1: the fee cap an order that went through the confirm screen signs, built from the REVIEWED terms whatever the P2
+ * flag: the total fee the confirm showed (base + the matcher's quote + the busy-side fee) plus the usual slippage margin
+ * (`defaultFeeCapMarginBps`, signedFeeForQuote's constant), never above the market's maximum trading fee. Signed exactly (never the chain read).
+ */
+export function confirmedFeeCapBps(reviewedTotalBps: bigint, marginBps: number, maxTradingFeeBps?: bigint | null): bigint {
+  const cap = reviewedTotalBps + BigInt(Math.max(0, Math.floor(marginBps)));
+  return maxTradingFeeBps != null && maxTradingFeeBps > 0n && cap > maxTradingFeeBps ? maxTradingFeeBps : cap;
+}
+
 /** What the confirm screen showed (and what is signed). */
 export interface ConfirmedTerms {
   direction: "long" | "short";
   leverage: number;
-  /** The taker-signed fee cap (bps); null = the channel was off, no cap was shown. */
-  signedFeeBps: bigint | null;
+  /**
+   * Snapshot: the fee cap signed (bps, `confirmedFeeCapBps`). Live: the total fee (base + quote + busy-side) the order would be charged now,
+   * which must still fit under the snapshot's cap (its margin absorbs a small move of the quote).
+   */
+  signedFeeBps: bigint;
   busyFeeBps: bigint;
 }
 
@@ -47,9 +60,12 @@ export function confirmDriftRefusal(snapshot: ConfirmedTerms, live: ConfirmedTer
   if (live.leverage !== snapshot.leverage) {
     return "The leverage changed while you were reviewing. Review it again. Nothing was sent.";
   }
-  const capUp = live.signedFeeBps !== null && (snapshot.signedFeeBps === null || live.signedFeeBps > snapshot.signedFeeBps);
-  if (live.busyFeeBps > snapshot.busyFeeBps || capUp) {
+  // What moved decides the words: the growth busy-side rate rose, else (the total no longer fits the signed cap) the market maker's fee.
+  if (live.busyFeeBps > snapshot.busyFeeBps) {
     return "The busy-side fee changed while you were reviewing: it is now higher than the one you saw. Review it again. Nothing was sent.";
+  }
+  if (live.signedFeeBps > snapshot.signedFeeBps) {
+    return "The market maker's fee changed while you were reviewing: it is now higher than the one you saw. Review it again. Nothing was sent.";
   }
   return null;
 }

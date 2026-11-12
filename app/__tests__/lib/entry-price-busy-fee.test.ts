@@ -3,6 +3,7 @@
  * reduce, and is unknown (never zero) whenever the entry, the record or the prior amount is unknown or not current.
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import { applyFill } from "@/lib/trade-book";
 import { busyFeeAfterTrade, entryRecordCurrent, getCurrentEntry, getSavedEntry, saveEntryPrice } from "@/lib/entry-price";
 
 const SLAB = "CjdnH8fTmxNMsuUevBt9VjSi87E3ESTcuWuoSrjUjvXE";
@@ -37,8 +38,17 @@ describe("busyFeeAfterTrade", () => {
   const saved = (busy: bigint | null, size = 10n * Q) => ({ entryPriceE6: 83_000_000n, sizeQ: size, busyFeeAtoms: busy });
   it("open from flat / flip: this fill's amount (unknown stays unknown)", () => {
     expect(busyFeeAfterTrade({ beforeQ: 0n, afterQ: 5n * Q, saved: null, fillBusyFeeAtoms: 700n })).toBe(700n);
-    expect(busyFeeAfterTrade({ beforeQ: 4n * Q, afterQ: -3n * Q, saved: saved(900n, 4n * Q), fillBusyFeeAtoms: 700n })).toBe(700n);
+    expect(busyFeeAfterTrade({ beforeQ: 4n * Q, afterQ: -3n * Q, saved: saved(900n, 4n * Q), fillBusyFeeAtoms: 700n })).not.toBe(900n);
     expect(busyFeeAfterTrade({ beforeQ: 0n, afterQ: 5n * Q, saved: null, fillBusyFeeAtoms: null })).toBeNull();
+  });
+  it("review LOW-2: on a flip only the OPENING part of the fill's busy fee is stored (matches trade-book's attribution)", () => {
+    // long 4 -> short 3: the fill is 7 q, 3 of which open the new side
+    const fillBusy = 7_000n;
+    const stored = busyFeeAfterTrade({ beforeQ: 4n * Q, afterQ: -3n * Q, saved: saved(900n, 4n * Q), fillBusyFeeAtoms: fillBusy })!;
+    expect(stored).toBe(3_000n);
+    // the trade book gives the new position fee x openQ/|q| of the same fill
+    const flip = applyFill({ q: 4n * Q, avgE6: 1_000_000n, fees: 0n, pnl: 0n }, { q: -7n * Q, bookedPriceE6: 1_100_000n, feeAtoms: fillBusy });
+    expect(flip.book!.fees).toBe(stored);
   });
   it("add: the prior amount plus this fill's (size-weighted: nothing is averaged away)", () => {
     expect(busyFeeAfterTrade({ beforeQ: 10n * Q, afterQ: 15n * Q, saved: saved(1_000n), fillBusyFeeAtoms: 300n })).toBe(1_300n);

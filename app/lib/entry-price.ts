@@ -264,7 +264,16 @@ export function busyFeeAfterTrade(a: {
   const { beforeQ, afterQ, saved, fillBusyFeeAtoms } = a;
   if (afterQ === 0n) return null;
   const opened = beforeQ === 0n || (beforeQ > 0n) !== (afterQ > 0n);
-  if (opened) return fillBusyFeeAtoms !== null && fillBusyFeeAtoms >= 0n ? fillBusyFeeAtoms : null;
+  if (opened) {
+    if (fillBusyFeeAtoms === null || fillBusyFeeAtoms < 0n) return null;
+    // A flip: the fill's busy-side fee is charged on the WHOLE fill, but only the part that opens the new side belongs to the new position
+    // (lib/trade-book.ts applyFill gives it `fee x openQ / |q|`), so the closing part's share is not carried (it would be subtracted twice).
+    if (beforeQ !== 0n) {
+      const fillQ = absQ(afterQ - beforeQ);
+      return fillQ === 0n ? null : (fillBusyFeeAtoms * absQ(afterQ) + fillQ / 2n) / fillQ;
+    }
+    return fillBusyFeeAtoms;
+  }
   if (!saved || saved.entryPriceE6 <= 0n || saved.sizeQ === null || saved.busyFeeAtoms === null) return null;
   if ((saved.sizeQ > 0n) !== (beforeQ > 0n) || absQ(beforeQ) > absQ(saved.sizeQ)) return null;
   const before = absQ(beforeQ);

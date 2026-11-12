@@ -71,11 +71,12 @@ vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 vi.mock("@/lib/userAccountScan", async (orig) => ({ ...(await orig<object>()), getPortfolioRawSnapshot: () => null }));
 vi.mock("@/lib/close-trading-account", async (orig) => ({ ...(await orig<object>()), isPortfolioClosable: () => ({ closable: false }) }));
 vi.mock("@/hooks/useClosePosition", () => ({ useClosePosition: () => ({ closePosition: vi.fn(), prewarmClose: vi.fn(), loading: false, error: null }) }));
+const busy = { on: false };
 // Council r9 Trader MED: Max on a busy side now fixes leverage at 1x (OrderTicket.max-busy-fixed-1x.test.tsx). This file is about the
 // room / collateral bounds of Buying power and Max at every leverage, so it prices the order with no busy-side part.
 vi.mock("@/lib/limits/estimated-fee", async (orig) => {
   const m = await orig<typeof import("@/lib/limits/estimated-fee")>();
-  return { ...m, ticketFeeForEstimate: (l: Parameters<typeof m.ticketFeeForEstimate>[0]) => { const f = m.ticketFeeForEstimate(l); return f ? { ...f, utilFeeBps: 0n } : f; } };
+  return { ...m, ticketFeeForEstimate: (l: Parameters<typeof m.ticketFeeForEstimate>[0]) => { const f = m.ticketFeeForEstimate(l); return f && !busy.on ? { ...f, utilFeeBps: 0n } : f; } };
 });
 vi.mock("@/hooks/useLivePrice", () => ({ useLivePrice: () => ({ priceE6: px.e6, priceUsd: Number(px.e6) / 1e6 }) }));
 vi.mock("@/hooks/useNftWrappedPosition", () => ({ useNftWrappedPosition: () => null }));
@@ -118,7 +119,7 @@ beforeEach(() => {
   mocks.useEngineState.mockReturnValue({ engine: null, params: { initialMarginBps: 1000n, maintenanceMarginBps: 500n, tradingFeeBps: 30n }, insuranceBalance: 1_000_000n, totalOI: 0n, hasData: true });
 });
 beforeEach(() => { px.e6 = 1_000_000n; px.drift = 0n; });
-afterEach(() => { __setDevnetV22ForTest(null); slow.lotExp = 0; });
+afterEach(() => { __setDevnetV22ForTest(null); slow.lotExp = 0; busy.on = false; });
 
 
 
@@ -178,5 +179,30 @@ describe("r8 council: Buying power and Max stay bounded when the typed order onl
       expect(a[i].bp, `bp at ${a[i].lev}x`).toBe(b[i].bp);
       expect(a[i].maxQ).toBe(b[i].maxQ);
     }
+  });
+});
+
+describe("review LOW-3: Buying power and Max with the busy-side fee PRESENT (no Max click: that fixes 1x by design)", () => {
+  it("BP == Max across leverages, within the room/collateral bound, monotonic in leverage", async () => {
+    busy.on = true;
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("limits-max-size-inline")).not.toBeNull(), { timeout: 8000 });
+    fireEvent.click(screen.getByTestId("trade-side-short"));
+    fireEvent.change(sizeBox(), { target: { value: String(Number(ROOM) / 1e6 - 1) } });
+    await act(async () => {});
+    expect(screen.queryByTestId("ticket-busy-fee"), "the busy-side fee is really present in this case").not.toBeNull();
+    const BOUND_USD = Number(ROOM + 234_000n) / 1e6;
+    const rows: Array<{ lev: number; bp: number; mq: bigint }> = [];
+    for (const lev of presetLevs()) {
+      fireEvent.click(levBtn(lev));
+      await act(async () => {});
+      rows.push({ lev, bp: bpNum(), mq: maxQ() });
+    }
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    for (const r of rows) {
+      expect(r.bp, `bp at ${r.lev}x`).toBeLessThanOrEqual(BOUND_USD + 0.01);
+      expect(Math.abs(r.bp - Number(r.mq) / 1e6), `BP vs Max at ${r.lev}x`).toBeLessThan(0.02);
+    }
+    for (let i = 1; i < rows.length; i++) expect(rows[i].bp).toBeGreaterThanOrEqual(rows[i - 1].bp);
   });
 });
