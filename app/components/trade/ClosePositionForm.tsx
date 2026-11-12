@@ -207,9 +207,13 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     const spreadMissing = spreadEstimateFor != null && spread === null;
     const spreadUnavailable = spreadMissing && spreadEstimateFor?.unavailable === true;
     const feeLoading = spreadMissing && !spreadUnavailable;
-    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee : null;
+    // r9 live verification: the realised trade result (the post-close "Trade result" and the chain) also carries the BASE fee paid when the
+    // closed part was opened (the fill Entry holds the spread, not the base fee). Leaving it out let a trade that loses overall read green
+    // when the mark sat just above the closing costs. Estimated on the booked (risk) entry the engine charged it on, for the closed part.
+    const openFee = riskBasis > 0n && tradingFeeBps > 0n ? (((closeAbs * riskBasis) / 1_000_000n) * tradingFeeBps) / 10_000n : 0n;
+    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee - openFee : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
   }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
@@ -394,6 +398,14 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
             <span className="text-[var(--text-dim)]">{preview.feeEstimated ? "Trading Fee (est.):" : "Trading Fee:"}</span>
             <span className="font-mono font-medium text-[var(--text-secondary)]">
               −{formatTokenAmount(preview.closeFee, decimals)} {colSym}
+            </span>
+          </div>
+        )}
+        {entryKnown && preview.openFee > 0n && (
+          <div className="flex justify-between" data-testid="close-open-fee">
+            <span className="text-[var(--text-dim)]">Opening fee (base, paid when you opened, est.):</span>
+            <span className="font-mono font-medium text-[var(--text-secondary)]">
+              −{formatTokenAmount(preview.openFee, decimals)} {colSym}
             </span>
           </div>
         )}

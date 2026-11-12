@@ -1,5 +1,6 @@
 /**
- * r8 Council: the close dialogs lead with the NET result (mark-to-market PnL from the fill entry, less the closing fee incl. spread). The gross
+ * r8 Council: the close dialogs lead with the NET result (mark-to-market PnL from the fill entry, less the closing fee incl. spread and,
+ * since r9, less the base fee paid when the closed part was opened, so it equals the realised trade result). The gross
  * line is secondary. "Profit becomes withdrawable" shows only for a positive net; the loading fee estimate shows no optimistic number.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -27,11 +28,11 @@ const loaded = (): SpreadEstimate => ({ kind: "quote", bps: 70, execPriceE6: nul
 
 describe("close dialog: net result after closing fees", () => {
   it("a long whose mark is just above the entry but whose closing fee exceeds the gain: negative net, red, no profit line", () => {
-    // gross +1.00 (1,000 x +0.1%), fee 100 bps of 1,001 = 10.01 -> net -9.01
+    // gross +1.00 (1,000 x +0.1%), close fee 100 bps of 1,001 = 10.01, opening base fee 30 bps of 1,000 = 3 -> net -12.01
     render(<ClosePositionForm {...props} currentPrice={1_001_000n} spreadEstimateFor={loaded} closeFeeBpsFor={() => 100n} />);
     const net = screen.getByTestId("close-net-result");
     expect(net).toHaveAttribute("data-sign", "negative");
-    expect(net.textContent).toMatch(/^-9\.0\d+ USDC/);
+    expect(net.textContent).toMatch(/^-12\.0\d+ USDC/);
     expect(net.className).toContain("--short");
     expect(screen.getByText("Est. result if closed now:")).toBeInTheDocument();
     expect(screen.getByText("Est. PnL (before closing fees):")).toBeInTheDocument();
@@ -42,11 +43,11 @@ describe("close dialog: net result after closing fees", () => {
   });
 
   it("a clear winner: positive net, green, with the profit line", () => {
-    // gross +100, fee (30 base + 70 spread) bps of 1,100 = 11 -> net +89
+    // gross +100, close fee (30 base + 70 spread) bps of 1,100 = 11, opening base fee 3 -> net +86
     render(<ClosePositionForm {...props} currentPrice={1_100_000n} spreadEstimateFor={loaded} />);
     const net = screen.getByTestId("close-net-result");
     expect(net).toHaveAttribute("data-sign", "positive");
-    expect(net.textContent).toMatch(/^\+89 USDC/);
+    expect(net.textContent).toMatch(/^\+86 USDC/);
     expect(net.className).toContain("--long");
     expect(screen.getByTestId("close-profit-settles")).toBeInTheDocument();
   });
@@ -65,11 +66,11 @@ describe("close dialog: net result after closing fees", () => {
   });
 
   it("a short that gains: positive net after the closing fee", () => {
-    // short 1,000 units, entry 1.00, mark 0.90: gross +100, fee 100 bps of 900 = 9 -> +91
+    // short 1,000 units, entry 1.00, mark 0.90: gross +100, close fee 100 bps of 900 = 9, opening fee 3 -> +88
     render(<ClosePositionForm {...props} positionSize={-1_000n * USDC} isLong={false} currentPrice={900_000n} spreadEstimateFor={loaded} />);
     const net = screen.getByTestId("close-net-result");
     expect(net).toHaveAttribute("data-sign", "positive");
-    expect(net.textContent).toMatch(/^\+91 USDC/);
+    expect(net.textContent).toMatch(/^\+88 USDC/);
   });
 
   it("a short that loses on the mark: negative net, red", () => {
@@ -80,10 +81,10 @@ describe("close dialog: net result after closing fees", () => {
   });
 
   it("a partial close (50%) uses half the PnL and the fee on half the notional, and shows no profit line", () => {
-    // 50%: gross +50, fee 100 bps of 550 = 5.5 -> +44.5
+    // 50%: gross +50, close fee 100 bps of 550 = 5.5, opening fee on half = 1.5 -> +43
     render(<ClosePositionForm {...props} currentPrice={1_100_000n} spreadEstimateFor={loaded} />);
     fireEvent.click(screen.getByRole("button", { name: "50%" }));
-    expect(screen.getByTestId("close-net-result").textContent).toMatch(/^\+44\.5 USDC/);
+    expect(screen.getByTestId("close-net-result").textContent).toMatch(/^\+43 USDC/);
     expect(screen.queryByTestId("close-profit-settles")).toBeNull();
   });
 
@@ -102,8 +103,8 @@ describe("close dialog: net result after closing fees", () => {
   });
 
   it("a near-zero net reads neutral 0.00, never a red -0.00", () => {
-    // 1 unit at the entry price: no PnL, fee 30 bps of 1 = 0.003 -> inside half a cent
-    render(<ClosePositionForm {...props} positionSize={1n * USDC} spreadEstimateFor={() => ({ kind: "quote", bps: 0, execPriceE6: null, inFee: false })} />);
+    // half a unit at the entry price: no PnL, close fee 0.0015 + opening fee 0.0015 = 0.003 -> inside half a cent
+    render(<ClosePositionForm {...props} positionSize={USDC / 2n} spreadEstimateFor={() => ({ kind: "quote", bps: 0, execPriceE6: null, inFee: false })} />);
     const net = screen.getByTestId("close-net-result");
     expect(net.textContent).toBe("0.00 USDC");
     expect(net).toHaveAttribute("data-sign", "zero");
@@ -123,11 +124,11 @@ describe("close dialog: net result after closing fees", () => {
   // r9 LOW-1: a quoter that failed / is unavailable never answers, so "loading" would show "--" forever.
   const unavailable = Object.assign(() => null, { unavailable: true });
   it("an unavailable spread quoter shows the net from the base-fee estimate, labelled excl. spread, and neutral for a gain", () => {
-    // gross +100, base fee 30 bps of 1,100 = 3.3 -> +96.7
+    // gross +100, base close fee 30 bps of 1,100 = 3.3, opening fee 3 -> +93.7
     render(<ClosePositionForm {...props} currentPrice={1_100_000n} spreadEstimateFor={unavailable} />);
     expect(screen.queryByTestId("close-net-loading")).toBeNull();
     const net = screen.getByTestId("close-net-result");
-    expect(net.textContent).toMatch(/^\+96\.7 USDC/);
+    expect(net.textContent).toMatch(/^\+93\.7 USDC/);
     expect(screen.getByTestId("close-net-excl-spread").textContent).toMatch(/excl\. spread/);
     expect(net.className).not.toContain("--long");
   });
@@ -181,5 +182,21 @@ describe("close dialog: net result after closing fees", () => {
       />,
     );
     expect(screen.getByTestId("close-net-result").textContent).toBe("0.00 SOL");
+  });
+
+  it("r9: a mark just above the closing break-even but below the opening fee too reads RED: the whole trade loses", () => {
+    // gross +11.5 (mark 1.0115), close fee 100 bps of 1,011.5 = 10.115 -> old net +1.385 (green); less the 3 opening fee -> -1.615
+    render(<ClosePositionForm {...props} currentPrice={1_011_500n} spreadEstimateFor={loaded} closeFeeBpsFor={() => 100n} />);
+    const net = screen.getByTestId("close-net-result");
+    expect(net).toHaveAttribute("data-sign", "negative");
+    expect(net.textContent).toMatch(/^-1\.61\d* USDC/);
+    expect(net.className).toContain("--short");
+    expect(screen.getByTestId("close-open-fee").textContent).toMatch(/−3 USDC/);
+  });
+  it("r9: the opening fee uses the booked (risk) entry it was charged on", () => {
+    // fill entry 1.00, booked 0.99: opening fee 30 bps of 990 = 2.97
+    render(<ClosePositionForm {...props} riskEntryPrice={990_000n} currentPrice={1_100_000n} spreadEstimateFor={loaded} />);
+    expect(screen.getByTestId("close-open-fee").textContent).toMatch(/−2\.97 USDC/);
+    expect(screen.getByTestId("close-net-result").textContent).toMatch(/^\+86\.03 USDC/);
   });
 });
