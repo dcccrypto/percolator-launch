@@ -81,7 +81,7 @@ describe("ClosePositionForm spread line (M7)", () => {
   it("F1: channel OFF: the fee stays the base fee alone (30 bps = 0.0601 USDC)", () => {
     render(<ClosePositionForm {...council} closeFeeBpsFor={() => 30n} spreadEstimateFor={() => ({ kind: "quote", bps: 21, execPriceE6: null })} />);
     expect(screen.getByText("Trading Fee:")).toBeInTheDocument();
-    expect(screen.getByText(/−0\.0600/)).toBeInTheDocument();
+    expect(screen.getByText("Trading Fee:").parentElement?.textContent).toMatch(/−0\.0600/); // the opening-fee row (r9) is its own line
   });
   it("L-1: the estimate holds MORE than base (53 bps, e.g. P2 on with a busy-side part): the quote's 21 bps is not added on top and not substituted either (53 bps of 20.0248 = 106,131)", () => {
     render(<ClosePositionForm {...council} closeFeeBpsFor={() => 53n} spreadEstimateFor={() => ({ kind: "quote", bps: 21, execPriceE6: null, inFee: true })} />);
