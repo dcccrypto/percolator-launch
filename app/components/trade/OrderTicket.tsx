@@ -1414,11 +1414,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   ) {
     const effectiveSize = snapshotSize ?? positionSize;
     // The confirm screen's deposit is what is signed (the live one can drift while the modal is open).
-    const signedDepositAtoms = snapshotDepositAtoms !== undefined && snapshotDepositAtoms > 0n ? snapshotDepositAtoms : fundAtoms;
+    // r9 review LOW-A: a confirm that showed NO deposit signs none. If the live order now needs one (capital moved while the confirm was
+    // open), refuse and ask for a fresh review: never sign a deposit the trader did not see.
+    const signedDepositAtoms = snapshotDepositAtoms !== undefined ? snapshotDepositAtoms : fundAtoms;
+    const depositAppearedAfterReview = snapshotDepositAtoms === 0n && fundAtoms > 0n;
     const signedFundLabel = signedDepositAtoms === fundAtoms ? fundLabel : `${usd2(signedDepositAtoms, decimals)} ${collateralSymbol}`;
     maxPinned.current = null; // a submit (sent, refused or failed) ends the Max pin: the box is the trader's order now
     // SILENT-1: every exit of this handler before the wallet leaves a visible line (it used to just return).
     if (!marginInput) { setHumanError("Enter an amount to trade. Nothing was sent."); return; }
+    if (depositAppearedAfterReview) {
+      setHumanError(`Your balance changed while you were reviewing: this order now needs a deposit of ${fundLabel}. Review it again. Nothing was sent.`);
+      return;
+    }
     if (effectiveSize <= 0n) {
       setHumanError(lotExp > 0 ? "That size is less than one lot here, so there is nothing to send. Enter a larger amount." : "That size is too small to send. Enter a larger amount.");
       return;

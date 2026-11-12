@@ -206,3 +206,25 @@ describe("r9 MED-2: a Max bound only by the position being closed fills the exac
     expect(Number(sizeBox().value)).toBe(1);
   });
 });
+
+describe("r9 delta LOW-A: a confirm that showed no deposit never signs one", () => {
+  it("capital drops while the modal is open: Confirm refuses with a visible line and nothing is signed", async () => {
+    let cap = 50_000_000n;
+    mocks.useUserAccount.mockImplementation(() => ({ account: { capital: cap, positionSize: 0n, entryPrice: 0n, pnl: 0n, feeCredits: 0n }, idx: 0 }));
+    mocks.fundAndTrade.mockImplementation(() => new Promise(() => {}));
+    const r = render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("limits-max-size-inline")).not.toBeNull(), { timeout: 8000 });
+    fireEvent.change(sizeBox(), { target: { value: "10" } });
+    await act(async () => {});
+    await act(async () => { fireEvent.click(submit()); });
+    await waitFor(() => expect(mocks.modal.props).not.toBeNull());
+    expect(mocks.modal.props!.depositAmount ?? 0n).toBe(0n); // the reviewed order needed no deposit
+    cap = 1_000_000n; // capital falls while the confirm is open: the live order now needs a deposit
+    await act(async () => { r.rerender(<OrderTicket slabAddress={SLAB} {...tickProp(1)} />); });
+    await act(async () => { r.rerender(<OrderTicket slabAddress={SLAB} {...tickProp(2)} />); });
+    await act(async () => { mocks.modal.props!.onConfirm(); });
+    await act(async () => { await new Promise((res) => setTimeout(res, 50)); });
+    expect(mocks.fundAndTrade).not.toHaveBeenCalled();
+    expect(screen.getByText(/Your balance changed while you were reviewing/)).toBeTruthy();
+  });
+});
