@@ -8,3 +8,8 @@ export { MarketLimitsStrip } from "@/components/limits/MarketLimitsStrip";
 export { MarketHeaderStatus, TradeMarketHealthBanner } from "@/components/market/MarketHealthBadges";
 export { MobileTradeBand } from "@/components/trade/MobileTradeBand";
 export { MultiAssetNotice } from "@/components/trade/MultiAssetNotice";
+
+/** Renders nothing. page.tsx mounts it through next/dynamic (ssr) so the server HTML preloads this chunk. */
+export function TradeViewPartsPreload(): null {
+  return null;
+}

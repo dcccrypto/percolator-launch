@@ -334,6 +334,10 @@ function loadTradeParts(): Promise<TradeParts> {
   );
   return tradePartsLoad;
 }
+// Rendered with the skeleton: through next/dynamic (ssr) the server HTML gets a low-priority
+// <link rel="preload"> for the parts chunk, so it downloads alongside the first-load scripts instead
+// of after hydration. The component itself renders nothing.
+const TradeViewPartsPreload = dynamic(() => import("./trade-view-parts").then((m) => m.TradeViewPartsPreload), { loading: () => null });
 /** Only called by components that render after `useTradeParts()` returned the module. */
 function tradeParts(): TradeParts {
   if (!loadedTradeParts) throw new Error("trade view parts not loaded");
@@ -432,7 +436,7 @@ function TradePageInner({ slab }: { slab: string }) {
   }, [symbol]);
 
   if (slabLoading && !engine) {
-    return <TradingPageLoading />;
+    return <>{!loadedParts && <TradeViewPartsPreload />}<TradingPageLoading /></>;
   }
 
   if (layoutUnsupported) {
@@ -525,7 +529,7 @@ function TradePageInner({ slab }: { slab: string }) {
   const hasNoPriceData = !slabLoading && !!config && !hasPrice;
 
   if (!loadedParts) {
-    if (!partsFailed) return <TradingPageLoading />;
+    if (!partsFailed) return <><TradeViewPartsPreload /><TradingPageLoading /></>;
     return (
       <div className="min-h-[calc(100dvh-48px)] flex flex-col items-center justify-center gap-3 px-4" data-testid="trade-view-load-error">
         <p className="text-sm text-[var(--text-secondary)]">The trading view did not load.</p>
