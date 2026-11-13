@@ -56,6 +56,8 @@ export interface ClosePositionFormProps {
    * stands but is tagged "excl. funding" (never green). Omitted = the caller does not supply it (no tag, nothing subtracted).
    */
   fundingPaidAtoms?: bigint | null;
+  /** r10 (#3817 MED-1): the market may charge holding rent, which no figure here includes: the net is tagged "excl. holding fee" (never green). */
+  holdingFeeExcluded?: boolean;
   currentPrice: bigint;
   capital: bigint;
   /** Index asset symbol for position size (e.g. "SOL"). */
@@ -132,6 +134,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   busyOpenFeeAtoms = null,
   busyFeeMayApply = false,
   fundingPaidAtoms,
+  holdingFeeExcluded,
   currentPrice: liveCurrentPrice,
   capital,
   symbol,
@@ -242,10 +245,11 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     const fundingKnown = fundingPaidAtoms != null;
     const fundingShare = fundingKnown && absPosition > 0n ? (fundingPaidAtoms * closeAbs) / absPosition : 0n;
     const netExclFunding = fundingPaidAtoms === null;
+    const netExclHolding = holdingFeeExcluded === true;
     const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee - openFee - busyOpenFee - fundingShare : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, busyOpenFee, fundingShare, netExclFunding, netExclBusy, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
-  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals, busyOpenFeeAtoms, busyFeeMayApply, fundingPaidAtoms]);
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, busyOpenFee, fundingShare, netExclFunding, netExclHolding, netExclBusy, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
+  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals, busyOpenFeeAtoms, busyFeeMayApply, fundingPaidAtoms, holdingFeeExcluded]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
@@ -262,7 +266,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   const net = netNearZero ? 0n : rawNet;
   // Excluding the spread, a positive figure is not a safe "profit": it stays neutral (a loss is still red).
   const netColor =
-    net === null || net === 0n || (net > 0n && (preview.netExclSpread || preview.netExclBusy || preview.netExclFunding))
+    net === null || net === 0n || (net > 0n && (preview.netExclSpread || preview.netExclBusy || preview.netExclFunding || preview.netExclHolding))
       ? "text-[var(--text-muted)]"
       : net > 0n
         ? "text-[var(--long)]"
@@ -401,6 +405,11 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
               {preview.netExclFunding && (
                 <span className="ml-1 text-[10px] text-[var(--text-muted)]" title="The funding this position has paid or received could not be worked out here, so this result excludes it" data-testid="close-net-excl-funding">
                   excl. funding
+                </span>
+              )}
+              {preview.netExclHolding && (
+                <span className="ml-1 text-[10px] text-[var(--text-muted)]" title="This market charges a holding fee, and it is not counted in this result" data-testid="close-net-excl-holding">
+                  excl. holding fee
                 </span>
               )}
               {preview.netExclBusy && (

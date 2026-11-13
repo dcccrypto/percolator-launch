@@ -13,7 +13,7 @@ import { growthFor, decodeMarketLevGuard, type LpView } from "@/hooks/useMarketL
 import { decodeAssetVaultLp, decodeMarketEngineView, decodePortfolioLegs, decodePortfolioRisk, signedPositionForAsset } from "@/lib/limits/decode";
 import { resolveLpAccounts } from "@/lib/limits/lp-discovery";
 import { lpEffectiveSignedQ } from "@/lib/limits/lp-inventory-room";
-import { decodeGrowthRecord, growthTicketDecision } from "@/lib/v21/growth-market";
+import { growthRecordPresence, growthTicketDecision } from "@/lib/v21/growth-market";
 import { levGuardPda } from "@/lib/v22/lev-guard";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { BusyFeeUnreadableError, withTimeout } from "@/lib/v22/busy-fee-unreadable";
@@ -47,7 +47,10 @@ export async function readFreshBusyFeeBps(
     const slabInfo = await connection.getAccountInfo(market, "confirmed");
     if (!slabInfo) return null;
     const raw = new Uint8Array(slabInfo.data);
-    if (!decodeGrowthRecord(raw, assetIndex)) return 0n; // no growth record: no busy-side fee exists
+    // Only a KNOWN absence is "no busy-side fee". A record that is there but cannot be read is unknown state: fail closed (owner decision 3).
+    const presence = growthRecordPresence(raw, assetIndex);
+    if (presence === "undecodable") return null;
+    if (presence === "absent") return 0n;
     const engine = decodeMarketEngineView(raw, assetIndex);
     if (!engine) return null;
     const vaultLp = decodeAssetVaultLp(raw, assetIndex);

@@ -673,6 +673,12 @@ export function useTrade(slabAddress: string) {
             instructions.push(crankIx);
           } else if (plan === "separate-tx") {
             console.info("[useTrade] taker portfolio needs a maintenance crank first; sending it as its own tx");
+            // The busy-side check runs BEFORE the crank is signed, so "Nothing was signed" stays true when it cannot be read.
+            // (The order's own pre-sign check still runs again right before the order is signed.)
+            if (params.busyGuard) {
+              const guard = params.busyGuard;
+              await assertBusyFeeNotRisen(guard, () => readFreshBusyFeeBps(connection, programId, slabPk, guard));
+            }
             await sendTx({ connection, wallet, instructions: [crankIx], computeUnitsFromSim: { cap: 200_000 }, abortSignal: params.abortSignal }).catch((err) => {
               // The trade below was never sent. Don't let the ticket watch the crank's signature
               // and report the trade as landed (timedOutSignature reads the timeout message).

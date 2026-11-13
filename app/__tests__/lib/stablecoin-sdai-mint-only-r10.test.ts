@@ -29,6 +29,12 @@ describe("sDAI is not ticker-blocked (r10)", () => {
   });
 });
 
+describe("bridged SDAI forms stay blocked (the exemption is the exact ticker only; pins the `$` anchor)", () => {
+  it.each(["SDAIet", "sDAIpo", "SDAIbs", "sDAI.so"])("symbol %s is refused", (symbol) => {
+    expect(isStablecoinPerpBlocked(MEMECOIN, { symbol }), symbol).toBe(true);
+  });
+});
+
 describe("DAI and the other DAI wrappers stay blocked", () => {
   it.each(["DAI", "dai", "$DAI", "wDAI", "aDAI", "bDAI", "xDAI", "jDAI", "stDAI", "DAIet", "DAIpo", "ＤＡＩ"])("symbol %s is refused", (symbol) => {
     expect(isStablecoinPerpBlocked(MEMECOIN, { symbol }), symbol).toBe(true);

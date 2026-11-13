@@ -692,6 +692,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
           riskEntryPrice={pnlIsKnown ? riskEntryE6 : 0n}
           busyOpenFeeAtoms={pnlResult.busyFeePaidAtoms ?? null}
           fundingPaidAtoms={pnlResult.fundingPaidAtoms ?? null}
+          holdingFeeExcluded={pnlResult.holdingFeeExcluded}
           currentPrice={currentPriceE6}
           capital={account.capital}
           symbol={symbol}

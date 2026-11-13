@@ -109,6 +109,7 @@ describe("assertBusyFeeNotRisen (delta review MED-A)", () => {
 });
 
 import { PublicKey } from "@solana/web3.js";
+import { growthRecordPresence } from "@/lib/v21/growth-market";
 import { modeFixtures } from "../../helpers/v22-fixtures";
 import { resolveUserMessage } from "@/lib/limits/user-message";
 describe("the refusal reaches the trader as a line, not a generic error", () => {
@@ -142,5 +143,12 @@ describe("readFreshBusyFeeBps never guesses", () => {
     const c = { getAccountInfo: vi.fn(async () => ({ data: Buffer.from(modeFixtures().market) })), getMultipleAccountsInfo: vi.fn(), getSlot: vi.fn() };
     const v = await readFreshBusyFeeBps(c as never, prog, mkt, g);
     expect(v).toBe(0n);
+  });
+  it("r10 follow-up: a growth record that is present but cannot be read is UNKNOWN (null, refused), never a known 0n", async () => {
+    const truncated = modeFixtures().market.slice(0, 2_000);
+    expect(growthRecordPresence(truncated)).toBe("undecodable"); // guards the fixture itself
+    const c = { getAccountInfo: vi.fn(async () => ({ data: Buffer.from(truncated) })), getMultipleAccountsInfo: vi.fn(), getSlot: vi.fn() };
+    expect(await readFreshBusyFeeBps(c as never, prog, mkt, g)).toBeNull();
+    await expect(assertBusyFeeNotRisen({ confirmedBusyFeeBps: 0n, ...g }, () => readFreshBusyFeeBps(c as never, prog, mkt, g))).rejects.toBeInstanceOf(BusyFeeUnreadableError);
   });
 });

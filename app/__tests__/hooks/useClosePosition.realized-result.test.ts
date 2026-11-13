@@ -105,7 +105,8 @@ import { useTrade } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
-import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
+import { __setUnknownLotExpForTest, observeLotExp } from "@/lib/v22/lot-registry";
+import { LAYOUT_V22 } from "@/lib/v22/sdk";
 import { getLastResult, getRealized } from "@/lib/realized-pnl";
 import { loadBook, saveBook } from "@/lib/trade-book";
 
@@ -132,6 +133,7 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     vi.clearAllMocks();
     localStorage.clear();
     __setUnknownLotExpForTest(0);
+    observeLotExp(SOL_MARKET, new Uint8Array(MARKET_BYTES)); // the market bytes the app read: no holding fee on this market (r10 #3817 MED-1)
     mocks.takeFillResult.mockReturnValue(undefined);
     // r10: the funding counters after the closing fill: flat, 1,234 atoms paid over the trade (the book's base is 1,000,000).
     mocks.readFundingSample.mockResolvedValue({ netPaid: FUNDING_BASE + FUNDING_PAID, legs: 0 });
@@ -172,6 +174,19 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
     expect(getLastResult(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
     expect(loadBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58())).toBeNull();
+  });
+
+  it("r10 #3817 MED-1: a market that charges a holding fee: effective price shows, NO money result and nothing in the ledger", async () => {
+    const rentMarket = new Uint8Array(MARKET_BYTES);
+    new DataView(rentMarket.buffer, rentMarket.byteOffset).setBigUint64(LAYOUT_V22.marketGroupOff + LAYOUT_V22.group.config + LAYOUT_V22.bandRent!.config.rentMaxE9PerSlot, 23n, true);
+    observeLotExp(SOL_MARKET, rentMarket);
+    seedOpen();
+    const { result } = renderHook(() => useClosePosition(SOL_MARKET));
+    await act(async () => { await result.current.closePosition(100, { skipSweep: true }); });
+    const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
+    expect(call).toContain("Effective price");
+    expect(call).not.toMatch(/Trade result/);
+    expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBeNull();
   });
 
   it("r10: the funding counters could not be read at the close: NO money result is claimed (never one that leaves funding out)", async () => {
