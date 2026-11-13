@@ -85,7 +85,7 @@ import { formatTokenAmount, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
-import { holdChainSync } from "@/lib/entry-chain-sync";
+import { holdChainSync } from "@/lib/entry-chain-hold";
 import { saveEntryPrice, clearEntryPrice, markEntryUnknown, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
 import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";

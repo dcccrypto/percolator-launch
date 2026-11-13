@@ -49,7 +49,7 @@ import { clearEntryPrice } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
-import { holdChainSync } from "@/lib/entry-chain-sync";
+import { holdChainSync } from "@/lib/entry-chain-hold";
 import { recordFill } from "@/lib/trade-book";
 import { readFundingSample } from "@/lib/funding-flow";
 import { formatLotPriceE6 } from "@/lib/v22/lot";

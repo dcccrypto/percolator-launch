@@ -13,6 +13,8 @@ import { PublicKey, type Connection } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { entryFromChain, type ChainEntryVerdict } from "@/lib/entry-chain";
 import { entryRecordCurrent, getEntryLeverage, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice } from "@/lib/entry-price";
+import { __resetChainSyncHoldsForTests, chainSyncHeld, holdChainSync } from "@/lib/entry-chain-hold";
+export { chainSyncHeld, holdChainSync };
 import { growthRecordPresence } from "@/lib/v21/growth-market";
 
 export const COOLDOWN_MS = 10 * 60 * 1000;
@@ -65,18 +67,6 @@ export interface SyncTarget {
   /** The signed ADL-effective size the chain holds now. */
   qNow: bigint;
   assetIndex?: number;
-}
-
-/**
- * r10: a trade on this device is in flight (or just landed) on `slab`: the ticket / close hook is about to write the position's entry itself,
- * so no chain rebuild may start or save meanwhile. Time-boxed so a stuck wallet prompt cannot block a rebuild forever.
- */
-const holds = new Map<string, number>();
-export function holdChainSync(slab: string, ms: number, now: number = Date.now()): void {
-  holds.set(slab, Math.max(holds.get(slab) ?? 0, now + ms));
-}
-export function chainSyncHeld(slab: string, now: number = Date.now()): boolean {
-  return (holds.get(slab) ?? 0) > now;
 }
 
 interface MarketFacts {
@@ -159,7 +149,7 @@ export function __resetEntryChainSyncForTests(): void {
   memory.clear();
   inflight.clear();
   factsCache.clear();
-  holds.clear();
+  __resetChainSyncHoldsForTests();
   queue = Promise.resolve();
 }
 
