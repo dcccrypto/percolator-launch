@@ -57,7 +57,8 @@ export function depositAmountMessage(
 export function depositInputMessage(input: string, decimals: number): string | null {
   const t = input.trim();
   if (!t) return null;
-  if (!/^\d*\.?\d*$/.test(t) || t === ".") {
+  if (t === ".") return null; // a lone point is a number being typed; Deposit stays off until there are digits
+  if (!/^\d*\.?\d*$/.test(t)) {
     return "Enter a plain number, like 100 or 12.5. Letters, commas, minus signs and 1e3-style numbers don't work.";
   }
   const frac = t.split(".")[1] ?? "";

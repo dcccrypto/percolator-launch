@@ -18,12 +18,13 @@ describe("pool row name cell on a narrow screen", () => {
     expect(SRC.slice(SRC.lastIndexOf("<div", m!.index), SRC.indexOf(">", m!.index))).toMatch(/flex-col[^"]*md:flex-row/);
     expect(line).toBeTruthy();
   });
-  it("the notes can shrink and truncate on mobile instead of overflowing, and stay whole on desktop", () => {
+  it("the notes wrap on mobile (the amount stays visible, no ellipsis) and stay on one line from md", () => {
     for (const id of ["pool-deployed", "pool-unclaimed"]) {
       const at = SRC.indexOf(`data-testid="${id}"`);
       const tag = SRC.slice(SRC.lastIndexOf("<span", at), at);
       expect(tag).toContain("min-w-0");
-      expect(tag).toContain("truncate");
+      expect(tag).toContain("break-words");
+      expect(tag).not.toContain("truncate");
       expect(tag).toContain("md:shrink-0");
       expect(tag).not.toMatch(/(^|\s)shrink-0/);
     }
@@ -32,7 +33,7 @@ describe("pool row name cell on a narrow screen", () => {
 
 describe("depositInputMessage", () => {
   it("explains e-notation, commas, minus and letters", () => {
-    for (const v of ["1e3", "1,5", "-2", "abc", "1.2.3", "."]) {
+    for (const v of ["1e3", "1,5", "-2", "abc", "1.2.3"]) {
       expect(depositInputMessage(v, 6), v).toMatch(/plain number/);
     }
   });
@@ -42,7 +43,16 @@ describe("depositInputMessage", () => {
     expect(depositInputMessage("0.000", 6)).toBe("Enter an amount above 0.");
   });
   it("is quiet for empty and good amounts", () => {
-    for (const v of ["", " ", "100", "12.5", ".5", "5."]) expect(depositInputMessage(v, 6), v).toBeNull();
+    for (const v of ["", " ", "100", "12.5", ".5", "5.", "."]) expect(depositInputMessage(v, 6), v).toBeNull();
+  });
+});
+
+describe("the stake inputs show what was typed (text + decimal keypad, not type=number)", () => {
+  it("the fee-only deposit box is a text input, so '1,5' and 'abc' reach the reason instead of arriving as an empty string", () => {
+    const at = SRC.indexOf('data-testid="stake-deposit-input"');
+    const tag = SRC.slice(SRC.lastIndexOf("<input", at), at);
+    expect(tag).toContain('type="text"');
+    expect(tag).toContain('inputMode="decimal"');
   });
 });
 

@@ -44,7 +44,30 @@ describe("combinePortfolioValue", () => {
   });
 });
 
+describe("combinePortfolioValue: LP read errors", () => {
+  it("an LP error with no positions is unread (left out and said so); with positions it keeps the last good value", () => {
+    const base = { totalRedeemable: 0, loading: false };
+    expect(combinePortfolioValue(10, { ...base, error: "rpc", positionCount: 0 }).lpUsd).toBeNull();
+    expect(combinePortfolioValue(10, { totalRedeemable: 7, loading: false, error: "rpc", positionCount: 1 }).lpUsd).toBe(7);
+  });
+});
+
 describe("Overview header Portfolio Value includes LP", () => {
+  it("LP still loading: the headline is '...', not a trading-only number that later jumps", () => {
+    setPortfolio({ totalDeposited: 100_000_000n });
+    setLp({ loading: true });
+    render(<DashboardHeader />);
+    expect(screen.queryByText("$100.00")).not.toBeInTheDocument();
+    expect(screen.getAllByText("...").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("header-value-breakdown")).toBeNull();
+  });
+  it("LP read failed with no positions: trading only, labelled not included", () => {
+    setPortfolio({ totalDeposited: 100_000_000n });
+    setLp({ positions: [], totalRedeemable: 0, error: "rpc down" });
+    render(<DashboardHeader />);
+    expect(screen.getByText("$100.00")).toBeInTheDocument();
+    expect(screen.getByTestId("header-value-breakdown")).toHaveTextContent("LP value unavailable (not included)");
+  });
   it("LP only: $25.03, not $0.00, with the breakdown", () => {
     setPortfolio();
     setLp();

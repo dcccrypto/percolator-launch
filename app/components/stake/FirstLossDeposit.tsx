@@ -12,6 +12,7 @@ import { useStakeFirstLoss } from '@/hooks/useStakeFirstLoss';
 import { ConsentChangedError, consentKey, consentTextMatches, consentViewOf, pctOfBps } from '@/lib/v22/stake-v5';
 import { STAKE_CONSENT_TEXT_V2, V22_COPY, consentDisplay } from '@/lib/v22/copy';
 import { parseHumanAmount } from '@/lib/parseAmount';
+import { depositInputMessage } from '@/lib/deposit-guard';
 
 type FirstLossState = ReturnType<typeof useStakeFirstLoss>;
 
@@ -60,7 +61,9 @@ export function FirstLossDeposit({ slabAddress, collateralMint, decimals = 6, de
   if (!consentTextMatches(view)) return <p data-testid="first-loss-unavailable" className="text-[11px] text-[var(--text-secondary)]">{V22_COPY.stake.consentUnavailable}</p>;
   let atoms: bigint | null = null;
   try { atoms = amount ? parseHumanAmount(amount, decimals) : null; } catch { atoms = null; }
-  const ok = accepted === key && !!atoms && atoms > 0n && !loading;
+  // A box value the deposit can't use ("1e3", "1,5", too many decimals) used to leave Deposit off with no reason.
+  const inputError = depositInputMessage(amount, decimals);
+  const ok = accepted === key && !!atoms && atoms > 0n && !loading && inputError === null;
 
   const submit = async () => {
     if (!atoms) return;
@@ -99,11 +102,12 @@ export function FirstLossDeposit({ slabAddress, collateralMint, decimals = 6, de
         <span>{V22_COPY.stake.consentLabel}</span>
       </label>
       <input
-        type="number" min="0" step="any" value={amount} placeholder="0.00" data-testid="stake-deposit-input"
+        type="text" inputMode="decimal" autoComplete="off" value={amount} placeholder="0.00" data-testid="stake-deposit-input"
         onChange={(e) => setAmount(e.target.value)}
         className="w-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] tabular-nums text-[var(--text)] outline-none"
         style={{ fontFamily: 'var(--font-mono)' }}
       />
+      {inputError && <p role="alert" data-testid="stake-deposit-input-error" className="text-[11px] text-[var(--short)]">{inputError}</p>}
       <button type="button" data-testid="first-loss-submit" disabled={!ok} onClick={() => void submit()}
         className="w-full border border-[var(--accent)]/40 py-2.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--accent-text)] disabled:opacity-40">
         {loading ? '…' : V22_COPY.stake.deposit}

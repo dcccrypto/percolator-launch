@@ -1077,13 +1077,13 @@ function DepositWidget({
               <div className="flex gap-2">
                 <input
                   id={`${fieldId}-deposit`}
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
                   data-testid="stake-deposit-input"
                   value={amount}
                   onChange={(e) => { setAmount(e.target.value); setTxStatus(null); }}
                   placeholder="0.00"
-                  min="0"
-                  step="any"
                   className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums"
                   style={{ fontFamily: "var(--font-mono)" }}
                 />
@@ -1403,12 +1403,12 @@ function PoolRow({
           {pool.symbol}
         </Link>
         {pool.stakeKind === "first-loss" && (
-          <span className="min-w-0 truncate text-[10px] text-[var(--text-dim)] md:shrink-0 md:overflow-visible" data-testid="pool-deployed" title={V22_COPY.stake.insuranceStaking}>
+          <span className="min-w-0 break-words text-[10px] leading-tight text-[var(--text-dim)] md:shrink-0" data-testid="pool-deployed" title={V22_COPY.stake.insuranceStaking}>
             {pool.deployedValue === null || pool.deployedValue === undefined ? V22_COPY.stake.deployedUnknown : V22_COPY.stake.deployed(formatUsd(pool.deployedValue))}
           </span>
         )}
         {(pool.unclaimedValue ?? 0) > 0 && (
-          <span className="min-w-0 truncate text-[10px] text-[var(--text-dim)] md:shrink-0 md:overflow-visible" data-testid="pool-unclaimed">{V22_COPY.stake.unclaimed(formatUsd(pool.unclaimedValue as number))}</span>
+          <span className="min-w-0 break-words text-[10px] leading-tight text-[var(--text-dim)] md:shrink-0" data-testid="pool-unclaimed">{V22_COPY.stake.unclaimed(formatUsd(pool.unclaimedValue as number))}</span>
         )}
         </div>
       </div>
