@@ -1,8 +1,8 @@
 "use client";
 
 import { Component, FC, ReactNode, useMemo, useState, useEffect } from "react";
-import dynamic from "next/dynamic";
 import { AutoFundProvider } from "./AutoFundProvider";
+import PrivyProviderClient from "./PrivyProviderClient";
 import { PrivyAvailableContext, PrivyLoginContext } from "@/hooks/usePrivySafe";
 import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModal";
 import {
@@ -43,18 +43,10 @@ class PrivyErrorBoundary extends Component<
   }
 }
 
-/**
- * Dynamically import the Privy wrapper with SSR disabled.
- * This prevents Privy SDK from being evaluated during server-side rendering,
- * which crashes because Privy accesses browser-only APIs (window, localStorage).
- */
-const PrivyProviderClient = dynamic(
-  () => import("./PrivyProviderClient").then((mod) => mod.default),
-  { ssr: false }
-);
-
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  // Trimmed like lib/privy-auth.ts: a stray newline in the env value makes Privy
+  // throw "invalid Privy app ID" (it requires exactly 25 chars).
+  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
   const preferredWallet = usePreferredWalletState();
 
   // LAUNCH-H2: Warn at startup if the WSS key equals the HTTP key.
@@ -81,12 +73,17 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
     </PrivyAvailableContext.Provider>
   );
 
-  // No app ID configured: read-only mode (skip Privy entirely)
-  if (!appId) {
+  // No (valid) app ID: read-only mode (skip Privy entirely). Privy now renders on
+  // the server, where PrivyErrorBoundary can't catch its throw on a bad ID, so
+  // check its 25-char rule here instead of 500ing every page.
+  if (!appId || appId.length !== 25) {
     return readOnlyFallback;
   }
 
-  // Mount Privy client-side only via dynamic import (ssr: false)
+  // Privy is imported statically (NOT next/dynamic ssr:false): this provider wraps
+  // every page, and an ssr:false boundary here made the server bail out of
+  // rendering the whole page tree, so crawlers saw an empty shell (SEO P1).
+  // Privy's hooks are SSR-safe and report ready=false until mounted.
   return (
     <PrivyErrorBoundary fallback={readOnlyFallback}>
       <PrivyAvailableContext.Provider value={true}>
