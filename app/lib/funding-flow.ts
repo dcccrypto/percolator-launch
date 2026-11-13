@@ -102,16 +102,49 @@ export function fundingPaidSoFar(base: bigint | null | undefined, netNow: bigint
   return netNow - base + pending;
 }
 
+/** Waits between attempts when a funding read fails (a busy public RPC answers 429 for a moment). Three retries, about 3 s in all. */
+export const FUNDING_READ_RETRY_MS: readonly number[] = [300, 900, 1800];
+
+/**
+ * Runs `read` and, while it answers null, tries again after each delay (backoff). Null after the last try: the read failed and the caller claims
+ * no figure. A throw counts as null. `sleep` is a test seam.
+ */
+export async function retryFundingRead<T>(
+  read: () => Promise<T | null>,
+  delaysMs: readonly number[] = FUNDING_READ_RETRY_MS,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<T | null> {
+  for (let i = 0; ; i++) {
+    let out: T | null = null;
+    try {
+      out = await read();
+    } catch {
+      out = null;
+    }
+    if (out !== null || i >= delaysMs.length) return out;
+    await sleep(delaysMs[i]);
+  }
+}
+
 /**
  * Samples the portfolio's funding counters at (or after) `slot`. The pinned slot means a node that has not seen the fill yet refuses instead of
- * handing back the state before it. Null on any failure: the caller then claims no funding figure.
+ * handing back the state before it. A failed read is retried with backoff (rate limits pass). Null once the retries fail: the caller then claims
+ * no funding figure.
  */
-export async function readFundingSample(connection: Pick<Connection, "getAccountInfo">, portfolio: PublicKey, slot: number): Promise<FundingSample | null> {
-  try {
-    const info = await connection.getAccountInfo(portfolio, { commitment: "confirmed", minContextSlot: slot });
-    if (!info) return null;
-    return fundingSampleOf(parsePortfolio(new Uint8Array(info.data)));
-  } catch {
-    return null;
-  }
+export async function readFundingSample(
+  connection: Pick<Connection, "getAccountInfo">,
+  portfolio: PublicKey,
+  slot: number,
+  delaysMs: readonly number[] = FUNDING_READ_RETRY_MS,
+  sleep?: (ms: number) => Promise<void>,
+): Promise<FundingSample | null> {
+  return retryFundingRead(
+    async () => {
+      const info = await connection.getAccountInfo(portfolio, { commitment: "confirmed", minContextSlot: slot });
+      if (!info) return null;
+      return fundingSampleOf(parsePortfolio(new Uint8Array(info.data)));
+    },
+    delaysMs,
+    sleep,
+  );
 }

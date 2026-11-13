@@ -1240,7 +1240,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Round 10 (owner decision 4): the est. fill follows the matcher's spread for THIS order's size (the chain charges more on a big order), the same
   // price the position's Entry takes after the fill. Without an exact per-size quote it stays the mark adjusted for the base fee.
   // Where the ticket's own quote is charged it is the source of the Fee row, so the est. fill reads the SAME rounded value (`fee.requestedBps`, the quoted
-  // price rounded up) and the two cannot differ; otherwise the per-size read of the quoter. The margin is the trader's own (the one the ticket signs).
+  // price rounded up) and the two cannot differ; otherwise the per-size read of the quoter. The margin is the trader's own, the one shown in the Fee row (what is signed on v2.2 is the chain worst case, not this figure).
   const ticketFeeQuoteBps = ticketLimits.fee?.charged ? Number(ticketLimits.fee.requestedBps) : null;
   const quotedFill = hasOrder
     ? ticketFeeQuoteBps !== null

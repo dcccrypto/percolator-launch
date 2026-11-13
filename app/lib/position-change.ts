@@ -13,7 +13,7 @@
  * from before the first. Every failure is `null` and never fails a trade.
  */
 import { parsePortfolio } from "@/lib/v22/layout";
-import { fundingSampleOf, type FundingSample } from "@/lib/funding-flow";
+import { fundingSampleOf, retryFundingRead, type FundingSample } from "@/lib/funding-flow";
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { effectiveLeg } from "@/lib/limits/effective-quantity";
@@ -88,6 +88,9 @@ export async function readEffectivePosition(
   }
 }
 
+/** Waits between tries of the post-trade read. Shorter than the funding read: the trade result is waited for. */
+const POST_TRADE_READ_RETRY_MS: readonly number[] = [300, 900];
+
 /** The pre-trade read, pinned past this portfolio's previous measured trade. */
 export function readBeforeTrade(connection: Connection, portfolio: PublicKey, market: PublicKey): Promise<bigint | null> {
   return readEffectivePositionQ(connection, portfolio, market, lastSlot.get(portfolio.toBase58()));
@@ -107,7 +110,8 @@ export async function measurePositionChange(
     const slot = st.value[0]?.slot;
     if (slot === undefined || slot === null) return null;
     noteSlot(portfolio.toBase58(), slot);
-    const after = await readEffectivePosition(connection, portfolio, market, slot);
+    // A busy RPC (429) makes this read fail for a moment: retry with backoff before the trade result goes unknown (it carries the funding).
+    const after = await retryFundingRead(() => readEffectivePosition(connection, portfolio, market, slot), POST_TRADE_READ_RETRY_MS);
     return after === null ? null : { beforeQ, afterQ: after.q, funding: after.funding };
   } catch {
     return null;

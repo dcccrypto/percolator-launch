@@ -33,8 +33,8 @@ describe("ClosePositionForm fee preview (#3726)", () => {
   it("with the close-fee estimate: the whole fee, labelled (est.), and the balance after reflects it", () => {
     render(<ClosePositionForm {...props} closeFeeBpsFor={() => 71n} />);
     expect(screen.getByText("Trading Fee (est.):")).toBeTruthy();
-    expect(screen.getAllByText(/12\.616/).length).toBeGreaterThan(0); // 1,777 x 71 bps
-    expect(screen.getByText(/487\.38/)).toBeTruthy(); // 500 - 12.6167
+    expect(screen.getAllByText(/12\.972/).length).toBeGreaterThan(0); // 1,777 x (71 bps + the 2 bp margin)
+    expect(screen.getByText(/487\.0279/)).toBeTruthy(); // 500 - 12.9721
   });
 
   it("the estimate is asked for the size being closed (the default is a 100% close)", () => {

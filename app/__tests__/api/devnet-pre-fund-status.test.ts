@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { PREFUND_WINDOW_MS } from "@/lib/prefund-requirement";
 
 const gate = vi.hoisted(() => ({
   peekFaucetGate: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("@/lib/faucet-rate-gate", () => ({
   tryFaucetGate: gate.tryFaucetGate,
   releaseFaucetClaim: vi.fn(),
   FaucetGateUnavailableError: class extends Error {},
+  FaucetGateReadError: class extends Error { constructor(m: string) { super(m); this.name = "FaucetGateReadError"; } },
 }));
 vi.mock("@/lib/prefund-claim-store", () => ({
   peekClaim: gate.peekClaim,
@@ -85,5 +87,31 @@ describe("GET /api/devnet-pre-fund", () => {
     expect((await get(`walletAddress=${WALLET}&mintAddress=${MINT}`)).status).toBe(403);
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
     expect((await get(`walletAddress=nope&mintAddress=${MINT}`)).status).toBe(400);
+  });
+
+  it("asks the gates with the POST's own arguments: the pre-fund key, the 1 h window, and the Blob fallback key (review of #3818: m11, m15)", async () => {
+    gate.peekFaucetGate.mockResolvedValue({ limited: false, nextClaimAt: null });
+    await get(`walletAddress=${WALLET}&mintAddress=${MINT}`);
+    expect(PREFUND_WINDOW_MS).toBe(60 * 60 * 1000);
+    expect(gate.peekFaucetGate).toHaveBeenNthCalledWith(1, expect.anything(), WALLET, `devnet-pre-fund:${MINT}`, PREFUND_WINDOW_MS);
+    expect(gate.peekFaucetGate).toHaveBeenNthCalledWith(2, expect.anything(), WALLET, "usdc");
+    gate.peekFaucetGate.mockRejectedValue(new Error("no table"));
+    gate.peekClaim.mockResolvedValue({ limited: false, nextClaimAt: null });
+    await get(`walletAddress=${WALLET}&mintAddress=${MINT}`);
+    expect(gate.peekClaim).toHaveBeenCalledWith(`${WALLET}:devnet-pre-fund:${MINT}`);
+  });
+
+  it("a read error that is not a schema error is 'unknown' ({known:false}), never 'available' from the Blob store (the POST refuses on it)", async () => {
+    gate.peekFaucetGate.mockRejectedValue(Object.assign(new Error("faucet_claims could not be read (57014)"), { name: "FaucetGateReadError" }));
+    gate.peekClaim.mockResolvedValue({ limited: false, nextClaimAt: null }); // an empty Blob store would say "available"
+    const res = await get(`walletAddress=${WALLET}&mintAddress=${MINT}`);
+    expect(await res.json()).toEqual({ known: false });
+    expect(gate.peekClaim).not.toHaveBeenCalled();
+  });
+
+  it("the 400 for a bad address is not cacheable", async () => {
+    const res = await get(`walletAddress=nope&mintAddress=${MINT}`);
+    expect(res.status).toBe(400);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 });

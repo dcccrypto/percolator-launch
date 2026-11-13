@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   quoterCalls: [] as Array<[bigint, boolean, boolean | undefined]>,
   cap: null as null | bigint,
   charged: false,
+  quoterNull: false,
+  quoteTotal: null as null | bigint,
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: mocks.useWalletCompat, useConnectionCompat: mocks.useConnectionCompat }));
@@ -41,12 +43,12 @@ vi.mock("@/hooks/useEngineState", () => ({ useEngineState: mocks.useEngineState 
 vi.mock("@solana/spl-token", () => ({ getAssociatedTokenAddressSync: vi.fn(() => new PublicKey("11111111111111111111111111111111")) }));
 vi.mock("@/hooks/useTrade", () => ({ useTrade: () => ({ trade: mocks.trade, loading: false, error: null }), prewarmTradeSubmission: vi.fn() }));
 vi.mock("@/hooks/useSpreadQuoter", () => ({
-  useSpreadQuoter: () => (size: bigint, buys: boolean, reducing?: boolean) => { mocks.quoterCalls.push([size, buys, reducing]); return { kind: "quote", bps: mocks.quoteBps, execPriceE6: null, inFee: true }; },
+  useSpreadQuoter: () => (size: bigint, buys: boolean, reducing?: boolean) => { mocks.quoterCalls.push([size, buys, reducing]); if (mocks.quoterNull) return null; return { kind: "quote", bps: mocks.quoteBps, execPriceE6: null, inFee: true }; },
 }));
 // The ticket's own fee read: a fee-channel market whose signed cap the test moves between the review and the click.
 vi.mock("@/lib/limits/ticket", async (orig) => {
   const m = await orig<typeof import("@/lib/limits/ticket")>();
-  return { ...m, deriveTicketLimits: (i: Parameters<typeof m.deriveTicketLimits>[0]) => { const r = m.deriveTicketLimits(i); return mocks.cap === null ? r : { ...r, fee: { channel: { enabled: true, protocolMaxBps: 100 }, signedFeeBps: mocks.cap, requestedBps: 23n, marginBps: 2n, verdict: "ok" as const, charged: mocks.charged } }; } };
+  return { ...m, deriveTicketLimits: (i: Parameters<typeof m.deriveTicketLimits>[0]) => { const r = m.deriveTicketLimits(i); return mocks.cap === null ? r : { ...r, ...(mocks.quoteTotal !== null ? { quote: { ...(r.quote ?? {}), totalBps: mocks.quoteTotal } as unknown as NonNullable<typeof r.quote> } : {}), fee: { channel: { enabled: true, protocolMaxBps: 100 }, signedFeeBps: mocks.cap, requestedBps: 23n, marginBps: 2n, verdict: "ok" as const, charged: mocks.charged } }; } };
 });
 // P2 off (the deployed configuration): the estimate's QUOTE is not charged; a busy-side fee can still be in it (M9).
 vi.mock("@/lib/limits/estimated-fee", async (orig) => ({
@@ -120,6 +122,8 @@ beforeEach(() => {
   mocks.auto = null;
   mocks.cap = null;
   mocks.charged = false;
+  mocks.quoterNull = false;
+  mocks.quoteTotal = null;
   mocks.quoterCalls.length = 0;
   mocks.growthRoom = null;
   mocks.effArgs.length = 0;
@@ -195,6 +199,26 @@ describe("P2 ON: Est. fill reads the Fee row's own rounded quote, not a differen
     expect(cellValue("Est. fill")).not.toMatch(/1\.2048/);
     expect(cellValue("Fee (est.)")).toMatch(/0\.0274/); // (30 + 23 + 2) bps of 5 = 0.0275
   });
+  it("Est. fill follows fee.requestedBps (23), not a different quote.totalBps (22) the same limits object carries (review of #3820 delta 2, LOW 2; M13b)", async () => {
+    mocks.cap = 70n;
+    mocks.charged = true;
+    mocks.quoteTotal = 22n;
+    mocks.quoteBps = 40;
+    await typeSize("5");
+    expect(cellValue("Est. fill")).toMatch(/1\.203/); // 1.20 x (1 + (23 + 2) bps) = 1.2030; with 22 it would read 1.20264 (rounded up: 1.202641)
+    expect(cellValue("Est. fill")).not.toMatch(/1\.2026/);
+    expect(cellValue("Fee (est.)")).toMatch(/0\.0274/);
+  });
+  it("the quoter has no answer while the ticket's own fee is charged: the Fee row still carries the margin, so it agrees with Est. fill (review of #3820 delta 2, LOW 1)", async () => {
+    mocks.cap = 70n;
+    mocks.charged = true;
+    mocks.quoterNull = true;
+    await typeSize("5");
+    expect(cellValue("Est. fill")).toMatch(/1\.203/); // +25 bps (23 + 2)
+    expect(cellValue("Fee (est.)")).toMatch(/0\.0274/); // 55 bps of 5, margin included (it was 53 bps: 0.0264)
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    expect(screen.getByText("Trading Fee (est.):").parentElement?.textContent).toMatch(/0\.0274/);
+  });
   it("the trader's own margin is used in the figures: the ticket's margin (10 bp, set at mount) moves Est. fill and the Fee row by 10, not the env default 2", async () => {
     vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "10");
     mocks.quoteBps = 38;
@@ -204,5 +228,15 @@ describe("P2 ON: Est. fill reads the Fee row's own rounded quote, not a differen
     fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
     expect(cellValue("Est. fill")).toMatch(/1\.20576/); // 48 bps
     expect(cellValue("Fee (est.)")).toMatch(/0\.0389/); // 78 bps of 5
+  });
+  it("the confirm's fee uses the trader's margin too (10 bp: 30 + 38 + 10 = 78 bps), not the env default (review of #3820 delta 2, LOW 3; M19)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "10");
+    mocks.quoteBps = 38;
+    withPosition(0n);
+    render(<OrderTicket slabAddress={SLAB} />);
+    vi.unstubAllEnvs();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    expect(screen.getByText("Trading Fee (est.):").parentElement?.textContent).toMatch(/0\.0389/); // 78 bps of 5; the default 2 would give 0.0349
   });
 });

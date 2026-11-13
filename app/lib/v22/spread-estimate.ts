@@ -79,11 +79,14 @@ export const SPREAD_LABEL = "Spread / price impact";
  * Display only: what is signed is unchanged.
  */
 export function feeBpsWithSpread(feeBps: bigint, e: SpreadEstimate | null, quoteCharged: boolean, marginBps: number = defaultFeeCapMarginBps()): bigint {
-  if (!e?.inFee) return feeBps;
   // Round 10 (review of #3820, MED 3): a quote is exact for the state it was read in; the fee the fill pays can be a few bps higher (the volatility
-  // step). The shown fee carries the same margin the signed cap does, so the shown cost is never below what the cap lets through for that drift.
+  // step). The shown fee carries the trader's margin as an honest upper bound for that drift. (On v2.2 what is signed is the chain worst case, not
+  // this figure; drift above the margin is charged.)
+  // The ticket's own quote is in the estimate (`quoteCharged`): it is exact whatever the per-size quoter says, so the margin goes on even when the
+  // quoter has no answer (loading, failed): the Est. fill adds it in that case too and the two must agree (review of #3820, delta 2, LOW 1).
+  if (quoteCharged) return feeBps + BigInt(marginBps);
+  if (!e?.inFee) return feeBps;
   const margin = e.kind === "quote" ? BigInt(marginBps) : 0n;
-  if (quoteCharged) return feeBps + margin;
   return feeBps + BigInt(e.kind === "quote" ? e.bps : e.minBps) + margin;
 }
 

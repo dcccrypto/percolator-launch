@@ -177,6 +177,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * Read-only status for the create wizard: would a launch's top-up (POST) be allowed for this wallet right now, and
  * would the /faucet claim? Reserves nothing. `known: false` = could not tell (the wizard then says it can't confirm).
  * Answer: { known, preFund: { available, nextClaimAt }, faucet: { available, nextClaimAt } | null }.
+ *
+ * It asks the POST's own gate with the POST's own arguments (gate key `devnet-pre-fund:<mint>`, the 1 h PREFUND_WINDOW_MS, and the Blob fallback
+ * key `<wallet>:devnet-pre-fund:<mint>`), and takes the same split on a Supabase error: a missing table or no client falls back to the Blob store;
+ * any other read error is `known: false` (the POST refuses on it, so "available" would be a wrong promise).
+ *
+ * `available` is NOT a promise that the POST will mint. These POST checks are not made here: the mint allowlist, the MAX_FUNDABLE_REQUIREMENT
+ * ceiling, the sender's devnet genesis check, the per-IP fund rate limit, and whether the mint keypair parses. (Only the mint key being
+ * configured at all is checked.) The wizard's collateral is always the allowlisted Sim-USDC and the ceiling has its own gate there, and a refused
+ * POST ends the launch before anything is sent.
  */
 export async function GET(req: NextRequest) {
   if (deploymentNetwork() !== "devnet") {
@@ -188,7 +197,7 @@ export async function GET(req: NextRequest) {
     new PublicKey(wallet);
     new PublicKey(mint);
   } catch {
-    return NextResponse.json({ error: "Invalid walletAddress or mintAddress" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid walletAddress or mintAddress" }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
   const headers = { "Cache-Control": "no-store" };
   // No mint key configured: the top-up can never run.
@@ -209,7 +218,9 @@ export async function GET(req: NextRequest) {
       } catch {
         faucet = null; // the /faucet claim's state is unknown: the wizard does not hide its link for that
       }
-    } catch {
+    } catch (err) {
+      // The table exists but could not be read: the POST refuses on that, so the answer is "unknown", not the (probably empty) Blob store's "available".
+      if (err instanceof Error && err.name === "FaucetGateReadError") throw err;
       preFund = await peekClaim(`${wallet}:${preFundType}`);
     }
     return NextResponse.json(
