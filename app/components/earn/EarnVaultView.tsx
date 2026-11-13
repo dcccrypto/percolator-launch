@@ -1,10 +1,13 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import dynamic from 'next/dynamic';
 import { useEarnStats } from '@/hooks/useEarnStats';
-import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { VaultGrid } from '@/components/earn/VaultGrid';
+// Rendered on the server with the rest of the page (was `dynamic(..., { ssr: false })`): it is static
+// copy plus three figures that show their own skeletons while the stats load, and it holds the page's
+// LCP text — client-only, that text painted only after every chunk had run (Lighthouse mobile /earn
+// LCP 11.9 s, all of it render delay).
+import { EarnHeader } from '@/components/earn/EarnHeader';
 import { VaultDepositRail } from '@/components/earn/VaultDepositRail';
 import { useEarnPositions } from '@/hooks/useEarnPositions';
 import { useWalletCompat } from '@/hooks/useWalletCompat';
@@ -13,34 +16,6 @@ import { limitsFlags } from '@/lib/limits/flags';
 import { COPY } from '@/lib/limits/copy';
 import { isDevnetV22Enabled } from '@/lib/v22/flag';
 import { V22_COPY } from '@/lib/v22/copy';
-
-const EarnHeader = dynamic(
-  () => import('@/components/earn/EarnHeader').then((m) => m.EarnHeader),
-  {
-    ssr: false,
-    loading: () => (
-      // Same shape as EarnHeader: title block, then the three stats (beside it from xl).
-      <div className="relative mx-auto max-w-[1400px] px-4 pt-10 pb-6 lg:px-6">
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] xl:items-end xl:gap-10">
-          <div>
-            <ShimmerSkeleton className="mb-2 h-3 w-16" />
-            <ShimmerSkeleton className="h-7 w-64 max-w-full" />
-            <ShimmerSkeleton className="mt-3 h-4 w-[36rem] max-w-full" />
-            <ShimmerSkeleton className="mt-2 h-4 w-80 max-w-full" />
-          </div>
-          <div className="grid grid-cols-1 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3 animate-fade-in">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-[var(--panel-bg)] p-4 sm:p-5 space-y-2">
-                <ShimmerSkeleton className="h-3 w-24" />
-                <ShimmerSkeleton className="h-6 w-16" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    ),
-  },
-);
 
 export function EarnVaultView() {
   const { stats, loading: statsLoading, error, hasData, refresh } = useEarnStats();
