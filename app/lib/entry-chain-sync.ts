@@ -11,8 +11,9 @@
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
-import { entryFromChain, type ChainEntryVerdict } from "@/lib/entry-chain";
-import { clearEntryPrice, entryRecordCurrent, getEntryLeverage, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice } from "@/lib/entry-price";
+import { entryFromChain, type ChainEntryVerdict, type NoBusyCap } from "@/lib/entry-chain";
+import { resolveTradeFeeBps } from "@/lib/limits/trade-fee-resolve";
+import { clearEntryPrice, clearEntryUnknownMark, entryRecordCurrent, getEntryLeverage, getEntryUnknownMark, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice } from "@/lib/entry-price";
 import { readEffectivePositionQ } from "@/lib/position-change";
 import { __resetChainSyncHoldsForTests, chainSyncHeld, holdChainSync } from "@/lib/entry-chain-hold";
 export { chainSyncHeld, holdChainSync };
@@ -78,10 +79,35 @@ export interface SyncTarget {
 
 interface MarketFacts {
   baseFeeBps: bigint;
+  /** The market account bytes (for the no-busy fee cap). */
+  data: Uint8Array;
   /** A growth record may exist for the asset: a busy-side fee is possible. Fails toward true (undecodable counts as possible). */
   mayChargeBusy: boolean;
 }
 const factsCache = new Map<string, MarketFacts>();
+const ctxCache = new Map<string, Uint8Array | null>();
+
+/**
+ * The market's own no-busy cap for a matcher context: `resolveTradeFeeBps` with no busy rate, from the market and matcher context as they are NOW
+ * (history is not readable by standard RPC). If their inputs changed since a fill, the cap differs from what it signed and the Entry is unknown.
+ */
+async function noBusyCapFor(connection: Pick<Connection, "getAccountInfo">, facts: MarketFacts, assetIndex: number, ctx: PublicKey | null): Promise<NoBusyCap | null> {
+  let ctxData: Uint8Array | null = null;
+  if (ctx) {
+    const k = ctx.toBase58();
+    if (!ctxCache.has(k)) {
+      try {
+        const info = await connection.getAccountInfo(ctx, "confirmed");
+        ctxCache.set(k, info ? new Uint8Array(info.data) : null);
+      } catch {
+        return null;
+      }
+    }
+    ctxData = ctxCache.get(k) ?? null;
+  }
+  const r = resolveTradeFeeBps({ marketData: facts.data, matcherCtxData: ctxData, assetIndex });
+  return r ? { feeBps: r.feeBps, maxFeeBps: r.maxFeeBps } : null;
+}
 async function marketFacts(connection: Pick<Connection, "getAccountInfo">, slab: string, assetIndex: number): Promise<MarketFacts | null> {
   const c = factsCache.get(slab);
   if (c) return c;
@@ -91,7 +117,7 @@ async function marketFacts(connection: Pick<Connection, "getAccountInfo">, slab:
     const data = new Uint8Array(info.data);
     const v = decodeMarketEngineView(data);
     if (!v) return null;
-    const f = { baseFeeBps: v.tradeFeeBaseBps, mayChargeBusy: growthRecordPresence(data, assetIndex) !== "absent" };
+    const f = { baseFeeBps: v.tradeFeeBaseBps, data, mayChargeBusy: growthRecordPresence(data, assetIndex) !== "absent" };
     factsCache.set(slab, f);
     return f;
   } catch {
@@ -103,7 +129,7 @@ async function marketFacts(connection: Pick<Connection, "getAccountInfo">, slab:
 export function syncChainEntry(connection: Connection, t: SyncTarget, now: () => number = Date.now): Promise<ChainEntryVerdict | "skipped"> {
   const pk = t.portfolio.toBase58();
   // Never for a flat position, an explicit "unknown" (owner decision 2), a trade in flight on this market, or when not due.
-  if (t.qNow === 0n || isEntryMarkedUnknown(t.slab, t.idx, t.wallet, t.qNow) || chainSyncHeld(t.slab, now()) || !readDue(pk, t.qNow, now())) return Promise.resolve("skipped");
+  if (t.qNow === 0n || markedWithoutSig(t) || chainSyncHeld(t.slab, now()) || !readDue(pk, t.qNow, now())) return Promise.resolve("skipped");
   const flightKey = `${pk}:${t.qNow}`;
   const running = inflight.get(flightKey);
   if (running) return running;
@@ -118,6 +144,12 @@ export function syncChainEntry(connection: Connection, t: SyncTarget, now: () =>
   return result;
 }
 
+/** A marker with no fill signature (written before it carried one) cannot be probed: it stands. A marker WITH one is probed (see `run`). */
+function markedWithoutSig(t: SyncTarget): boolean {
+  const m = getEntryUnknownMark(t.slab, t.idx, t.wallet, t.qNow);
+  return m !== null && m.sig === null;
+}
+
 function readDue(pk: string, q: bigint, now: number): boolean {
   return rebuildDue(readAttempt(pk), q, now);
 }
@@ -125,7 +157,7 @@ function readDue(pk: string, q: bigint, now: number): boolean {
 async function run(connection: Connection, t: SyncTarget, now: () => number): Promise<void> {
   const pk = t.portfolio.toBase58();
   if (!readDue(pk, t.qNow, now())) return; // another instance finished it while this one waited in the queue
-  if (isEntryMarkedUnknown(t.slab, t.idx, t.wallet, t.qNow) || chainSyncHeld(t.slab, now())) return;
+  if (markedWithoutSig(t) || chainSyncHeld(t.slab, now())) return;
   const prior = readAttempt(pk);
   if (prior && prior.verdict === "chain" && prior.q === t.qNow.toString() && prior.topSig) {
     // A chain record is only vouched for while the portfolio's newest signature is the one it was read at.
@@ -136,7 +168,8 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
         return;
       }
     } catch {
-      return; // cannot tell: leave the record as it is until the next check
+      writeAttempt(pk, { ...prior, ts: now() }); // cannot tell: leave the record, and back off a full verify window (an outage is not retried every poll)
+      return;
     }
   }
   const facts = await marketFacts(connection, t.slab, t.assetIndex ?? 0);
@@ -144,7 +177,19 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
     writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now() });
     return;
   }
-  const r = await entryFromChain(connection, t.wrapper, { market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, qNow: t.qNow, baseFeeBps: facts.baseFeeBps, mayChargeBusy: facts.mayChargeBusy });
+  const r = await entryFromChain(connection, t.wrapper, { market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, qNow: t.qNow, baseFeeBps: facts.baseFeeBps, mayChargeBusy: facts.mayChargeBusy, noBusyCap: (ctx) => noBusyCapFor(connection, facts, t.assetIndex ?? 0, ctx) });
+  // An "unknown" marker stands for as long as the position it was written for does. The walk can tell: when that fill is not part of the current
+  // position any more (closed and reopened elsewhere, even at the same size), the marker is retired and the rebuild goes on. Otherwise nothing is
+  // ever saved over it.
+  const mark = getEntryUnknownMark(t.slab, t.idx, t.wallet, t.qNow);
+  if (mark) {
+    const readToStart = (r.verdict === "chain" || r.verdict === "unexplained") && r.positionSigs !== undefined;
+    if (readToStart && mark.sig && !r.positionSigs?.includes(mark.sig)) clearEntryUnknownMark(t.slab, t.idx, t.wallet);
+    else {
+      writeAttempt(pk, { q: t.qNow.toString(), verdict: "unexplained", ts: now() });
+      return;
+    }
+  }
   let verdict = r.verdict;
   const stale = getSavedEntry(t.slab, t.idx, t.wallet);
   if (r.verdict === "chain" && r.entry) {
@@ -178,6 +223,7 @@ export function __resetEntryChainSyncForTests(): void {
   memory.clear();
   inflight.clear();
   factsCache.clear();
+  ctxCache.clear();
   __resetChainSyncHoldsForTests();
   queue = Promise.resolve();
 }
@@ -203,6 +249,8 @@ export function shouldSyncPosition(p: SyncCandidate, wallet: string, now: number
   if (p.entryPriceSource === "server") return false;
   // A device-written entry is current by construction. A chain-rebuilt one is re-verified (newer signature = maybe a same-size reopen).
   if (p.entryPriceSource === "cache" && !getSavedEntry(p.slabAddress, p.idx, wallet)?.chainSig) return false;
-  if (isEntryMarkedUnknown(p.slabAddress, p.idx, wallet, p.effectiveSize) || chainSyncHeld(p.slabAddress, now)) return false;
+  // A marker with a fill signature is probed by the walk (it may belong to a position that is gone); one without stands.
+  const mark = getEntryUnknownMark(p.slabAddress, p.idx, wallet, p.effectiveSize);
+  if ((mark !== null && mark.sig === null) || chainSyncHeld(p.slabAddress, now)) return false;
   return true;
 }

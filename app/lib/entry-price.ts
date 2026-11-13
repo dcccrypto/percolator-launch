@@ -113,37 +113,64 @@ const unknownKey = (slab: string, accountIdx: number, wallet?: string): string =
  * The marker is tied to the size the unpriced open / add left the position at (`sizeQ`, signed effective): it is honoured only while the chain
  * holds that size, so a later trade (a different size) retires it, and a close to flat clears it (`clearEntryPrice(..., { flat: true })`).
  */
-export function markEntryUnknown(slab: string, accountIdx: number, wallet: string | undefined, sizeQ: bigint): void {
-  try {
-    localStorage.setItem(unknownKey(slab, accountIdx, wallet), JSON.stringify({ sizeQ: sizeQ.toString(), ts: Date.now() }));
-  } catch {
-    // ignore
-  }
-}
 /** Did a trade from `beforeQ` to `afterQ` open or add to a position (or flip it)? Only such a fill leaves the Entry unknown when it cannot be priced; a reduce keeps the average it had. */
 export function tradeGrewPosition(beforeQ: bigint, afterQ: bigint): boolean {
   if (afterQ === 0n) return false;
   return beforeQ === 0n || (beforeQ > 0n) !== (afterQ > 0n) || absQ(afterQ) > absQ(beforeQ);
 }
 
-/** True while the marker stands for `currentQ`; a marker for another size is stale and is removed. */
-export function isEntryMarkedUnknown(slab: string, accountIdx: number, wallet: string | undefined, currentQ: bigint): boolean {
+/**
+ * The marker's content: the size the unpriced fill left the position at and the signature of that fill. The signature lets the chain rebuild
+ * retire the marker when the position it was about is gone (closed and reopened elsewhere, even at the same size).
+ */
+export interface UnknownMark {
+  sizeQ: bigint;
+  sig: string | null;
+}
+
+export function markEntryUnknown(slab: string, accountIdx: number, wallet: string | undefined, sizeQ: bigint, sig?: string | null): void {
+  try {
+    localStorage.setItem(unknownKey(slab, accountIdx, wallet), JSON.stringify({ sizeQ: sizeQ.toString(), ...(sig ? { sig } : {}), ts: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Marks the position unknown after a fill that was READ but could not be priced, only when the fill opened or added (a reduce keeps the average
+ * it had). Returns whether a marker was written. Called BEFORE the entry is cleared with the size the order should leave (so another tab never
+ * sees a cleared entry without a marker), and again with the measured size.
+ */
+export function markUnpricedFill(slab: string, accountIdx: number, wallet: string | undefined, sig: string | null, beforeQ: bigint, afterQ: bigint): boolean {
+  if (!tradeGrewPosition(beforeQ, afterQ)) return false;
+  markEntryUnknown(slab, accountIdx, wallet, afterQ, sig);
+  return true;
+}
+
+/** The marker standing for `currentQ`, or null; a marker for another size is stale and is removed. */
+export function getEntryUnknownMark(slab: string, accountIdx: number, wallet: string | undefined, currentQ: bigint): UnknownMark | null {
   try {
     const raw = localStorage.getItem(unknownKey(slab, accountIdx, wallet));
-    if (raw === null) return false;
+    if (raw === null) return null;
     let size: string | null = null;
+    let sig: string | null = null;
     try {
-      const j = JSON.parse(raw) as { sizeQ?: unknown };
+      const j = JSON.parse(raw) as { sizeQ?: unknown; sig?: unknown };
       size = typeof j.sizeQ === "string" ? j.sizeQ : null;
+      sig = typeof j.sig === "string" ? j.sig : null;
     } catch {
       size = null;
     }
-    if (size !== null && size === currentQ.toString()) return true;
+    if (size !== null && size === currentQ.toString()) return { sizeQ: currentQ, sig };
     localStorage.removeItem(unknownKey(slab, accountIdx, wallet));
-    return false;
+    return null;
   } catch {
-    return false;
+    return null;
   }
+}
+/** True while the marker stands for `currentQ`. */
+export function isEntryMarkedUnknown(slab: string, accountIdx: number, wallet: string | undefined, currentQ: bigint): boolean {
+  return getEntryUnknownMark(slab, accountIdx, wallet, currentQ) !== null;
 }
 export function clearEntryUnknownMark(slab: string, accountIdx: number, wallet?: string): void {
   try {

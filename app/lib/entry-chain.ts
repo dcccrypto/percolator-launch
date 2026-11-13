@@ -32,7 +32,6 @@ import type { Connection, PublicKey } from "@solana/web3.js";
 import { decodeTxEventsV22 } from "@/lib/v22/sdk/v22-fill-events";
 import { execFillFromLogs, quotedSpreadBpsFloor, type ExecFill } from "@/lib/v22/exec-fill";
 import { busyFeeAfterTrade, entryAfterTrade } from "@/lib/entry-price";
-import { DEFAULT_FEE_CAP_MARGIN_BPS } from "@/lib/limits/fee-channel";
 
 /** REDUCE reasons whose `signed_reduced_q` is in ADL-effective position units (the same unit as the fills' executed_q). */
 const EFFECTIVE_UNIT_REDUCE = new Set([2, 3, 6, 7, 8]);
@@ -65,6 +64,8 @@ export interface ChainEntryResult {
   txRead: number;
   /** The newest signature on the portfolio when the walk started (any transaction): the record is only vouched for while it is still the newest. */
   topSig?: string;
+  /** The signatures of the changes that make up the current position (set when the walk reached its start): lets a caller tell whether a given transaction belongs to it. */
+  positionSigs?: string[];
 }
 
 /** One change of the position, from a landed transaction. */
@@ -76,6 +77,14 @@ export interface ChainDelta {
   fill?: ExecFill;
   /** The `fee_bps` the taker signed (TradeCpi instruction data); null = the instruction could not be found / decoded. */
   signedFeeBps?: bigint | null;
+  /** The market's own no-busy cap for that transaction's matcher context (what `fetchTradeFeeBps` signs with no busy rate); null = not readable. */
+  noBusyCap?: NoBusyCap | null;
+}
+
+/** The fee cap an order with NO busy rate signs, and the market maximum it is clamped to. */
+export interface NoBusyCap {
+  feeBps: bigint;
+  maxFeeBps: bigint;
 }
 
 const abs = (n: bigint): bigint => (n < 0n ? -n : n);
@@ -90,7 +99,7 @@ export function deltasFromLogs(
   succeeded: boolean,
   wrapper: PublicKey,
   o: { market: PublicKey; portfolio: PublicKey; assetIndex: number },
-  signedFeeBps: bigint | null = null,
+  signed: { feeBps: bigint | null; noBusyCap: NoBusyCap | null } = { feeBps: null, noBusyCap: null },
 ): ChainDelta[] | null | "irreconcilable" {
   if (!succeeded) return [];
   const ev = decodeTxEventsV22(true, logs, wrapper);
@@ -112,7 +121,7 @@ export function deltasFromLogs(
     const f = execFillFromLogs(logs, wrapper, { market: o.market, assetIndex: o.assetIndex, taker: o.portfolio, succeeded: true });
     // A fill of ours the decoder cannot reduce to one price (two assets in one line...) cannot be reconciled.
     if (!f) return "irreconcilable";
-    fillDelta = { sig, deltaQ: f.executedQ, fill: f, signedFeeBps };
+    fillDelta = { sig, deltaQ: f.executedQ, fill: f, signedFeeBps: signed.feeBps, noBusyCap: signed.noBusyCap };
   }
   // Keep the log order: the summed fill sits where its first FILL event was (REDUCEs before it happen before it).
   for (const r of reduces.filter((r) => r.at < fillAt || fillAt < 0)) out.push(r.d);
@@ -122,19 +131,19 @@ export function deltasFromLogs(
 }
 
 /**
- * The `fee_bps` a TradeCpi instruction signed, from the transaction's own instruction data (wrapper tag 10: 85 bytes, `fee_bps` u64 at 67).
- * Null when the transaction holds no such instruction for this asset, or several (a batch, an evict-and-trade, a wrapper call by another
- * program): the signed cap is then not provable.
+ * The `fee_bps` a TradeCpi instruction signed, from the transaction's own instruction data (wrapper tag 10: 85 bytes, `fee_bps` u64 at 67),
+ * and the matcher context it named (account 5). Null when the transaction holds no such instruction for this asset, or several (a batch, an
+ * evict-and-trade, a wrapper call by another program): the signed cap is then not provable.
  */
-export function signedFeeBpsFromTx(
-  message: { staticAccountKeys?: readonly PublicKey[]; compiledInstructions?: readonly { programIdIndex: number; data: Uint8Array }[] } | null | undefined,
+export function signedFeeFromTx(
+  message: { staticAccountKeys?: readonly PublicKey[]; compiledInstructions?: readonly { programIdIndex: number; data: Uint8Array; accountKeyIndexes?: readonly number[] }[] } | null | undefined,
   wrapper: PublicKey,
   assetIndex: number,
-): bigint | null {
+): { feeBps: bigint; matcherCtx: PublicKey | null } | null {
   const keys = message?.staticAccountKeys;
   const ixs = message?.compiledInstructions;
   if (!keys || !ixs) return null;
-  let found: bigint | null = null;
+  let found: { feeBps: bigint; matcherCtx: PublicKey | null } | null = null;
   let n = 0;
   for (const ix of ixs) {
     const pid = keys[ix.programIdIndex];
@@ -142,9 +151,15 @@ export function signedFeeBpsFromTx(
     const dv = new DataView(ix.data.buffer, ix.data.byteOffset, ix.data.byteLength);
     if (dv.getUint16(41, true) !== assetIndex) continue;
     n++;
-    found = dv.getBigUint64(67, true);
+    const ci = ix.accountKeyIndexes?.[5];
+    found = { feeBps: dv.getBigUint64(67, true), matcherCtx: ci === undefined ? null : keys[ci] ?? null };
   }
   return n === 1 ? found : null;
+}
+
+/** Back-compat helper: the signed fee only. */
+export function signedFeeBpsFromTx(message: Parameters<typeof signedFeeFromTx>[0], wrapper: PublicKey, assetIndex: number): bigint | null {
+  return signedFeeFromTx(message, wrapper, assetIndex)?.feeBps ?? null;
 }
 
 /**
@@ -157,16 +172,20 @@ export function signedFeeBpsFromTx(
  * state standard RPC cannot read back, and shows the Entry as unknown when they differ (or when a raised-fee Custom order was sent). Device 2
  * shows a number only when the chain PROVES no busy rate was quoted AND none was charged:
  *   - charged: the fee is base + the matcher's own request within rounding (no busy part above tolerance, none below);
- *   - quoted: the SIGNED `fee_bps` (instruction data) holds no room for a busy rate: signed <= base + request + the ticket's default margin.
- *     Confirmed orders sign room for the confirmed busy rate, so signed above that means a rate was quoted (even if none was charged).
- * No signed value (batch / unreadable instruction) = not provable = unknown. The request is the ceil of |quoted - booked| bps (percolator-match
- * `requested_fee_bps`). A signed cap clamped to the market maximum cannot show room; that residual is accepted and noted in the PR.
+ *   - quoted: the SIGNED `fee_bps` (instruction data) EQUALS the market's own no-busy cap, the value `fetchTradeFeeBps` /
+ *     `resolveTradeFeeBps` produce with no busy rate (base + the matcher's worst-case fee + the SDK margin, clamped to the market maximum). A
+ *     confirmed order signs room for its busy rate (above the cap), a raised-fee retry signs the util maximum (above), and a changed config
+ *     shows as a different value: all unknown. A signed value at the market maximum is unknown too (a clamp could hide busy room).
+ * No signed value (batch / unreadable instruction) or no readable cap = not provable = unknown. The cap is read from the market and matcher
+ * context as they are NOW (history is not readable by standard RPC); if their inputs changed since the fill, the values differ and the Entry is
+ * unknown: fail closed. Residual: an admin change that raises the cap by exactly a later-quoted busy rate could match.
  */
 export function chainFillPrice(
   f: ExecFill,
   baseFeeBps: bigint,
   mayChargeBusy: boolean,
   signedFeeBps: bigint | null = null,
+  noBusyCap: NoBusyCap | null = null,
 ): { priceE6: bigint; busyAtoms: bigint } | null {
   if (f.executedQ === 0n) return null;
   const base = (f.notionalAtoms * baseFeeBps) / 10_000n;
@@ -176,10 +195,8 @@ export function chainFillPrice(
     const expected = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsFloor(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
     const off = rest > expected ? rest - expected : expected - rest;
     if (off > tol) return null;
-    if (signedFeeBps === null) return null;
-    const diff = f.quotedPriceE6 > f.bookedPriceE6 ? f.quotedPriceE6 - f.bookedPriceE6 : f.bookedPriceE6 - f.quotedPriceE6;
-    const reqCeil = f.quotedPriceE6 > 0n && f.bookedPriceE6 > 0n ? (diff * 10_000n + f.bookedPriceE6 - 1n) / f.bookedPriceE6 : 0n;
-    if (signedFeeBps > baseFeeBps + reqCeil + BigInt(DEFAULT_FEE_CAP_MARGIN_BPS)) return null;
+    if (signedFeeBps === null || noBusyCap === null) return null;
+    if (signedFeeBps !== noBusyCap.feeBps || signedFeeBps >= noBusyCap.maxFeeBps) return null;
   }
   const perUnit = (rest * 1_000_000n) / abs(f.executedQ);
   const p = f.executedQ > 0n ? f.bookedPriceE6 + perUnit : f.bookedPriceE6 - perUnit;
@@ -204,7 +221,7 @@ export function rebuildEntry(deltas: readonly ChainDelta[], qNow: bigint, baseFe
     const opens = q === 0n || (q > 0n) !== (after > 0n) || abs(after) > abs(q);
     if (d.fill) {
       fills++;
-      const px = chainFillPrice(d.fill, baseFeeBps, mayChargeBusy, d.signedFeeBps ?? null);
+      const px = chainFillPrice(d.fill, baseFeeBps, mayChargeBusy, d.signedFeeBps ?? null, d.noBusyCap ?? null);
       if (px === null && opens) return { verdict: "unexplained", entry: null };
       if (after === 0n) {
         saved = null;
@@ -251,6 +268,8 @@ export interface ChainEntryOptions {
   baseFeeBps: bigint;
   /** The market may charge a busy-side fee (a growth record exists). Default true (the stricter rule). */
   mayChargeBusy?: boolean;
+  /** The market's no-busy cap for a transaction's matcher context (null context = none named). Absent / null result = growth fills are unknown. */
+  noBusyCap?: (matcherCtx: PublicKey | null) => Promise<NoBusyCap | null>;
   /** Signatures per page (default 50). */
   pageSize?: number;
   /** Transactions read at most (default 60). */
@@ -290,7 +309,9 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
         for (let j = 0; j < group.length; j++) {
           const tx = txs[j];
           if (!tx?.meta) return { verdict: "unreadable", entry: null, txRead, topSig };
-          const ds = deltasFromLogs(group[j], tx.meta.logMessages, tx.meta.err === null, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex }, signedFeeBpsFromTx(tx.transaction?.message as Parameters<typeof signedFeeBpsFromTx>[0], wrapper, assetIndex));
+          const sf = signedFeeFromTx(tx.transaction?.message as Parameters<typeof signedFeeFromTx>[0], wrapper, assetIndex);
+          const cap = sf && o.noBusyCap ? await o.noBusyCap(sf.matcherCtx).catch(() => null) : null;
+          const ds = deltasFromLogs(group[j], tx.meta.logMessages, tx.meta.err === null, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex }, { feeBps: sf?.feeBps ?? null, noBusyCap: cap });
           if (ds === null) return { verdict: "unreadable", entry: null, txRead, topSig };
           if (ds === "irreconcilable") return { verdict: "mismatch", entry: null, txRead, topSig };
           // Inside one transaction the changes are applied in order; undo them last to first.
@@ -303,7 +324,7 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
             if (q === 0n) {
               const used = flip ? newestFirst.slice(0, flip.len) : newestFirst;
               const r = rebuildEntry(used.slice().reverse(), o.qNow, o.baseFeeBps, flip ? flip.startQ : 0n, o.mayChargeBusy ?? true);
-              return { verdict: r.verdict, entry: r.entry, txRead, topSig };
+              return { verdict: r.verdict, entry: r.entry, txRead, topSig, positionSigs: used.map((d) => d.sig) };
             }
           }
         }

@@ -4,12 +4,13 @@ import { Keypair } from "@solana/web3.js";
 
 const h = vi.hoisted(() => ({ entryFromChain: vi.fn(), fee: 30n as bigint | null, growth: "present" as string, nowQ: null as bigint | null, sigs: [] as string[], sigCalls: 0 }));
 vi.mock("@/lib/v21/growth-market", () => ({ growthRecordPresence: () => h.growth }));
+vi.mock("@/lib/limits/trade-fee-resolve", () => ({ resolveTradeFeeBps: () => ({ feeBps: 135n, maxFeeBps: 700n }) }));
 vi.mock("@/lib/position-change", () => ({ readEffectivePositionQ: async () => h.nowQ }));
 vi.mock("@/lib/entry-chain", () => ({ entryFromChain: h.entryFromChain }));
 vi.mock("@/lib/limits/decode", () => ({ decodeMarketEngineView: () => (h.fee === null ? null : { tradeFeeBaseBps: h.fee }) }));
 
 import { COOLDOWN_MS, VERIFY_MS, __resetEntryChainSyncForTests, holdChainSync, rebuildDue, shouldSyncPosition, syncChainEntry } from "@/lib/entry-chain-sync";
-import { clearEntryPrice, getSavedEntry, markEntryUnknown, saveEntryPrice } from "@/lib/entry-price";
+import { clearEntryPrice, getSavedEntry, markEntryUnknown, markUnpricedFill, saveEntryPrice } from "@/lib/entry-price";
 
 const SLAB = Keypair.generate().publicKey.toBase58();
 const WALLET = Keypair.generate().publicKey.toBase58();
@@ -286,5 +287,70 @@ describe("N5: the growth status comes from the market's growth record", () => {
     h.growth = "undecodable";
     await syncChainEntry(conn, target());
     expect(h.entryFromChain.mock.calls[2][2].mayChargeBusy).toBe(true); // fails toward the stricter rule
+  });
+});
+
+describe("D1: the no-busy cap the chain compares with", () => {
+  it("is the market's own cap (resolveTradeFeeBps with no busy rate) and is handed to the walk", async () => {
+    h.entryFromChain.mockResolvedValue({ verdict: "incomplete", entry: null, txRead: 1 });
+    await syncChainEntry(conn, target());
+    const o = h.entryFromChain.mock.calls[0][2];
+    expect(await o.noBusyCap(null)).toEqual({ feeBps: 135n, maxFeeBps: 700n });
+  });
+});
+
+describe("D3: a marker with a fill signature is retired when its position is gone", () => {
+  const withSig = (sig: string) => markEntryUnknown(SLAB, 0, WALLET, 2n * T, sig);
+  it("the walk shows the marked fill is not part of the current position (closed + reopened elsewhere at the same size): marker retired, chain Entry saved", async () => {
+    withSig("oldFill");
+    h.entryFromChain.mockResolvedValue({ ...chain(), positionSigs: ["newOpen"] });
+    expect(await syncChainEntry(conn, target())).toBe("chain");
+    expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(101_000_000n);
+    expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).toBeNull();
+  });
+  it("the marked fill IS part of the current position: the marker stands, nothing is saved, and the probe waits for the cooldown", async () => {
+    withSig("theFill");
+    h.entryFromChain.mockResolvedValue({ ...chain(), positionSigs: ["theFill"] });
+    await syncChainEntry(conn, target());
+    expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+    expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).not.toBeNull();
+    expect(await syncChainEntry(conn, target())).toBe("skipped");
+    expect(h.entryFromChain).toHaveBeenCalledTimes(1);
+  });
+  it("a walk that did not reach the start proves nothing: the marker stands", async () => {
+    withSig("oldFill");
+    h.entryFromChain.mockResolvedValue({ verdict: "incomplete", entry: null, txRead: 60 });
+    await syncChainEntry(conn, target());
+    expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).not.toBeNull();
+  });
+  it("trigger: a marker with a signature is probed, one without is not", () => {
+    const row = { slabAddress: SLAB, idx: 0, adlKnown: true, effectiveSize: 2n * T, portfolioPk: portfolio, entryPriceSource: "unknown", account: { positionSize: 2n * T } };
+    markEntryUnknown(SLAB, 0, WALLET, 2n * T);
+    expect(shouldSyncPosition(row, WALLET)).toBe(false);
+    markEntryUnknown(SLAB, 0, WALLET, 2n * T, "fillSig");
+    expect(shouldSyncPosition(row, WALLET)).toBe(true);
+  });
+});
+
+describe("D4", () => {
+  it("(d) markUnpricedFill: an open or add marks; a reduce, a close and a flat-to-flat do not", () => {
+    expect(markUnpricedFill(SLAB, 0, WALLET, "s", 0n, 2n * T)).toBe(true);
+    localStorage.clear();
+    expect(markUnpricedFill(SLAB, 0, WALLET, "s", 2n * T, 3n * T)).toBe(true);
+    localStorage.clear();
+    expect(markUnpricedFill(SLAB, 0, WALLET, "s", 3n * T, 2n * T)).toBe(false);
+    expect(markUnpricedFill(SLAB, 0, WALLET, "s", 2n * T, 0n)).toBe(false);
+    expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).toBeNull();
+  });
+  it("(c) a verify read that throws backs off a full verify window instead of retrying every poll", async () => {
+    let t = 1_000_000;
+    h.entryFromChain.mockResolvedValue(chain(101_000_000n, "sigA"));
+    await syncChainEntry(conn, target(), () => t);
+    t += VERIFY_MS;
+    (conn as unknown as { getSignaturesForAddress: ReturnType<typeof vi.fn> }).getSignaturesForAddress.mockRejectedValueOnce(new Error("429"));
+    await syncChainEntry(conn, target(), () => t);
+    const before = h.sigCalls;
+    await syncChainEntry(conn, target(), () => t + 1_000);
+    expect(h.sigCalls).toBe(before); // not retried within the window
   });
 });

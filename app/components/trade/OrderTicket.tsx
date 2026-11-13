@@ -86,7 +86,7 @@ import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
 import { holdChainSync, setChainSyncHold } from "@/lib/entry-chain-hold";
-import { saveEntryPrice, clearEntryPrice, markEntryUnknown, tradeGrewPosition, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
+import { saveEntryPrice, clearEntryPrice, markUnpricedFill, clearEntryUnknownMark, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
 import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
@@ -1652,6 +1652,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // Never "Confirmed!" for a no-op: nothing filled, nothing to save. Offer a smaller size.
         const room = marketMaxQFor(direction);
         const tryQ = room !== null && room > 0n && room < effectiveSize ? room : effectiveSize / 2n;
+        setChainSyncHold(slabAddress, 0); // nothing changed: release the hold
         setResult({ kind: "zero", body: TICKET_COPY.result.zero, sig: sig ?? null, tryQ: tryQ > 0n ? tryQ : null });
         setLastSig(sig ?? null);
         setTradePhase("idle");
@@ -1788,15 +1789,19 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // The fill could not be read (or its price cannot be split from the fee): keep no entry at all (the position panel then shows an
           // unknown one) rather than the mark or the booked price, which is gross of the spread.
           else if (entryIdx !== null) {
-            clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
+            const w = publicKey?.toBase58();
             // r10 decision 2: a fill that WAS read but cannot be priced honestly (busy rate differs from the quote, raised-fee Custom order) is
             // an explicit "unknown" no other source (the chain rebuild) may fill in. An unreadable fill is not marked: the chain may know it.
+            // The marker is written BEFORE the entry is cleared (another tab must never see a cleared entry without it), from the size this
+            // order should leave, then corrected with the measured size. A reduce never marks.
+            const wrote = ef ? markUnpricedFill(slabAddress, entryIdx, w, sig ?? null, existingPositionSize, existingPositionSize + ef.executedQ) : false;
+            clearEntryPrice(slabAddress, entryIdx, w);
             if (ef) {
-              // Only an OPEN or ADD whose fill could not be priced leaves the position's Entry unknown; a reduce keeps the average it had.
               const ch = await measured.catch(() => null);
-              const q0 = ch ? ch.beforeQ : existingPositionSize;
-              const q1 = ch ? ch.afterQ : existingPositionSize + ef.executedQ;
-              if (tradeGrewPosition(q0, q1)) markEntryUnknown(slabAddress, entryIdx, publicKey?.toBase58(), q1);
+              if (ch) {
+                const wroteMeasured = markUnpricedFill(slabAddress, entryIdx, w, sig ?? null, ch.beforeQ, ch.afterQ);
+                if (wrote && !wroteMeasured) clearEntryUnknownMark(slabAddress, entryIdx, w);
+              }
             }
           }
           // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
