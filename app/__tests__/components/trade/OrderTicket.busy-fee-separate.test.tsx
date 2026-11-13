@@ -190,8 +190,18 @@ describe("the saved Entry is the fill price, not the fill price plus the busy-si
     render(<OrderTicket slabAddress={SLAB} />);
     fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
     await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    // E4(c): the marker must already stand when the entry is cleared (another tab must never see a cleared entry without it)
+    const markerAtClear: boolean[] = [];
+    const realRemove = localStorage.removeItem.bind(localStorage);
+    const spy = vi.spyOn(localStorage, "removeItem").mockImplementation((k: string) => {
+      if (k.startsWith("perc:entry:")) markerAtClear.push(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${W}`) !== null);
+      return realRemove(k);
+    });
     await act(async () => { fireEvent.click(screen.getByTestId("trade-confirm")); });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    spy.mockRestore();
+    expect(markerAtClear.length).toBeGreaterThan(0);
+    expect(markerAtClear.every(Boolean)).toBe(true);
     expect(getSavedEntry(SLAB, 0, W)).toBeNull();
     expect(isEntryMarkedUnknown(SLAB, 0, W, FILLED)).toBe(true); // tied to the size the unpriced open left
     expect(chainSyncHeld(SLAB)).toBe(true); // the 30 s post-landing hold (the wait budget's long hold is shortened, not dropped)

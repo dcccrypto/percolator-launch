@@ -9,6 +9,7 @@
  * Plus: side paused auto-selects the open side, the clamp helper, the long wait + Stop.
  */
 import { StrictMode } from "react";
+import { chainSyncHeld } from "@/lib/entry-chain-hold";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -305,6 +306,7 @@ describe("WP-3 result lines", () => {
     expect(within(line).getByTestId("status-line-action").textContent).toMatch(/^Try /);
     expect(ticket().textContent).not.toMatch(/Tx:|Confirmed!/);
     expect(screen.queryByTestId("status-line-tx")).toBeNull();
+    expect(chainSyncHeld(SLAB)).toBe(false); // a zero fill changed nothing: the trade hold is released, not left at 12 minutes
     await snap("zero-fill");
     fireEvent.click(within(line).getByTestId("status-line-why"));
     expect(screen.getByTestId("status-line-tx").getAttribute("href")).toContain("5igSigZero");

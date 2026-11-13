@@ -165,8 +165,8 @@ export function signedFeeBpsFromTx(message: Parameters<typeof signedFeeFromTx>[0
 /**
  * The price a fill effectively paid, from the fill alone. Null = not explained (the Entry is then UNKNOWN, owner decision 2).
  *
- * `mayChargeBusy` false (no growth record): spread = fee - base, from trusted fields only, bit-identical to `effectivePriceE6(f, base, null)`;
- * the matcher's quote is not consulted.
+ * `mayChargeBusy` false (no growth record): spread = fee - base, bit-identical to `effectivePriceE6(f, base, null)` whenever the fee is base + the
+ * matcher's own request (checked on every market, below); otherwise unknown.
  *
  * `mayChargeBusy` true: the ticket compares the charged fee with the busy rate it QUOTED from the side's utilisation just before the trade,
  * state standard RPC cannot read back, and shows the Entry as unknown when they differ (or when a raised-fee Custom order was sent). Device 2
@@ -190,11 +190,13 @@ export function chainFillPrice(
   if (f.executedQ === 0n) return null;
   const base = (f.notionalAtoms * baseFeeBps) / 10_000n;
   const rest = f.feeAtoms > base ? f.feeAtoms - base : 0n;
+  // The charged check runs on EVERY market: the fee must be base + the matcher's own request within rounding. On a non-growth market this also
+  // makes a base-fee change after the fill (the authority can set it any time) fail closed instead of moving the Entry by the difference.
+  const tol = f.notionalAtoms / 1_000_000n + 5n;
+  const expected = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsFloor(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
+  const off = rest > expected ? rest - expected : expected - rest;
+  if (off > tol) return null;
   if (mayChargeBusy) {
-    const tol = f.notionalAtoms / 1_000_000n + 5n;
-    const expected = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsFloor(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
-    const off = rest > expected ? rest - expected : expected - rest;
-    if (off > tol) return null;
     if (signedFeeBps === null || noBusyCap === null) return null;
     if (signedFeeBps !== noBusyCap.feeBps || signedFeeBps >= noBusyCap.maxFeeBps) return null;
   }
@@ -262,6 +264,13 @@ export function rebuildEntry(deltas: readonly ChainDelta[], qNow: bigint, baseFe
 export interface ChainEntryOptions {
   market: PublicKey;
   portfolio: PublicKey;
+  /**
+   * The address whose signatures are walked (default: the portfolio). Fills are still filtered to this portfolio, market and asset. The trader's
+   * WALLET signs every trade but not the keeper's cranks (which flood a trader portfolio's list), so walking it spends the transaction budget on
+   * real trades. A keeper-signed REDUCE (liquidation) is not on the wallet's list: the sizes then do not add up and the caller falls back to the
+   * portfolio walk.
+   */
+  walkAddress?: PublicKey;
   assetIndex?: number;
   /** The signed ADL-effective size the chain holds now. */
   qNow: bigint;
@@ -297,7 +306,7 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
   let topSig: string | undefined;
   try {
     for (;;) {
-      const page = await connection.getSignaturesForAddress(o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
+      const page = await connection.getSignaturesForAddress(o.walkAddress ?? o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
       if (page.length === 0) return { verdict: "incomplete", entry: null, txRead, topSig };
       if (topSig === undefined) topSig = page[0].signature;
       const sigs = page.filter((s) => s.err === null).map((s) => s.signature);

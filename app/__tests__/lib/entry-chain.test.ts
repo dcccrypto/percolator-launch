@@ -76,11 +76,13 @@ describe("entryFromChain: open, add, partial close, flip", () => {
     const g = await run(c, 2n * T, { mayChargeBusy: true });
     expect(g.verdict).toBe("unexplained");
     expect(g.entry).toBeNull();
-    // non-growth: no busy fee exists; the whole excess is spread, exactly as the ticket (busyFeeBps null) computes it
+    // E1: the charged check runs on every market, so a fee that is not base + the matcher's request is unknown on a non-growth market too
     const ng = await run(conn({ s1: fill(2n * T, 100_000_000n, 23n, 200n) }, ["s1"]), 2n * T, { mayChargeBusy: false });
-    expect(ng.verdict).toBe("chain");
-    expect(ng.entry?.busyFeeAtoms).toBe(0n);
-    expect(ng.entry?.entryPriceE6).toBe(effective(2n * T, 100_000_000n, 223n));
+    expect(ng.verdict).toBe("unexplained");
+    // ... while a normal fill on a non-growth market is priced as the ticket prices it
+    const ok = await run(conn({ s1: fill(2n * T, 100_000_000n, 23n) }, ["s1"]), 2n * T, { mayChargeBusy: false });
+    expect(ok.verdict).toBe("chain");
+    expect(ok.entry?.busyFeeAtoms).toBe(0n);
   });
   it("an add averages by size; a PARTIAL close keeps the average (the case the device cache lost)", async () => {
     const txs = { s1: fill(T, 100_000_000n, 20n), s2: fill(T, 110_000_000n, 20n), s3: fill(-T, 120_000_000n, 20n) };
@@ -197,7 +199,7 @@ describe("chainFillPrice: the same arithmetic as the ticket, and the r9 'unknown
     const f = { ...real, feeAtoms: real.feeAtoms + (real.notionalAtoms * 5n) / 10_000n };
     expect(effectivePriceE6(f, 30n, 3n)).toBeNull(); // the trading device: unknown
     expect(chainFillPrice(f, 30n, true, NO_BUSY_SIGNED + 3n, CAP_135)).toBeNull(); // the other device: also unknown
-    expect(chainFillPrice(f, 30n, false)?.priceE6).toBe(effectivePriceE6(f, 30n, null)); // non-growth: spread = fee - base, as the ticket
+    expect(chainFillPrice(f, 30n, false)).toBeNull(); // non-growth: the fee is not base + the matcher's request either (E1)
   });
   it("N1: quoted 3 bps, charged 0 (utilisation fell before landing): the ticket is unknown; the chain sees room in the SIGNED fee_bps and is unknown too", () => {
     expect(effectivePriceE6(real, 30n, 3n)).toBeNull(); // device 1: unknown
@@ -215,6 +217,11 @@ describe("chainFillPrice: the same arithmetic as the ticket, and the r9 'unknown
     expect(chainFillPrice(real, 30n, true, 633n, CAP_135)).toBeNull();
     expect(chainFillPrice(real, 30n, true, 135n, CAP_135)).not.toBeNull();
   });
+  it("E1: a base-fee change after the fill fails closed on a NON-growth market (fill paid 30 bps base, base now read as 20)", () => {
+    expect(chainFillPrice(real, 30n, false)?.priceE6).toBe(effectivePriceE6(real, 30n, null)); // the base the fill paid
+    expect(chainFillPrice(real, 20n, false)).toBeNull(); // base lowered since: rest is 10 bps too high
+    expect(chainFillPrice(real, 40n, false)).toBeNull(); // base raised since
+  });
   it("D1: signed below the cap (config changed / fallback), a cap that cannot be read, and a signed value at the market maximum are all unknown", () => {
     expect(chainFillPrice(real, 30n, true, 134n, CAP_135)).toBeNull();
     expect(chainFillPrice(real, 30n, true, 135n, null)).toBeNull();
@@ -222,6 +229,20 @@ describe("chainFillPrice: the same arithmetic as the ticket, and the r9 'unknown
   });
   it("NEGATIVE: a fee below base + the matcher's own request is not explained on a growth market", () => {
     expect(chainFillPrice({ ...real, feeAtoms: 80_000n }, 30n, true, NO_BUSY_SIGNED, CAP_135)).toBeNull();
+  });
+});
+
+describe("E2: walkAddress", () => {
+  it("lists the signatures of the walk address (the trader's wallet), while fills are still filtered to the portfolio", async () => {
+    const wallet = Keypair.generate().publicKey;
+    const c = conn({ s1: fill(2n * T, 100_000_000n, 23n), other: fill(T, 90_000_000n, 10n, 0n, OTHER) }, ["other", "s1"]);
+    const r = await run(c, 2n * T, { walkAddress: wallet });
+    expect(r.verdict).toBe("chain");
+    expect((c.getSignaturesForAddress.mock.calls[0][0] as PublicKey).equals(wallet)).toBe(true);
+    // default: the portfolio
+    const c2 = conn({ s1: fill(2n * T, 100_000_000n, 23n) }, ["s1"]);
+    await run(c2, 2n * T);
+    expect((c2.getSignaturesForAddress.mock.calls[0][0] as PublicKey).equals(PORTFOLIO)).toBe(true);
   });
 });
 

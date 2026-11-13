@@ -2,9 +2,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Keypair } from "@solana/web3.js";
 
-const h = vi.hoisted(() => ({ entryFromChain: vi.fn(), fee: 30n as bigint | null, growth: "present" as string, nowQ: null as bigint | null, sigs: [] as string[], sigCalls: 0 }));
+const h = vi.hoisted(() => ({ entryFromChain: vi.fn(), fee: 30n as bigint | null, growth: "present" as string, nowQ: null as bigint | null, sigs: [] as string[], sigCalls: 0, resolveArgs: [] as { matcherCtxData: Uint8Array | null; assetIndex?: number }[] }));
 vi.mock("@/lib/v21/growth-market", () => ({ growthRecordPresence: () => h.growth }));
-vi.mock("@/lib/limits/trade-fee-resolve", () => ({ resolveTradeFeeBps: () => ({ feeBps: 135n, maxFeeBps: 700n }) }));
+vi.mock("@/lib/limits/trade-fee-resolve", () => ({ resolveTradeFeeBps: (a: { matcherCtxData: Uint8Array | null; assetIndex?: number }) => { h.resolveArgs.push(a); return { feeBps: 135n, maxFeeBps: 700n }; } }));
 vi.mock("@/lib/position-change", () => ({ readEffectivePositionQ: async () => h.nowQ }));
 vi.mock("@/lib/entry-chain", () => ({ entryFromChain: h.entryFromChain }));
 vi.mock("@/lib/limits/decode", () => ({ decodeMarketEngineView: () => (h.fee === null ? null : { tradeFeeBaseBps: h.fee }) }));
@@ -89,14 +89,14 @@ describe("syncChainEntry", () => {
     h.entryFromChain.mockResolvedValue({ verdict: "unreadable", entry: null, txRead: 0 });
     expect(await syncChainEntry(conn, target(3n * T))).toBe("unreadable");
     expect(await syncChainEntry(conn, target(3n * T))).toBe("skipped");
-    expect(h.entryFromChain).toHaveBeenCalledTimes(2);
+    expect(h.entryFromChain).toHaveBeenCalledTimes(3); // chain (1 walk) + unreadable (wallet walk, then the portfolio walk)
   });
   it("the attempt survives a reload (storage), so a page refresh does not retry an unreadable chain at once", async () => {
     h.entryFromChain.mockResolvedValue({ verdict: "incomplete", entry: null, txRead: 60 });
     await syncChainEntry(conn, target());
     __resetEntryChainSyncForTests(); // memory gone, storage stays
     expect(await syncChainEntry(conn, target())).toBe("skipped");
-    expect(h.entryFromChain).toHaveBeenCalledTimes(1);
+    expect(h.entryFromChain).toHaveBeenCalledTimes(2);
   });
   it("a flat position never reads the chain", async () => {
     expect(await syncChainEntry(conn, target(0n))).toBe("skipped");
@@ -276,17 +276,17 @@ describe("N5: the growth status comes from the market's growth record", () => {
     h.entryFromChain.mockResolvedValue({ verdict: "incomplete", entry: null, txRead: 1 });
     h.growth = "present";
     await syncChainEntry(conn, target());
-    expect(h.entryFromChain.mock.calls[0][2].mayChargeBusy).toBe(true);
+    expect(h.entryFromChain.mock.calls.at(-1)?.[2].mayChargeBusy).toBe(true);
     __resetEntryChainSyncForTests();
     localStorage.clear();
     h.growth = "absent";
     await syncChainEntry(conn, target());
-    expect(h.entryFromChain.mock.calls[1][2].mayChargeBusy).toBe(false);
+    expect(h.entryFromChain.mock.calls.at(-1)?.[2].mayChargeBusy).toBe(false);
     __resetEntryChainSyncForTests();
     localStorage.clear();
     h.growth = "undecodable";
     await syncChainEntry(conn, target());
-    expect(h.entryFromChain.mock.calls[2][2].mayChargeBusy).toBe(true); // fails toward the stricter rule
+    expect(h.entryFromChain.mock.calls.at(-1)?.[2].mayChargeBusy).toBe(true); // fails toward the stricter rule
   });
 });
 
@@ -296,6 +296,11 @@ describe("D1: the no-busy cap the chain compares with", () => {
     await syncChainEntry(conn, target());
     const o = h.entryFromChain.mock.calls[0][2];
     expect(await o.noBusyCap(null)).toEqual({ feeBps: 135n, maxFeeBps: 700n });
+    // E4(a): the matcher context the instruction named is read and handed to the cap (it can lower the worst-case matcher fee)
+    h.resolveArgs.length = 0;
+    await o.noBusyCap(Keypair.generate().publicKey);
+    expect(h.resolveArgs.at(-1)?.matcherCtxData).not.toBeNull();
+    expect(h.resolveArgs.at(-1)?.assetIndex).toBe(0);
   });
 });
 
@@ -352,5 +357,32 @@ describe("D4", () => {
     const before = h.sigCalls;
     await syncChainEntry(conn, target(), () => t + 1_000);
     expect(h.sigCalls).toBe(before); // not retried within the window
+  });
+});
+
+describe("E2: the trader's wallet is walked first (cranks flood the portfolio's own list)", () => {
+  it("a wallet walk that settles is the only walk; its newest signature vouches for the record (re-checked on the WALLET)", async () => {
+    let t = 1_000_000;
+    h.entryFromChain.mockResolvedValue(chain(101_000_000n, "walletTop"));
+    expect(await syncChainEntry(conn, target(), () => t)).toBe("chain");
+    expect(h.entryFromChain).toHaveBeenCalledTimes(1);
+    expect(h.entryFromChain.mock.calls[0][2].walkAddress.toBase58()).toBe(WALLET);
+    t += VERIFY_MS;
+    h.sigs = ["walletTop"];
+    const calls = (conn as unknown as { getSignaturesForAddress: ReturnType<typeof vi.fn> }).getSignaturesForAddress;
+    calls.mockClear();
+    await syncChainEntry(conn, target(), () => t);
+    expect(calls.mock.calls[0][0].toBase58()).toBe(WALLET); // not the portfolio: crank transactions would change its newest signature every minute
+    expect(h.entryFromChain).toHaveBeenCalledTimes(1);
+  });
+  it("a wallet walk that cannot settle (e.g. a keeper-signed liquidation is not on its list) falls back to the portfolio walk, which decides", async () => {
+    h.entryFromChain
+      .mockResolvedValueOnce({ verdict: "mismatch", entry: null, txRead: 4 })
+      .mockResolvedValueOnce(chain(99_000_000n, "pfTop"));
+    expect(await syncChainEntry(conn, target())).toBe("chain");
+    expect(h.entryFromChain).toHaveBeenCalledTimes(2);
+    expect(h.entryFromChain.mock.calls[0][2].walkAddress).toBeDefined();
+    expect(h.entryFromChain.mock.calls[1][2].walkAddress).toBeUndefined();
+    expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(99_000_000n);
   });
 });

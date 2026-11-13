@@ -30,6 +30,8 @@ interface Attempt {
   ts: number;
   /** The portfolio's newest signature when a "chain" attempt read it: the record is vouched for only while it is still the newest. */
   topSig?: string;
+  /** Whose newest signature `topSig` is: the trader's wallet (its walk found the position) or the portfolio. */
+  src?: "wallet" | "portfolio";
 }
 
 const memory = new Map<string, Attempt>();
@@ -160,9 +162,9 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   if (markedWithoutSig(t) || chainSyncHeld(t.slab, now())) return;
   const prior = readAttempt(pk);
   if (prior && prior.verdict === "chain" && prior.q === t.qNow.toString() && prior.topSig) {
-    // A chain record is only vouched for while the portfolio's newest signature is the one it was read at.
+    // A chain record is only vouched for while the newest signature of the address it was read from (wallet or portfolio) is the one it was read at.
     try {
-      const latest = await connection.getSignaturesForAddress(t.portfolio, { limit: 1 }, "confirmed");
+      const latest = await connection.getSignaturesForAddress(prior.src === "wallet" ? new PublicKey(t.wallet) : t.portfolio, { limit: 1 }, "confirmed");
       if (latest.length > 0 && latest[0].signature === prior.topSig) {
         writeAttempt(pk, { ...prior, ts: now() });
         return;
@@ -177,7 +179,22 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
     writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now() });
     return;
   }
-  const r = await entryFromChain(connection, t.wrapper, { market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, qNow: t.qNow, baseFeeBps: facts.baseFeeBps, mayChargeBusy: facts.mayChargeBusy, noBusyCap: (ctx) => noBusyCapFor(connection, facts, t.assetIndex ?? 0, ctx) });
+  const base = { market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, qNow: t.qNow, baseFeeBps: facts.baseFeeBps, mayChargeBusy: facts.mayChargeBusy, noBusyCap: (ctx: PublicKey | null) => noBusyCapFor(connection, facts, t.assetIndex ?? 0, ctx) };
+  // The trader's wallet signs every trade but not the keeper's cranks, which fill a trader portfolio's own list: walk the wallet first so the
+  // budget goes to real fills. When that walk cannot settle (unreadable / incomplete / sizes do not add up, e.g. a keeper-signed liquidation is not
+  // on the wallet's list), the portfolio walk decides. A wallet result that is "chain" has to add up to the chain's size exactly, like any other.
+  let src: "wallet" | "portfolio" = "wallet";
+  let walletKey: PublicKey | null = null;
+  try {
+    walletKey = new PublicKey(t.wallet);
+  } catch {
+    walletKey = null;
+  }
+  let r = walletKey ? await entryFromChain(connection, t.wrapper, { ...base, walkAddress: walletKey }) : null;
+  if (!r || (r.verdict !== "chain" && r.verdict !== "unexplained")) {
+    src = "portfolio";
+    r = await entryFromChain(connection, t.wrapper, base);
+  }
   // An "unknown" marker stands for as long as the position it was written for does. The walk can tell: when that fill is not part of the current
   // position any more (closed and reopened elsewhere, even at the same size), the marker is retired and the rebuild goes on. Otherwise nothing is
   // ever saved over it.
@@ -216,7 +233,7 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   // A record the chain wrote earlier that the chain can no longer vouch for (newer signature, and now unknown / unexplained / mismatched) is
   // removed rather than shown as exact. An unreadable chain proves nothing, so it stays.
   if (verdict !== "chain" && verdict !== "unreadable" && stale?.chainSig) clearEntryPrice(t.slab, t.idx, t.wallet);
-  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}) });
+  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig, src } : {}) });
 }
 
 export function __resetEntryChainSyncForTests(): void {
