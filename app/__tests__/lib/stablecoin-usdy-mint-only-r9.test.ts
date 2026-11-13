@@ -14,7 +14,6 @@ const MEMECOIN = "CbcyNo7m1amFWqEQm2m4PLv1UNvpcL3C1Ujm6AkzpKoU";
 const USDY_MINT = "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6";
 const STILL_BY_MINT: Record<string, string> = {
   sUSDe: "Eh6XEPhSwoLv5wFApukmnaVSHQ6sAnoD9BmgmwQoN2sN",
-  sDAI: "", // no Solana mint listed; covered by the ticker rule below
   USDu: "9ckR7pPPvyPadACDTzLwK2ZAEeUJ3qGSnzPs8bVaHrSy",
   sUSD: "susdabGDNbhrnCa6ncrYo81u4s9GM8ecK2UwMyZiq4X",
   syrupUSDC: "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
@@ -45,7 +44,7 @@ describe("USDY is mint-only (r9)", () => {
     for (const [sym, mint] of Object.entries(STILL_BY_MINT)) {
       if (mint) expect(isStablecoinPerpBlocked(mint), sym).toBe(true);
     }
-    for (const symbol of ["sUSDe", "sDAI", "USDC", "USDT"]) expect(isStablecoinPerpBlocked(MEMECOIN, { symbol }), symbol).toBe(true);
+    for (const symbol of ["sUSDe", "USDC", "USDT"]) expect(isStablecoinPerpBlocked(MEMECOIN, { symbol }), symbol).toBe(true);
     expect(STABLECOIN_MINT_LIST.length).toBe(52);
   });
 });

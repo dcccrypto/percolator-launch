@@ -57,13 +57,19 @@ const STABLE_TICKERS = ["USDC", "USDT", "PYUSD", "USDS", "FDUSD", "USDE", "USDG"
  * r9 (owner decision 2026-11-12): USDY joins them. An unrelated memecoin uses the exact ticker USDY, so Ondo USDY is blocked by its
  * verified mint only (A1KLoBrK..., in STABLECOIN_MINT_LIST); the bare ticker and bare name "USDY" are no longer refused, and the
  * qualified name "Ondo US Dollar Yield" still is.
+ * r10 (owner decision 2026-11-13): sDAI (Savings Dai) is handled the same way. No genuine Solana mint of it exists (Jupiter, CoinGecko
+ * platforms and the bridge lists show only Ethereum / Base / Optimism), while unrelated memecoins use the exact ticker SDAI. So the exact
+ * ticker SDAI (any case, "$sDAI") is exempt from the S-prefix rule below and no longer refused. DAI and every other DAI wrapper (wDAI,
+ * aDAI, stDAI, ...) stay refused. The qualified name "Savings Dai" stays refused: it is the issuer's full product name, not a word a
+ * memecoin ticker collides with, and refusing it only affects a token that calls itself exactly that. If a real Solana sDAI mint ever
+ * appears, add it to STABLECOIN_MINT_LIST (and the keeper copy) after on-chain + independent verification.
  */
 const EXACT_ONLY_TICKERS: ReadonlySet<string> = new Set(["ACUSD", "EUSX", "GHO", "FRAX", "TUSD", "BUSD"]);
 /** Wrapper / bridge prefixes (s = staked, w = wrapped, a = aave / allbridge, ae/ap/ab/ac/aa = Allbridge chains, j/jl = Jupiter lend, ...). */
 const WRAP_PREFIXES = ["W", "S", "B", "A", "X", "J", "JL", "ST", "AE", "AP", "AB", "AC", "AA"];
 /** Bridge suffixes (Portal: et / po / bs / av / so, and the ".e" form which normalises to a trailing E for USDC / USDT only). */
 const WRAP_SUFFIXES = ["ET", "PO", "BS", "AV", "SO"];
-const STABLE_SYMBOL_RE = new RegExp(`^(?:${WRAP_PREFIXES.join("|")})?(?:${STABLE_TICKERS.join("|")})(?:${WRAP_SUFFIXES.join("|")})?$|^(?:USDC|USDT)E$|^UST$`); // UST exact only: a wrapper prefix would hit JUST / BUST / AUST etc.
+const STABLE_SYMBOL_RE = new RegExp(`^(?!SDAI$)(?:${WRAP_PREFIXES.join("|")})?(?:${STABLE_TICKERS.join("|")})(?:${WRAP_SUFFIXES.join("|")})?$|^(?:USDC|USDT)E$|^UST$`); // SDAI exempt (r10, see EXACT_ONLY_TICKERS note); UST exact only: a wrapper prefix would hit JUST / BUST / AUST etc.
 
 const NAME_PHRASES = [
   "usd coin", "usdc", "tether usd", "tether usdt", "usdt", "tether", "paypal usd", "pyusd", "first digital usd", "fdusd", "global dollar", "usdg",

@@ -61,7 +61,7 @@ describe("BOLD / USX / CASH are mint-only", () => {
 
 describe("sUSDe / USDY / sDAI stay blocked", () => {
   it("by symbol, name and mint (USDY: mint and qualified name only, r9)", () => {
-    for (const symbol of ["sUSDe", "sDAI", "SDAI", "sdai"]) expect(isStablecoinPerpBlocked(MEMECOIN, { symbol }), symbol).toBe(true);
+    for (const symbol of ["sUSDe"]) expect(isStablecoinPerpBlocked(MEMECOIN, { symbol }), symbol).toBe(true);
     for (const name of ["Staked USDe", "Ondo US Dollar Yield", "Savings Dai", "savings dai"]) expect(isStablecoinPerpBlocked(MEMECOIN, { symbol: "ZZZ", name }), name).toBe(true);
     for (const addr of ["Eh6XEPhSwoLv5wFApukmnaVSHQ6sAnoD9BmgmwQoN2sN", "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"]) expect(isStablecoinPerpBlocked(addr), addr).toBe(true);
   });
@@ -92,7 +92,7 @@ describe("server: non-stable mint with a BOLD / USX / CASH ticker is accepted", 
   it.each(["BOLD", "USX", "CASH"])("client-supplied symbol %s does not add a refusal", async (symbol) => {
     expect((await checkStablecoinUnderlying({ mainnetCa: mint, symbol, conn: metaConn("Some Coin", "SOME") })).ok).toBe(true);
   });
-  it.each([["sUSDe", "Staked USDe"], ["USDY", "Ondo US Dollar Yield"], ["sDAI", "Savings Dai"]])("on-chain %s is still refused", async (symbol, name) => {
+  it.each([["sUSDe", "Staked USDe"], ["USDY", "Ondo US Dollar Yield"], ["ZZZ", "Savings Dai"]])("on-chain %s is still refused", async (symbol, name) => {
     expect(await checkStablecoinUnderlying({ mainnetCa: mint, conn: metaConn(name, symbol) })).toEqual({ ok: false, kind: "stablecoin" });
   });
   it.each([USX_MINT, CASH_MINT, SUSD_MINT, SYRUP_MINT])("mint %s is refused by address on the server", async (m) => {

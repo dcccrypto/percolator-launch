@@ -15,14 +15,16 @@
  * launches for them, which are deliberately NOT listed): GHO, TUSD, BUSD, USDT0, RLUSD and USDtb are covered by the ticker / name rule in
  * ./stablecoin-perps. BOLD, USX, CASH and (r9) USDY are NOT ticker-blocked (unrelated memecoins use those exact tickers): USX, CASH and USDY
  * are blocked by their verified mint below, and BOLD has no Solana mint so it is not blocked at all until one is verified (only the full name
- * "Liquity BOLD" / "Liquity USD" is refused).
+ * "Liquity BOLD" / "Liquity USD" is refused). The same holds for sDAI (r10): no Solana mint of Savings Dai exists (checked Jupiter, CoinGecko
+ * platforms, bridge lists, 2026-11-13), the exact ticker SDAI is used by unrelated memecoins, so it is not ticker-blocked; only the full
+ * name "Savings Dai" is refused.
  *
  * 52 entries: 32 (2026-11-10) + 7 (r7, 2026-11-11, #3798) + 2 (r8, 2026-11-11: sUSD, syrupUSDC) + 11 (r8 Council finding, 2026-11-11: USDu, sUSDu,
  * USDGO, USDP, sUSDai, USDv, DUSD, wYLDS, PST, XO, SOFID). The keeper copy
  * (percolator-oracle-keeper src/cross-cluster/stablecoin-mints.ts) must hold the same 52 addresses.
  *
  * Policy: USD only. EURC and other non-USD fiat stables are NOT blocked. Yield-bearing / NAV-accruing USD tokens (sUSDe, USDY)
- * ARE blocked (sUSDe, USDY, sDAI, and the r8 additions sUSD, syrupUSDC, sUSDu, sUSDai, wYLDS and PST): their price is a deterministic accrual on a dollar, so a perp on them has no independent underlying.
+ * ARE blocked (sUSDe, USDY, and the r8 additions sUSD, syrupUSDC, sUSDu, sUSDai, wYLDS and PST): their price is a deterministic accrual on a dollar, so a perp on them has no independent underlying.
  * Devnet: the app's USDC-like devnet mints (Sim-USDC, Circle devnet USDC) are collateral, never a perp underlying
  * identity (`mainnet_ca`), and were not in the original list, so they are intentionally not here.
  */
