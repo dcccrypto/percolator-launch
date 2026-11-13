@@ -9,7 +9,7 @@ import { useEffect } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { lotExpOfStrict, setLotExpLoader } from "@/lib/v22/lot-registry";
+import { lotExpOfStrict, observeLotExp, setLotExpLoader } from "@/lib/v22/lot-registry";
 
 export function LotExpLoaderBridge(): null {
   const { connection } = useConnectionCompat();
@@ -17,7 +17,12 @@ export function LotExpLoaderBridge(): null {
     if (!isDevnetV22Enabled()) return;
     setLotExpLoader(async (slab) => {
       const info = await connection.getAccountInfo(new PublicKey(slab), "confirmed");
-      return info?.data ? lotExpOfStrict(new Uint8Array(info.data)) : null;
+      if (!info?.data) return null;
+      const bytes = new Uint8Array(info.data);
+      // r10 (#3821 LOW-3): the same bytes give the exponent AND the holding-fee flag, so a surface that only has the loader never sees one
+      // without the other (an unseen market answers "may apply" and would hide the trade result on every normal market).
+      observeLotExp(slab, bytes);
+      return lotExpOfStrict(bytes);
     });
     return () => setLotExpLoader(null);
   }, [connection]);
