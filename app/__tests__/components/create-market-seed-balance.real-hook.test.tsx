@@ -1,7 +1,9 @@
 /**
  * R10 (Council r9 creator, low): the wizard showed seed 3,100 USDC, wallet 400, and HOLD TO LAUNCH was enabled with no
- * warning. HOLD is now off with "You need N USDC to seed this market; your wallet has M." (+ the faucet link on devnet)
- * while the wallet is short, off while the balance is being read or could not be read (with Retry), and on once funded.
+ * warning. The launch tops a short wallet up itself (/api/devnet-pre-fund), so: short + top-up available = HOLD on with a
+ * plain note; short + top-up can't be confirmed = HOLD on, the note says so; short + top-up known unavailable = HOLD off
+ * with "You need N USDC to seed this market; your wallet has M." (+ the faucet link only if /faucet would allow a claim);
+ * balance unread / unreadable = HOLD off (with Retry); funded = HOLD on.
  * Same real-wizard harness as create-market-live-price-limit.real-hook.test.tsx.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -54,6 +56,11 @@ globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
     return g.__resolveReply ? g.__resolveReply() : json(RESOLVE_BODY);
   }
   // E2E B21: the pool search classifies candidates by mainnet owner; this pool is DLMM.
+  if (url.startsWith("/api/devnet-pre-fund?")) {
+    const gp = globalThis as { __preFund?: { status: number; body: unknown } | "throw" };
+    if (gp.__preFund === "throw") throw new Error("offline");
+    return json(gp.__preFund?.body ?? { known: true, preFund: { available: true, nextClaimAt: null }, faucet: null }, gp.__preFund?.status ?? 200);
+  }
   if (url === "/api/dex/classify-pools") {
     const body = JSON.parse(String(init?.body ?? "{}")) as { addresses?: string[] };
     return json({ classes: Object.fromEntries((body.addresses ?? []).map((a) => [a, "meteora-dlmm"])) });
@@ -156,11 +163,13 @@ async function balanceBecomes(sol: number) {
 
 
 describe("seed balance check in the wizard", () => {
+  const setPreFund = (v: { status: number; body: unknown } | "throw" | undefined) => { (globalThis as { __preFund?: unknown }).__preFund = v; };
   beforeEach(() => {
     create.mockReset(); localStorage.clear(); sessionStorage.clear();
     fetchLog.length = 0; gateResolve = deferred(); gateDex = deferred();
     g0.__lamports = 100e9;
     createState = IDLE;
+    setPreFund(undefined);
     bal.balance = 10n ** 15n; bal.readFailed = false; bal.retry.mockReset();
     (globalThis as { __noWallet?: boolean }).__noWallet = false;
     (window.matchMedia as unknown as ReturnType<typeof vi.fn>).mockImplementation((q: string) => ({
@@ -168,10 +177,31 @@ describe("seed balance check in the wizard", () => {
       addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false, onchange: null,
     }));
   });
-  afterEach(() => { g0.__lamports = undefined; });
+  afterEach(() => { g0.__lamports = undefined; setPreFund(undefined); });
 
-  it("short wallet: HOLD is off, the shortfall line names both numbers, the faucet link is there, nothing launches", async () => {
+  it("short, top-up available: HOLD stays on and the note says the launch adds the missing amount", async () => {
     bal.balance = 400_000_000n; // 400 USDC
+    setPreFund({ status: 200, body: { known: true, preFund: { available: true, nextClaimAt: null }, faucet: { available: true, nextClaimAt: null } } });
+    await reachStep2();
+    await waitFor(() => expect(screen.getByTestId("seed-notice").textContent).toMatch(/Your wallet has 400 USDC\. The launch adds the missing [\d,]+ test USDC first\./));
+    expect(launchBtn().disabled).toBe(false);
+    expect(screen.getByTestId("seed-notice").querySelector("a")).toBeNull();
+    await act(async () => { fireEvent.mouseDown(launchBtn()); });
+    await flush();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("short, top-up can't be confirmed (status read fails): HOLD stays on, the note says it can't confirm", async () => {
+    bal.balance = 400_000_000n;
+    setPreFund("throw");
+    await reachStep2();
+    await waitFor(() => expect(screen.getByTestId("seed-notice").textContent).toMatch(/can't confirm/));
+    expect(launchBtn().disabled).toBe(false);
+  });
+
+  it("short, top-up known unavailable (1 h window): HOLD off, shortfall line, faucet link when /faucet would allow a claim", async () => {
+    bal.balance = 400_000_000n;
+    setPreFund({ status: 200, body: { known: true, preFund: { available: false, nextClaimAt: "2099-01-01T00:00:00Z" }, faucet: { available: true, nextClaimAt: null } } });
     await reachStep2();
     await waitFor(() => expect(launchBtn().disabled).toBe(true));
     expect(launchBtn().getAttribute("aria-label")).toBe("Not enough USDC to seed");
@@ -181,6 +211,14 @@ describe("seed balance check in the wizard", () => {
     await act(async () => { fireEvent.mouseDown(launchBtn()); });
     await flush();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("short, top-up unavailable and /faucet also refuses: no faucet link", async () => {
+    bal.balance = 400_000_000n;
+    setPreFund({ status: 200, body: { known: true, preFund: { available: false, nextClaimAt: null }, faucet: { available: false, nextClaimAt: "2099-01-01T00:00:00Z" } } });
+    await reachStep2();
+    await waitFor(() => expect(launchBtn().disabled).toBe(true));
+    expect(screen.getByTestId("seed-notice").querySelector("a")).toBeNull();
   });
 
   it("balance still being read: HOLD is off and says so", async () => {
@@ -194,17 +232,17 @@ describe("seed balance check in the wizard", () => {
     bal.balance = null; bal.readFailed = true;
     await reachStep2();
     await waitFor(() => expect(launchBtn().disabled).toBe(true));
-    const note = screen.getByTestId("seed-notice");
-    expect(note.textContent).toMatch(/Could not read your wallet balance/);
+    expect(screen.getByTestId("seed-notice").textContent).toMatch(/Could not read your wallet balance/);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(bal.retry).toHaveBeenCalledTimes(1);
   });
 
-  it("CONTROL: a funded wallet gets an enabled HOLD and no notice", async () => {
+  it("CONTROL: a funded wallet gets an enabled HOLD, no notice, and never asks the top-up status", async () => {
     await reachStep2();
     await flush();
     expect(launchBtn().disabled).toBe(false);
     expect(screen.queryByTestId("seed-notice")).toBeNull();
+    expect(fetchLog.some((u) => u.startsWith("/api/devnet-pre-fund"))).toBe(false);
     await act(async () => { fireEvent.mouseDown(launchBtn()); });
     await flush();
     expect(create).toHaveBeenCalledTimes(1);

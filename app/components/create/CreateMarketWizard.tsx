@@ -13,7 +13,8 @@ import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSolBalance } from "@/hooks/useSolBalance";
 import { useCollateralBalance } from "@/hooks/useCollateralBalance";
-import { checkSeedBalance, seedCheckMessage } from "@/lib/create-seed-check";
+import { usePreFundStatus } from "@/hooks/usePreFundStatus";
+import { checkSeedBalance, decideSeed } from "@/lib/create-seed-check";
 import {
   useCreateMarket,
   wizardSlabBytes,
@@ -572,16 +573,19 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   const devnetFaucetCeilingExceeded =
     isDevnet && !mockBypass && totalTokensRequired > MAX_FUNDABLE_REQUIREMENT;
 
-  // R10: the wallet must hold the seed the launch takes. On devnet the launch tops the wallet up from the faucet, but that
-  // is a once-a-day claim that can refuse, so a short wallet is told up front (and HOLD stays off) instead of failing
-  // part-way. Not for a resume (the earlier steps already took their share) or mock mode.
+  // R10: does the wallet hold the seed the launch takes? On devnet the launch itself tops the wallet up first
+  // (/api/devnet-pre-fund mints the shortfall, one top-up per wallet per hour; a refused top-up ends the launch before
+  // anything is sent). So a short wallet only blocks HOLD when that top-up is known not to be available, and a balance
+  // that is unread or unreadable never lets HOLD on silently (lib/create-seed-check.ts). Not for a resume (the earlier
+  // steps already took their share) or mock mode.
   const resumingForSeed = resumeFromStep !== null || chainResume !== null;
   const seedCheckOn = isDevnet && !mockBypass && !resumingForSeed;
   const collateralBal = useCollateralBalance(publicKey, connection, collateralMintAddress, seedCheckOn);
   const seedCheck = seedCheckOn
     ? checkSeedBalance({ balanceAtoms: collateralBal.balance, readFailed: collateralBal.readFailed, needAtoms: totalTokensRequired })
     : ({ kind: "ok" } as const);
-  const seedCheckText = seedCheckMessage(seedCheck, collateralSymbol, decimals);
+  const topUp = usePreFundStatus(publicKey?.toBase58(), collateralMintAddress, seedCheck.kind === "short");
+  const seedVerdict = decideSeed(seedCheck, topUp, collateralSymbol, decimals);
 
   // Build oracle feed for create — also used below to gate launch on a real price
   // being available (no on-chain InitMarket call should ever ship a priceE6 of 0).
@@ -834,7 +838,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   const atLivePriceLimit = blocksNewLaunch(livePriceLimit, { keeperPriced: resolvedOracleType === "keeper", resuming: resumingLaunch });
   // A NEW stablecoin launch never starts; continuing one that already started (its market exists) stays the creator's call.
   const stablecoinLaunchBlocked = stablecoinBlocked && !resumingLaunch;
-  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null || v22Issue !== null || tierIssue !== null || decimalsIssue !== null || atLivePriceLimit || stablecoinLaunchBlocked || seedCheck.kind !== "ok";
+  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null || v22Issue !== null || tierIssue !== null || decimalsIssue !== null || atLivePriceLimit || stablecoinLaunchBlocked || seedVerdict.blocked;
   const launchDisabledReason: string | undefined = !publicKey
     ? "Connect wallet"
     : stablecoinLaunchBlocked
@@ -883,13 +887,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
                   ? `Devnet faucet caps a launch at ${(Number(MAX_FUNDABLE_REQUIREMENT) / 10 ** decimals).toLocaleString()} ${collateralSymbol} — reduce LP collateral`
                   : !skipTokenBalanceCheck && (!hasTokens || !hasSufficientTokensForSeed)
                     ? "Insufficient token balance"
-                    : seedCheck.kind === "short"
-                      ? `Not enough ${collateralSymbol} to seed`
-                      : seedCheck.kind === "checking"
-                        ? "Checking balance"
-                        : seedCheck.kind === "unknown"
-                          ? "Balance unknown"
-                          : undefined;
+                    : seedVerdict.holdReason;
 
   // Demo-launch state machine. When mockBypass is on and the user clicks
   // LAUNCH MARKET, fake the 5-step deploy progress over ~3 seconds, then
@@ -1063,7 +1061,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // Returns false when it stopped before calling create() (nothing started), so a caller holding a one-shot guard can re-arm it.
   const launch = (withoutBond: boolean): boolean => {
     if (!allValid || !oracleSettled || !publicKey) return false;
-    if (seedCheck.kind !== "ok") return false;
+    if (seedVerdict.blocked) return false;
     // #3320: the button is disabled at a known limit; this keeps any other caller of handleLaunch
     // from building a transaction for a market that would be refused a live price.
     if (atLivePriceLimit) return false;
@@ -1702,8 +1700,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
             launchDisabled={launchDisabled}
             launchDisabledReason={launchDisabledReason}
             seedNotice={
-              seedCheckText
-                ? { message: seedCheckText, faucetHref: seedCheck.kind === "short" ? "/faucet" : undefined, onRetry: seedCheck.kind === "unknown" ? collateralBal.retry : undefined }
+              seedVerdict.notice
+                ? { message: seedVerdict.notice.message, faucetHref: seedVerdict.notice.faucetHref, onRetry: seedVerdict.notice.retry === "balance" ? collateralBal.retry : undefined }
                 : undefined
             }
             instantLaunch={mockBypass}
