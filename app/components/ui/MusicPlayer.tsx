@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { usePathname } from "next/navigation";
-import gsap from "gsap";
+import { withGsap } from "@/lib/gsap-lazy";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 /* ─── Inline SVG Icons ─── */
@@ -170,7 +170,9 @@ export function MusicPlayer() {
     if (prefersReduced) {
       el.style.opacity = "1";
     } else {
-      gsap.fromTo(el, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" });
+      return withGsap((gsap) => {
+        gsap.fromTo(el, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" });
+      });
     }
   }, [prefersReduced]);
 

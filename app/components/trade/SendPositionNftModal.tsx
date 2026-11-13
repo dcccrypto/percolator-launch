@@ -3,7 +3,7 @@
 import { FC, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PublicKey } from "@solana/web3.js";
-import gsap from "gsap";
+import { withGsap } from "@/lib/gsap-lazy";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
@@ -126,8 +126,10 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
     const overlay = overlayRef.current;
     const modal = modalRef.current;
     if (!overlay || !modal) return;
-    gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.15 });
-    gsap.fromTo(modal, { opacity: 0, scale: 0.98 }, { opacity: 1, scale: 1, duration: 0.18, ease: "power2.out" });
+    return withGsap((gsap) => {
+      gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.15 });
+      gsap.fromTo(modal, { opacity: 0, scale: 0.98 }, { opacity: 1, scale: 1, duration: 0.18, ease: "power2.out" });
+    });
   }, [prefersReduced]);
 
   const body = (

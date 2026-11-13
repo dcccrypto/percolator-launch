@@ -2,7 +2,7 @@
 
 import { FC, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import gsap from "gsap";
+import { withGsap } from "@/lib/gsap-lazy";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
@@ -146,8 +146,10 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
       modal.style.opacity = "1";
       modal.style.transform = "scale(1)";
     } else {
-      gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" });
-      gsap.fromTo(modal, { opacity: 0, scale: 0.95 }, { opacity: 1, scale: 1, duration: 0.25, ease: "power2.out" });
+      withGsap((gsap) => {
+        gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" });
+        gsap.fromTo(modal, { opacity: 0, scale: 0.95 }, { opacity: 1, scale: 1, duration: 0.25, ease: "power2.out" });
+      });
     }
 
     // Move initial focus inside the dialog (APG dialog pattern) so Tab starts trapped.
