@@ -53,6 +53,7 @@ import {
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { riskLegFields } from "@/lib/risk-entry";
 import { fundingFields } from "@/lib/funding-flow";
+import { syncChainEntry } from "@/lib/entry-chain-sync";
 
 const MAINNET_STATIC_MARKETS = [
   {
@@ -1603,6 +1604,28 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
       clearInterval(interval);
     };
   }, [enabled]);
+
+  // r10 owner decision 6: an open position this device has no current entry for (another browser, a lost session, a partial close made
+  // elsewhere) gets its Entry rebuilt from the chain's own fills. Bounded and cooled down inside syncChainEntry; the entry lands in the cache
+  // every surface reads, so one rescan afterwards is all the UI needs.
+  useEffect(() => {
+    if (!enabled || !publicKey) return;
+    let cancelled = false;
+    const wallet = publicKey.toBase58();
+    for (const p of positions) {
+      if (!isOpenPosition(p) || !p.adlKnown || p.effectiveSize === 0n || p.nftWrapped || !p.portfolioPk) continue;
+      if (p.entryPriceSource === "cache" || p.entryPriceSource === "server") continue;
+      void syncChainEntry(connection, { slab: p.slabAddress, idx: p.idx, wallet, portfolio: p.portfolioPk, wrapper: p.market.programId, qNow: p.effectiveSize }).then((v) => {
+        if (v === "chain" && !cancelled) {
+          forceNextLoad.current = true;
+          setRefreshCounter((c) => c + 1);
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, connection, publicKey, positions]);
 
   const unknownPnlCount = countUnknownPnl(positions);
   return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, unknownPnlCount, atRiskCount, loading, isRefreshing, error, refresh };
