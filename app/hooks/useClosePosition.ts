@@ -49,6 +49,7 @@ import { clearEntryPrice } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
+import { holdChainSync, setChainSyncHold } from "@/lib/entry-chain-hold";
 import { recordFill } from "@/lib/trade-book";
 import { readFundingSample } from "@/lib/funding-flow";
 import { formatLotPriceE6 } from "@/lib/v22/lot";
@@ -280,6 +281,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
       const userIdx = userAccount?.idx ?? 0;
 
       inflightRef.current = true;
+      holdChainSync(slabAddress, 12 * 60 * 1000); // r10: a close in flight rewrites the entry; no chain rebuild meanwhile (the end of the call shortens it to 30 s)
       setLoading(true);
       setError(null);
       setPhase("submitting");
@@ -691,7 +693,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         if (closeState.alreadyClosed) {
           // An earlier attempt landed (or the position is already flat): nothing was resent. Say so as the close it is.
           setLastSig(sig ?? null);
-          if (closePercent === 100 && (!targetPk || userAccount?.pubkey?.equals(targetPk))) clearEntryPrice(slabAddress, userIdx, publicKey?.toBase58());
+          if (closePercent === 100 && (!targetPk || userAccount?.pubkey?.equals(targetPk))) clearEntryPrice(slabAddress, userIdx, publicKey?.toBase58(), { flat: true });
           toast(COPY.closeDone, "success");
           setPhase("confirming");
           setTimeout(() => setPhase("idle"), 2000);
@@ -723,7 +725,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // The entry store is keyed per wallet+market, not per account: clearing it for a NON-canonical
         // target would erase the entry of the account the market shows by default (#3301).
         if (closePercent === 100 && outcome === "closed" && (!targetPk || userAccount?.pubkey?.equals(targetPk))) {
-          clearEntryPrice(slabAddress, userIdx, publicKey?.toBase58());
+          clearEntryPrice(slabAddress, userIdx, publicKey?.toBase58(), { flat: true });
         }
         // The one confirmation a close gets: every close surface (dock, ticket, portfolio rows) closes
         // its modal on resolve, so without this a partial close just vanished. A clipped fill already
@@ -840,6 +842,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey, targetPk));
         }
         inflightRef.current = false;
+        setChainSyncHold(slabAddress, 30_000); // landed or failed: the entry is written within seconds
         setLoading(false);
       }
     },

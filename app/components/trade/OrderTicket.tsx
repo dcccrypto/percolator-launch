@@ -85,7 +85,8 @@ import { formatTokenAmount, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
-import { saveEntryPrice, clearEntryPrice, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
+import { holdChainSync, setChainSyncHold } from "@/lib/entry-chain-hold";
+import { saveEntryPrice, clearEntryPrice, markUnpricedFill, clearEntryUnknownMark, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
 import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
@@ -273,6 +274,8 @@ function DiffRow({
  * `TradingChart`/`PositionsDock` already documented, no custom comparator
  * needed.
  */
+const TRADE_HOLD_MS = 12 * 60 * 1000; // the longest wait budget (10 min) plus margin
+
 const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { connected: walletConnected, publicKey, wallet: connectedWallet } = useWalletCompat();
   const walletAdapterName = (connectedWallet as { adapter?: { name?: string } } | null | undefined)?.adapter?.name ?? null;
@@ -1505,6 +1508,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
 
     if (mockMode) {
+      holdChainSync(slabAddress, 60_000); // r10: no chain Entry rebuild while this device is writing the entry itself
       setTradePhase("submitting");
       setTimeout(() => { setTradePhase("confirming"); maxPinned.current = null; setMarginInput(""); setSizeInput(""); resetSizeText(); setFundInput(""); }, 800);
       setTimeout(() => setTradePhase("idle"), 2000);
@@ -1546,6 +1550,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const waitAbort = new AbortController();
     waitAbortRef.current = waitAbort;
     const submitPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+    holdChainSync(slabAddress, TRADE_HOLD_MS); // r10: no chain Entry rebuild while this device is writing the entry itself; the landing or an error shortens it to 30 s
     setTradePhase("submitting");
     // Round i: the wait budget follows the estimate (max(2 min, 1.5 x estimate), at most 10 min); one silent retry covers a lag
     // that clears in about a keeper sweep (a 21 right after the approval).
@@ -1647,6 +1652,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // Never "Confirmed!" for a no-op: nothing filled, nothing to save. Offer a smaller size.
         const room = marketMaxQFor(direction);
         const tryQ = room !== null && room > 0n && room < effectiveSize ? room : effectiveSize / 2n;
+        setChainSyncHold(slabAddress, 0); // nothing changed: release the hold
         setResult({ kind: "zero", body: TICKET_COPY.result.zero, sig: sig ?? null, tryQ: tryQ > 0n ? tryQ : null });
         setLastSig(sig ?? null);
         setTradePhase("idle");
@@ -1725,6 +1731,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // (applied below once read); the mark is never the entry of a v2.2 fill.
       const markFillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
       // `fillPriceE6` is the entry the surfaces show (the price paid); `bookedPriceE6` the engine's basis for the same fill (risk math only).
+      setChainSyncHold(slabAddress, 30_000); // the wait is over: the landed fill's entry is written within seconds (measured read, up to 8 s)
       const applyEntryFill = (fillPriceE6: bigint, bookedPriceE6: bigint = fillPriceE6, fillBusyFeeAtoms: bigint | null = 0n) => {
       if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
@@ -1750,7 +1757,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           if (!change) return;
           const next = entryAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillPriceE6 });
           if (next === null) {
-            clearEntryPrice(slab, entryIdx, wallet);
+            clearEntryPrice(slab, entryIdx, wallet, { flat: change.afterQ === 0n });
             return;
           }
           // The same average over the BOOKED prices (the engine's basis) for risk math: an add averages fills, a reduce keeps the basis.
@@ -1781,7 +1788,22 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           if (ef && paid !== null) applyEntryFill(paid, ef.bookedPriceE6, busyFeeAtoms(ef, entryBusyQuoted));
           // The fill could not be read (or its price cannot be split from the fee): keep no entry at all (the position panel then shows an
           // unknown one) rather than the mark or the booked price, which is gross of the spread.
-          else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
+          else if (entryIdx !== null) {
+            const w = publicKey?.toBase58();
+            // r10 decision 2: a fill that WAS read but cannot be priced honestly (busy rate differs from the quote, raised-fee Custom order) is
+            // an explicit "unknown" no other source (the chain rebuild) may fill in. An unreadable fill is not marked: the chain may know it.
+            // The marker is written BEFORE the entry is cleared (another tab must never see a cleared entry without it), from the size this
+            // order should leave, then corrected with the measured size. A reduce never marks.
+            const wrote = ef ? markUnpricedFill(slabAddress, entryIdx, w, sig ?? null, existingPositionSize, existingPositionSize + ef.executedQ) : false;
+            clearEntryPrice(slabAddress, entryIdx, w);
+            if (ef) {
+              const ch = await measured.catch(() => null);
+              if (ch) {
+                const wroteMeasured = markUnpricedFill(slabAddress, entryIdx, w, sig ?? null, ch.beforeQ, ch.afterQ);
+                if (wrote && !wroteMeasured) clearEntryUnknownMark(slabAddress, entryIdx, w);
+              }
+            }
+          }
           // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
           if (ef && publicKey) {
             // The size the chain had BEFORE this fill: the measured change (ADL-effective, read around the trade) is fresher than the
@@ -1816,6 +1838,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         setTradePhase("idle");
       }, 1500);
     } catch (e) {
+      setChainSyncHold(slabAddress, 30_000); // the wait ended in an error: a landed-late trade may still write its entry
       setWaitingLong(false);
       setRaceNote(false);
       setTwoTxNote(false);

@@ -39,6 +39,11 @@ interface EntryRecord {
    * device's own entry for a short window (PENDING_ENTRY_WINDOW_MS); the measured save replaces it (or the window ends and it stops counting).
    */
   pending?: boolean;
+  /**
+   * r10: set only on a record rebuilt from the chain (lib/entry-chain-sync.ts): the portfolio's newest transaction signature when it was read. A
+   * newer signature makes the record unverified (a same-size close + reopen elsewhere), so it is re-checked, never trusted by size alone.
+   */
+  chainSig?: string;
   timestamp: number;
 }
 
@@ -75,21 +80,103 @@ export function saveEntryPrice(
   leverage?: number,
   wallet?: string,
   sizeQ?: bigint,
-  opts?: { bookedPriceE6?: bigint; pending?: boolean; busyFeeAtoms?: bigint | null },
+  opts?: { bookedPriceE6?: bigint; pending?: boolean; busyFeeAtoms?: bigint | null; chainSig?: string },
 ): void {
   try {
     const record: EntryRecord = {
       entryPriceE6: entryPriceE6.toString(),
       ...(opts?.bookedPriceE6 != null && opts.bookedPriceE6 > 0n && opts.bookedPriceE6 !== entryPriceE6 ? { bookedPriceE6: opts.bookedPriceE6.toString() } : {}),
       ...(opts?.busyFeeAtoms != null && opts.busyFeeAtoms >= 0n ? { busyFeeAtoms: opts.busyFeeAtoms.toString() } : {}),
+      ...(opts?.chainSig ? { chainSig: opts.chainSig } : {}),
       ...(opts?.pending && (sizeQ == null || sizeQ === 0n) ? { pending: true } : {}),
       ...(leverage != null && Number.isFinite(leverage) && leverage > 0 ? { leverage } : {}),
       ...(sizeQ != null && sizeQ !== 0n ? { sizeQ: sizeQ.toString() } : {}),
       timestamp: Date.now(),
     };
     localStorage.setItem(key(slab, accountIdx, wallet), JSON.stringify(record));
+    // A real save (this device's own measured fill, a fresh open, a chain rebuild) replaces an "unknown" marker.
+    localStorage.removeItem(unknownKey(slab, accountIdx, wallet));
   } catch {
     // localStorage may be unavailable (SSR, private browsing)
+  }
+}
+
+/**
+ * r10 owner decision 2 (r9 "unknown"): the explicit "this position's Entry is UNKNOWN" marker. The ticket writes it when the fill could not be
+ * priced honestly (the busy rate charged differs from the quoted one, or a raised-fee Custom order), so no later source may fill a number in:
+ * the chain rebuild (lib/entry-chain-sync.ts) never runs for a marked position and never overwrites it. It outlives the `clearEntryPrice` calls
+ * of later trades on the position; a real measured save, or a fresh open from flat on this device, replaces it.
+ */
+const UNKNOWN_PREFIX = "perc:entry-unknown:";
+const unknownKey = (slab: string, accountIdx: number, wallet?: string): string => `${UNKNOWN_PREFIX}${slab}:${accountIdx}${wallet ? `:${wallet}` : ""}`;
+/**
+ * The marker is tied to the size the unpriced open / add left the position at (`sizeQ`, signed effective): it is honoured only while the chain
+ * holds that size, so a later trade (a different size) retires it, and a close to flat clears it (`clearEntryPrice(..., { flat: true })`).
+ */
+/** Did a trade from `beforeQ` to `afterQ` open or add to a position (or flip it)? Only such a fill leaves the Entry unknown when it cannot be priced; a reduce keeps the average it had. */
+export function tradeGrewPosition(beforeQ: bigint, afterQ: bigint): boolean {
+  if (afterQ === 0n) return false;
+  return beforeQ === 0n || (beforeQ > 0n) !== (afterQ > 0n) || absQ(afterQ) > absQ(beforeQ);
+}
+
+/**
+ * The marker's content: the size the unpriced fill left the position at and the signature of that fill. The signature lets the chain rebuild
+ * retire the marker when the position it was about is gone (closed and reopened elsewhere, even at the same size).
+ */
+export interface UnknownMark {
+  sizeQ: bigint;
+  sig: string | null;
+}
+
+export function markEntryUnknown(slab: string, accountIdx: number, wallet: string | undefined, sizeQ: bigint, sig?: string | null): void {
+  try {
+    localStorage.setItem(unknownKey(slab, accountIdx, wallet), JSON.stringify({ sizeQ: sizeQ.toString(), ...(sig ? { sig } : {}), ts: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Marks the position unknown after a fill that was READ but could not be priced, only when the fill opened or added (a reduce keeps the average
+ * it had). Returns whether a marker was written. Called BEFORE the entry is cleared with the size the order should leave (so another tab never
+ * sees a cleared entry without a marker), and again with the measured size.
+ */
+export function markUnpricedFill(slab: string, accountIdx: number, wallet: string | undefined, sig: string | null, beforeQ: bigint, afterQ: bigint): boolean {
+  if (!tradeGrewPosition(beforeQ, afterQ)) return false;
+  markEntryUnknown(slab, accountIdx, wallet, afterQ, sig);
+  return true;
+}
+
+/** The marker standing for `currentQ`, or null; a marker for another size is stale and is removed. */
+export function getEntryUnknownMark(slab: string, accountIdx: number, wallet: string | undefined, currentQ: bigint): UnknownMark | null {
+  try {
+    const raw = localStorage.getItem(unknownKey(slab, accountIdx, wallet));
+    if (raw === null) return null;
+    let size: string | null = null;
+    let sig: string | null = null;
+    try {
+      const j = JSON.parse(raw) as { sizeQ?: unknown; sig?: unknown };
+      size = typeof j.sizeQ === "string" ? j.sizeQ : null;
+      sig = typeof j.sig === "string" ? j.sig : null;
+    } catch {
+      size = null;
+    }
+    if (size !== null && size === currentQ.toString()) return { sizeQ: currentQ, sig };
+    localStorage.removeItem(unknownKey(slab, accountIdx, wallet));
+    return null;
+  } catch {
+    return null;
+  }
+}
+/** True while the marker stands for `currentQ`. */
+export function isEntryMarkedUnknown(slab: string, accountIdx: number, wallet: string | undefined, currentQ: bigint): boolean {
+  return getEntryUnknownMark(slab, accountIdx, wallet, currentQ) !== null;
+}
+export function clearEntryUnknownMark(slab: string, accountIdx: number, wallet?: string): void {
+  try {
+    localStorage.removeItem(unknownKey(slab, accountIdx, wallet));
+  } catch {
+    // ignore
   }
 }
 
@@ -135,6 +222,8 @@ export interface SavedEntry {
   bookedPriceE6: bigint;
   /** The busy-side fee paid at open for the WHOLE position `sizeQ` (atoms); null = unknown (see EntryRecord.busyFeeAtoms). */
   busyFeeAtoms: bigint | null;
+  /** r10: the portfolio signature a chain-rebuilt record was read at (null = a record this device wrote itself). */
+  chainSig: string | null;
   /** A fresh size-less save from the fill that has not been measured yet (see EntryRecord.pending). Always false once the window has passed. */
   pending: boolean;
 }
@@ -186,7 +275,7 @@ export function getSavedEntry(slab: string, accountIdx: number, wallet?: string)
     }
     const sized = sizeQ !== null && sizeQ !== 0n;
     const fresh = typeof record.timestamp === "number" && Date.now() - record.timestamp >= 0 && Date.now() - record.timestamp < PENDING_ENTRY_WINDOW_MS;
-    return { entryPriceE6, leverage, sizeQ: sized ? sizeQ : null, bookedPriceE6, busyFeeAtoms, pending: !sized && record.pending === true && fresh };
+    return { entryPriceE6, leverage, sizeQ: sized ? sizeQ : null, bookedPriceE6, busyFeeAtoms, chainSig: typeof record.chainSig === "string" ? record.chainSig : null, pending: !sized && record.pending === true && fresh };
   } catch {
     return null;
   }
@@ -287,9 +376,11 @@ export function busyFeeAfterTrade(a: {
 }
 
 /** Clear saved entry price (call when position is fully closed). */
-export function clearEntryPrice(slab: string, accountIdx: number, wallet?: string): void {
+export function clearEntryPrice(slab: string, accountIdx: number, wallet?: string, opts?: { flat?: boolean }): void {
   try {
     localStorage.removeItem(key(slab, accountIdx, wallet));
+    // A close to flat ends the position the "unknown" marker was about.
+    if (opts?.flat) localStorage.removeItem(unknownKey(slab, accountIdx, wallet));
   } catch {
     // ignore
   }

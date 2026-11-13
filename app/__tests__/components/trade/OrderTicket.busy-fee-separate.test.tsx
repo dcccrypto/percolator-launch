@@ -60,7 +60,8 @@ import { modeFixtures } from "../../helpers/v22-fixtures";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { effectivePriceE6, execFillFromLogs } from "@/lib/v22/exec-fill";
 import { OrderTicket } from "@/components/trade/OrderTicket";
-import { getSavedEntry } from "@/lib/entry-price";
+import { getSavedEntry, isEntryMarkedUnknown, tradeGrewPosition } from "@/lib/entry-price";
+import { chainSyncHeld, __resetChainSyncHoldsForTests } from "@/lib/entry-chain-hold";
 // Round 10: these pin the fee PARTS (what is added once, never twice); the display margin has its own tests (spread-size-aware).
 vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "0");
 
@@ -78,6 +79,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   localStorage.clear();
+  __resetChainSyncHoldsForTests();
   mocks.change = null;
   mocks.quoteBps = 23;
   mocks.utilBps = 0n;
@@ -172,5 +174,47 @@ describe("the saved Entry is the fill price, not the fill price plus the busy-si
     // ~23 bps above the booked price (not ~223)
     expect(Number(entry - BOOKED) / Number(BOOKED)).toBeLessThan(0.0025);
     expect(Number(entry - BOOKED) / Number(BOOKED)).toBeGreaterThan(0.0020);
+  });
+
+  it("DECISION 2 (r10): the busy rate CHARGED (205 bps) differs from the quoted one (200): no Entry, and an explicit 'unknown' marker the chain rebuild respects", async () => {
+    mocks.utilBps = 200n;
+    const FILLED = 4_166_666n;
+    const BOOKED = 100_000_000n;
+    const base = decodeMarketEngineView(new Uint8Array(modeFixtures().market))!.tradeFeeBaseBps;
+    const notional = (FILLED * BOOKED) / 1_000_000n;
+    const fee = (notional * (base + 23n + 205n)) / 10_000n;
+    const logs = fillEventLogs(WALLET, new PublicKey(SLAB), [{ flags: 8, requestedQ: FILLED, executedQ: FILLED, priceE6: BOOKED, quotedPriceE6: BOOKED + 230_000n, feeAtoms: fee }]);
+    mocks.change = { beforeQ: 0n, afterQ: FILLED };
+    mocks.getTransaction.mockResolvedValue({ meta: { err: null, logMessages: logs } });
+    withPosition(0n);
+    render(<OrderTicket slabAddress={SLAB} />);
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    // E4(c): the marker must already stand when the entry is cleared (another tab must never see a cleared entry without it)
+    const markerAtClear: boolean[] = [];
+    const realRemove = localStorage.removeItem.bind(localStorage);
+    const spy = vi.spyOn(localStorage, "removeItem").mockImplementation((k: string) => {
+      if (k.startsWith("perc:entry:")) markerAtClear.push(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${W}`) !== null);
+      return realRemove(k);
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-confirm")); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    spy.mockRestore();
+    expect(markerAtClear.length).toBeGreaterThan(0);
+    expect(markerAtClear.every(Boolean)).toBe(true);
+    expect(getSavedEntry(SLAB, 0, W)).toBeNull();
+    expect(isEntryMarkedUnknown(SLAB, 0, W, FILLED)).toBe(true); // tied to the size the unpriced open left
+    expect(chainSyncHeld(SLAB)).toBe(true); // the 30 s post-landing hold (the wait budget's long hold is shortened, not dropped)
+  });
+});
+
+describe("N2: only an open or add that could not be priced leaves the Entry unknown", () => {
+  it("tradeGrewPosition: open, add and flip yes; reduce and close no", () => {
+    expect(tradeGrewPosition(0n, 5n)).toBe(true);
+    expect(tradeGrewPosition(5n, 8n)).toBe(true);
+    expect(tradeGrewPosition(5n, -2n)).toBe(true);
+    expect(tradeGrewPosition(5n, 3n)).toBe(false);
+    expect(tradeGrewPosition(-5n, -3n)).toBe(false);
+    expect(tradeGrewPosition(5n, 0n)).toBe(false);
   });
 });
