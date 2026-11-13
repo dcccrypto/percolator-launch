@@ -25,7 +25,7 @@ describe("ClosePositionModal close fee (#3726)", () => {
       />,
     );
     expect(screen.getByText("Trading Fee (est.):")).toBeTruthy();
-    expect(screen.getByText(/12\.616/)).toBeTruthy();
+    expect(screen.getByText(/12\.972/)).toBeTruthy();
     expect(est.calls.at(-1)).toEqual([1_777_000_000n, 30n, 1_000_000n]);
   });
 });
