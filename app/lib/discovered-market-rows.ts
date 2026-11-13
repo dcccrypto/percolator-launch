@@ -332,9 +332,12 @@ export async function discoverMarketsOnChain(
 // read, a getProgramAccounts discovery, a getMultipleAccountsInfo and the LP-capital reads. The preview is
 // cookie-gated, so the CDN's s-maxage does not collapse those requests. Now an instance re-reads at most once
 // per DISCOVERED_ROWS_MEMO_MAX_MS (never longer than MARKET_ROWS_MEMO_MS, so MARKET_ROWS_MEMO_MS=0 turns
-// both memos off), and concurrent callers share the one in-flight read. 5 s matches the route's own
-// `s-maxage=5`, so a row is never older than the response header already allows.
+// both memos off), and concurrent callers share the one in-flight read. The windows mirror the route's own
+// `s-maxage=5, stale-while-revalidate=20`: a copy younger than 5 s is served as is; one 5-25 s old is served
+// while ONE background read refreshes it (so a caller never waits on the RPC fan-out while a recent copy
+// exists); older than that, the caller waits for a fresh read. A row is never older than the header allows.
 const DISCOVERED_ROWS_MEMO_MAX_MS = 5_000;
+const DISCOVERED_ROWS_STALE_MS = 20_000;
 
 function discoveredRowsMemoTtlMs(): number {
   const raw = process.env.MARKET_ROWS_MEMO_MS;
@@ -360,8 +363,9 @@ export function resetDiscoveredRowsCache(): void {
  * The discovered rows /api/markets serves when Supabase is not configured (see the module comment).
  * `filter` narrows the rows (the route's ?program_id= / ?search=). [] when discovery finds nothing or fails.
  *
- * Memoized (see above): the unfiltered rows are shared between callers and `filter` is applied per call, so
- * treat the returned rows as read-only. An empty result (discovery failed or found nothing) is not cached.
+ * Memoized with stale-while-revalidate (see above): the unfiltered rows are shared between callers and `filter`
+ * is applied per call, so treat the returned rows as read-only. An empty result (discovery failed or found
+ * nothing) is not cached.
  */
 export async function loadDiscoveredMarketRows(
   opts: { filter?: (row: Row) => boolean } = {},
@@ -376,6 +380,16 @@ export async function loadDiscoveredMarketRows(
 function sharedDiscoveredRows(ttl: number): Promise<Row[]> {
   const now = Date.now();
   if (discoveredMemo && now - discoveredMemo.at < ttl) return Promise.resolve(discoveredMemo.rows);
+  if (discoveredMemo && now - discoveredMemo.at < ttl + DISCOVERED_ROWS_STALE_MS) {
+    // Stale but within stale-while-revalidate: serve it, refresh in the background (errors are swallowed —
+    // a failed refresh keeps the stale copy until it ages out, then a caller waits for a fresh read).
+    refreshDiscoveredRows(ttl, now).catch(() => undefined);
+    return Promise.resolve(discoveredMemo.rows);
+  }
+  return refreshDiscoveredRows(ttl, now);
+}
+
+function refreshDiscoveredRows(ttl: number, now: number): Promise<Row[]> {
   if (discoveredInflight && now - discoveredInflight.startedAt < ttl) return discoveredInflight.promise;
   const startedAt = now;
   const generation = discoveredGeneration;

@@ -74,16 +74,46 @@ describe("discovered-rows memo", () => {
     expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort());
   });
 
-  it("re-reads after the TTL (5 s cap, even when MARKET_ROWS_MEMO_MS is longer)", async () => {
+  it("fresh for 5 s (even when MARKET_ROWS_MEMO_MS is longer); 5-25 s serves the copy and refreshes it once in the background", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(1_000_000);
     await loadDiscoveredMarketRows();
     vi.setSystemTime(1_000_000 + 4_999);
     await loadDiscoveredMarketRows();
     expect(h.discover).toHaveBeenCalledTimes(1);
+
+    // Stale: the old copy is returned at once, one background read starts (concurrent stale callers share it).
+    let release!: (v: unknown) => void;
+    h.discover.mockImplementationOnce(() => new Promise((r) => { release = r; }));
     vi.setSystemTime(1_000_000 + 5_000);
-    await loadDiscoveredMarketRows();
+    expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort());
+    expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort());
     expect(h.discover).toHaveBeenCalledTimes(2);
+    release([market(1)]);
+    // Once the background read lands, the refreshed copy is fresh again and served without a new read.
+    await vi.waitFor(async () => expect(slabs(await loadDiscoveredMarketRows())).toEqual([A]));
+    expect(h.discover).toHaveBeenCalledTimes(2);
+  });
+
+  it("older than 5 + 20 s: the caller waits for a fresh read", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+    await loadDiscoveredMarketRows();
+    h.discover.mockResolvedValueOnce([market(2)]);
+    vi.setSystemTime(1_000_000 + 25_000);
+    expect(slabs(await loadDiscoveredMarketRows())).toEqual([B]);
+    expect(h.discover).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failed background refresh keeps the stale copy (and does not throw)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+    await loadDiscoveredMarketRows();
+    h.discover.mockRejectedValueOnce(new Error("rpc down"));
+    vi.setSystemTime(1_000_000 + 6_000);
+    expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort());
+    await Promise.resolve();
+    expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort());
   });
 
   it("an empty result (discovery failed / found nothing) is not cached", async () => {
