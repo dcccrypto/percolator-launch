@@ -50,6 +50,22 @@ export function depositAmountMessage(
   return null;
 }
 
+/**
+ * Why a typed amount can't be used, in plain words (null = fine, or nothing typed). The number box lets "1e3", "1,5" or
+ * "-2" through; those parse to zero, so the Deposit button stayed off without saying why.
+ */
+export function depositInputMessage(input: string, decimals: number): string | null {
+  const t = input.trim();
+  if (!t) return null;
+  if (!/^\d*\.?\d*$/.test(t) || t === ".") {
+    return "Enter a plain number, like 100 or 12.5. Letters, commas, minus signs and 1e3-style numbers don't work.";
+  }
+  const frac = t.split(".")[1] ?? "";
+  if (frac.length > decimals) return `Use at most ${decimals} decimal places.`;
+  if (!/[1-9]/.test(t)) return "Enter an amount above 0.";
+  return null;
+}
+
 export class DepositExceedsBalanceError extends Error {
   constructor(
     readonly requested: bigint,
