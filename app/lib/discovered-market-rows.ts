@@ -69,6 +69,8 @@ function getPlaygroundAllowedSlabs(): Set<string> {
  */
 export function registerPlaygroundSlab(slabAddress: string): void {
   _playgroundAllowedSlabs.add(slabAddress);
+  // The shared discovery copy was filtered by the old allowed set: drop it so the new market lists at once.
+  resetDiscoveredRowsCache();
   try {
     // Write only the user-created addresses (not the curated seeds, which come from
     // PLAYGROUND_SLAB_META at startup — no need to duplicate them in the JSON file).
@@ -324,9 +326,77 @@ export async function discoverMarketsOnChain(
  * `filter` narrows the rows before the LP overlay (the route's ?program_id= / ?search=), so a narrowed
  * request does not pay the LP reads for rows it drops. [] when discovery finds nothing or fails.
  */
+// ── One shared, short-lived copy per server instance (same pattern as loadMergedMarketRows) ──────────
+//
+// Without Supabase (the v2.2 preview) every /api/markets and /api/stats request ran this whole path: a Blob
+// read, a getProgramAccounts discovery, a getMultipleAccountsInfo and the LP-capital reads. The preview is
+// cookie-gated, so the CDN's s-maxage does not collapse those requests. Now an instance re-reads at most once
+// per DISCOVERED_ROWS_MEMO_MAX_MS (never longer than MARKET_ROWS_MEMO_MS, so MARKET_ROWS_MEMO_MS=0 turns
+// both memos off), and concurrent callers share the one in-flight read. 5 s matches the route's own
+// `s-maxage=5`, so a row is never older than the response header already allows.
+const DISCOVERED_ROWS_MEMO_MAX_MS = 5_000;
+
+function discoveredRowsMemoTtlMs(): number {
+  const raw = process.env.MARKET_ROWS_MEMO_MS;
+  if (raw === undefined || raw.trim() === "") return DISCOVERED_ROWS_MEMO_MAX_MS;
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= 0 ? Math.min(v, DISCOVERED_ROWS_MEMO_MAX_MS) : DISCOVERED_ROWS_MEMO_MAX_MS;
+}
+
+type Row = Record<string, unknown>;
+let discoveredMemo: { at: number; rows: Row[] } | null = null;
+let discoveredInflight: { startedAt: number; promise: Promise<Row[]> } | null = null;
+/** Bumped by resetDiscoveredRowsCache so a read started before a reset never repopulates the memo. */
+let discoveredGeneration = 0;
+
+/** Forget the shared copy and any in-flight read (new registration; tests). */
+export function resetDiscoveredRowsCache(): void {
+  discoveredMemo = null;
+  discoveredInflight = null;
+  discoveredGeneration++;
+}
+
+/**
+ * The discovered rows /api/markets serves when Supabase is not configured (see the module comment).
+ * `filter` narrows the rows (the route's ?program_id= / ?search=). [] when discovery finds nothing or fails.
+ *
+ * Memoized (see above): the unfiltered rows are shared between callers and `filter` is applied per call, so
+ * treat the returned rows as read-only. An empty result (discovery failed or found nothing) is not cached.
+ */
 export async function loadDiscoveredMarketRows(
-  opts: { filter?: (row: Record<string, unknown>) => boolean } = {},
-): Promise<Record<string, unknown>[]> {
+  opts: { filter?: (row: Row) => boolean } = {},
+): Promise<Row[]> {
+  const ttl = discoveredRowsMemoTtlMs();
+  // Memo off: the original path, where `filter` runs before the LP overlay so a narrowed request skips LP reads.
+  if (ttl === 0) return loadDiscoveredMarketRowsUncached(opts.filter);
+  const rows = await sharedDiscoveredRows(ttl);
+  return opts.filter ? rows.filter(opts.filter) : rows.slice();
+}
+
+function sharedDiscoveredRows(ttl: number): Promise<Row[]> {
+  const now = Date.now();
+  if (discoveredMemo && now - discoveredMemo.at < ttl) return Promise.resolve(discoveredMemo.rows);
+  if (discoveredInflight && now - discoveredInflight.startedAt < ttl) return discoveredInflight.promise;
+  const startedAt = now;
+  const generation = discoveredGeneration;
+  const promise = loadDiscoveredMarketRowsUncached()
+    .then((rows) => {
+      // Failures / empty results are not cached: the next caller retries.
+      if (rows.length > 0 && generation === discoveredGeneration && (!discoveredMemo || discoveredMemo.at <= startedAt)) {
+        discoveredMemo = { at: startedAt, rows };
+      }
+      return rows;
+    })
+    .finally(() => {
+      if (discoveredInflight?.promise === promise) discoveredInflight = null;
+    });
+  discoveredInflight = { startedAt, promise };
+  return promise;
+}
+
+async function loadDiscoveredMarketRowsUncached(
+  filter?: (row: Row) => boolean,
+): Promise<Row[]> {
   // Read the registration Blob ONCE per request — feeds both row metadata
   // (symbol/name for wizard-launched markets) and the visibility filter
   // below. Guarded: Blob unavailable → empty map, curated-only behavior.
@@ -357,7 +427,7 @@ export async function loadDiscoveredMarketRows(
     // of band, and is_complete only flips false on an EXPLICIT proof). Only an
     // explicit false is dropped — undefined (legacy v12 / unknown) is kept.
     .filter(m => !isProvenIncompleteMarket(m))
-    .filter(m => !opts.filter || opts.filter(m));
+    .filter(m => !filter || filter(m));
   if (filtered.length === 0) return [];
 
   // GH#2334 follow-up: discoveredToApiRow() hardcodes vault_balance: null
