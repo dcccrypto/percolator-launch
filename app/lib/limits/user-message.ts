@@ -320,6 +320,10 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   if ((err as { name?: string } | null)?.name === "BusyFeeRoseError") {
     return m("busy-fee-rose", "paused", "Fee changed", (err as Error).message);
   }
+  // Owner decision 3 (round 10): the busy-side fee could not be checked, so the order was not sent (nothing signed).
+  if ((err as { name?: string } | null)?.name === "BusyFeeUnreadableError") {
+    return m("busy-fee-unreadable", "paused", "Not sent", (err as Error).message, { action: { id: "try-again", label: "Try again" } });
+  }
   if ((err as { name?: string } | null)?.name === "UtilFeeOverMaxError") {
     return m("side-too-busy", "paused", "Side too busy", (err as Error).message);
   }

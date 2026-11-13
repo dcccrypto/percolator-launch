@@ -134,7 +134,7 @@ vi.mock("@/lib/trade-ix", async (orig) => {
 
 import { useTrade } from "@/hooks/useTrade";
 import { FeeChangedAfterReviewError } from "@/lib/limits/trade-fee-resolve";
-import { BusyFeeRoseError } from "@/lib/v22/fresh-busy-fee";
+import { BusyFeeRoseError, BusyFeeUnreadableError } from "@/lib/v22/fresh-busy-fee";
 
 const programId = new PublicKey(new Uint8Array(32).fill(12));
 const walletPk = new PublicKey(new Uint8Array(32).fill(11));
@@ -222,6 +222,13 @@ describe("useTrade: a confirmed order signs the chain cap, never silently raises
     await runOrder({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 5_000n } }); // above the market maximum
     expect(mocks.signedFees).toEqual([135n, 135n, 234n, 635n, MARKET_MAX]);
   });
+  it("r9 LOW-3 (mutation M7): a busyGuard WITHOUT confirmedFeeCap forwards no confirmed busy rate (signs exactly 135) but is still guarded", async () => {
+    mocks.sendTxWaiting.mockResolvedValue("sig-ok");
+    await runOrder({ busyGuard: GUARD });
+    expect(mocks.signedFees).toEqual([135n]);
+    expect(mocks.fetchTradeFeeBps.mock.calls[0][3]).not.toHaveProperty("confirmedUtilFeeBps");
+    expect(typeof preSign()).toBe("function");
+  });
   it("a 500 bps confirmed busy quote with the rate unchanged lands: the signed cap covers it and the pre-sign read lets it through", async () => {
     mocks.sendTxWaiting.mockResolvedValue("sig-ok");
     mocks.fresh.mockResolvedValue(500n);
@@ -268,13 +275,38 @@ describe("useTrade: a confirmed order signs the chain cap, never silently raises
     await expect(preSign()!()).rejects.toBeInstanceOf(BusyFeeRoseError);
     await expect(preSign()!()).rejects.toThrow("The busy-side fee rose to 1.06% while you were reviewing. Review it again. Nothing was sent.");
   });
-  it("busy-side rate equal or lower: proceeds; unreadable: proceeds on the chain cap", async () => {
+  it("busy-side rate equal or lower: proceeds", async () => {
     mocks.sendTxWaiting.mockResolvedValue("sig-ok");
     await runOrder({ confirmedFeeCap: true, busyGuard: GUARD });
-    for (const v of [99n, 50n, 0n, null]) {
+    for (const v of [99n, 50n, 0n]) {
       mocks.fresh.mockResolvedValue(v);
       await expect(preSign()!()).resolves.toBeUndefined();
     }
+  });
+  it("owner decision 3: unreadable (null, error) FAILS CLOSED from the real preSignCheck: BusyFeeUnreadableError, plain message", async () => {
+    mocks.sendTxWaiting.mockResolvedValue("sig-ok");
+    await runOrder({ confirmedFeeCap: true, busyGuard: GUARD });
+    mocks.fresh.mockResolvedValue(null);
+    await expect(preSign()!()).rejects.toBeInstanceOf(BusyFeeUnreadableError);
+    mocks.fresh.mockRejectedValue(new Error("rpc down"));
+    await expect(preSign()!()).rejects.toThrow("We couldn't check the busy-side fee right now, so we didn't send your order. Nothing was signed. Try again in a moment.");
+  });
+  it("owner decision 3: a confirmed order resolves its fee strictly (no fallback to the base fee); an unconfirmed one keeps the fallback", async () => {
+    mocks.sendTxWaiting.mockResolvedValue("sig-ok");
+    await runOrder({ confirmedFeeCap: true, busyGuard: GUARD });
+    expect(mocks.fetchTradeFeeBps.mock.calls[0][3]).toMatchObject({ strict: true, fallbackIncludesBusy: false });
+    await runOrder({ confirmedFeeCap: true, busyGuard: GUARD, feeBps: 200n });
+    expect(mocks.fetchTradeFeeBps.mock.calls.at(-1)![3]).toMatchObject({ strict: true, fallbackIncludesBusy: true });
+    await runOrder({});
+    expect(mocks.fetchTradeFeeBps.mock.calls.at(-1)![3]).not.toHaveProperty("strict");
+  });
+  it("owner decision 3: the fee terms cannot be read (strict resolve throws): the order is refused before anything is built or sent", async () => {
+    mocks.fetchTradeFeeBps.mockRejectedValue(new BusyFeeUnreadableError(new Error("rpc")));
+    const { sig, err } = await runOrder({ confirmedFeeCap: true, busyGuard: GUARD });
+    expect(sig).toBeNull();
+    expect(err).toBeInstanceOf(BusyFeeUnreadableError);
+    expect(mocks.sendTxWaiting).not.toHaveBeenCalled();
+    expect(mocks.sendTx).not.toHaveBeenCalled();
   });
   it("the guard asks for THIS order: market, side and size", async () => {
     mocks.sendTxWaiting.mockResolvedValue("sig-ok");

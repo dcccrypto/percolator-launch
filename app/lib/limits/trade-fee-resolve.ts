@@ -16,6 +16,7 @@ import type { Connection, PublicKey } from "@solana/web3.js";
 import { decodeAssetRiskLimits, decodeMarketEngineView, decodeMatcherCtx } from "./decode";
 import { decodeGrowthRecord } from "@/lib/v21/growth-market";
 import { utilFeeMaxEffectiveBps } from "@/lib/v22/sdk/records/growth-v19";
+import { BusyFeeUnreadableError, withTimeout } from "@/lib/v22/busy-fee-unreadable";
 import { computeTradeFeeBpsToSignV22, type TradeFeeInputsV22, type TradeFeeToSignV22 } from "@/lib/v22/sdk/v22-trade-fee";
 
 /** The SDK's `TradeFeeInputsV22`, read with the app decoders. null = the market bytes are not decodable. */
@@ -60,28 +61,58 @@ export function resolveTradeFeeBps(i: { marketData: Uint8Array; matcherCtxData: 
 }
 
 /**
- * Reads the market + matcher context and returns the fee to sign (the SDK rule). Read / decode failure =>
- * `fallback` (the legacy base fee) so a flaky RPC never blocks a trade the pre-sign simulation would accept.
+ * Reads the market + matcher context and returns the fee to sign (the SDK rule).
+ *
+ * Fail closed for a confirmed order (round 10, owner decision 3): with `strict` (set for every order that came through the confirm
+ * screen) an RPC error, a missing market account or an unreadable market is retried once and then thrown as BusyFeeUnreadableError, so an
+ * order is never signed on fee terms the app could not read. The legacy fallback (the base fee, or the ticket's cap) is only for callers
+ * without a confirm screen (closes, the util-max rebuild), which pay no busy-side fee and are still checked by the pre-sign simulation.
  */
 export async function fetchTradeFeeBps(
   connection: Pick<Connection, "getMultipleAccountsInfo">,
   market: PublicKey,
   matcherCtx: PublicKey,
-  p: { fallback?: bigint; assetIndex?: number; withUtilMax?: boolean; confirmedUtilFeeBps?: bigint },
+  p: {
+    fallback?: bigint;
+    assetIndex?: number;
+    withUtilMax?: boolean;
+    confirmedUtilFeeBps?: bigint;
+    /** The fallback is the ticket's `feeCapToSign`, which already includes the quoted busy fee: the confirmed busy rate is not added again. */
+    fallbackIncludesBusy?: boolean;
+    /** Fail closed: never fall back; an unreadable market refuses the order. */
+    strict?: boolean;
+  },
 ): Promise<bigint | undefined> {
-  try {
-    const [m, c] = await connection.getMultipleAccountsInfo([market, matcherCtx], "confirmed");
-    if (!m) return p.fallback;
-    const r = resolveTradeFeeBps({ marketData: new Uint8Array(m.data), matcherCtxData: c ? new Uint8Array(c.data) : null, assetIndex: p.assetIndex, withUtilMax: p.withUtilMax, confirmedUtilFeeBps: p.confirmedUtilFeeBps });
-    return r ? r.feeBps : withConfirmedBusy(p.fallback, p.confirmedUtilFeeBps);
-  } catch {
-    return withConfirmedBusy(p.fallback, p.confirmedUtilFeeBps);
+  let maxKnown: bigint | undefined;
+  const attempts = p.strict ? 2 : 1;
+  let cause: unknown;
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 300));
+    try {
+      const [m, c] = await withTimeout(() => connection.getMultipleAccountsInfo([market, matcherCtx], "confirmed"), 4_000);
+      if (!m) { cause = new Error("market account missing"); continue; }
+      const marketData = new Uint8Array(m.data);
+      maxKnown = decodeMarketEngineView(marketData, p.assetIndex ?? 0)?.maxTradingFeeBps;
+      const r = resolveTradeFeeBps({ marketData, matcherCtxData: c ? new Uint8Array(c.data) : null, assetIndex: p.assetIndex, withUtilMax: p.withUtilMax, confirmedUtilFeeBps: p.confirmedUtilFeeBps });
+      if (r) return r.feeBps;
+      cause = new Error("market bytes not readable");
+    } catch (e) {
+      cause = e;
+    }
   }
+  if (p.strict) throw new BusyFeeUnreadableError(cause);
+  return withConfirmedBusy(p.fallback, p.confirmedUtilFeeBps, p.fallbackIncludesBusy === true, maxKnown);
 }
 
-/** The legacy fallback (no readable market) plus the confirmed busy-side rate, so an unreadable market still leaves room for it. */
-function withConfirmedBusy(fallback: bigint | undefined, busy: bigint | undefined): bigint | undefined {
-  return fallback !== undefined && busy !== undefined && busy > 0n ? fallback + busy : fallback;
+/**
+ * The fallback (no readable market) plus the confirmed busy-side rate, so an unreadable market still leaves room for it. Round 10 (r9 #3814
+ * LOW-1): the rate is added only when the fallback is the wrapper's base fee; the ticket's cap already includes the quoted busy fee, so adding
+ * it again counted it twice. The result never exceeds the market's maximum when that is known.
+ */
+export function withConfirmedBusy(fallback: bigint | undefined, busy: bigint | undefined, fallbackIncludesBusy = false, max?: bigint): bigint | undefined {
+  if (fallback === undefined) return fallback;
+  const total = !fallbackIncludesBusy && busy !== undefined && busy > 0n ? fallback + busy : fallback;
+  return max !== undefined && max > 0n && total > max ? max : total;
 }
 
 /** 98 GrowthUtilisationFeeNotCovered from the wrapper (or unattributed), in any of the error shapes. */

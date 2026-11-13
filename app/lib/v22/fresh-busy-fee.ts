@@ -5,6 +5,7 @@
  *
  * Why this and not a tighter fee cap: devnet's matcher fee is adaptive (10-80 bps), so one cap cannot tell the matcher's part from the busy
  * part. The cap signed stays the chain cap (as before); this guard is what stops an order whose busy rate rose after the confirm screen.
+ * Round 10: it fails closed (see `assertBusyFeeNotRisen`).
  */
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { PublicKey as Pk } from "@solana/web3.js";
@@ -15,6 +16,13 @@ import { lpEffectiveSignedQ } from "@/lib/limits/lp-inventory-room";
 import { decodeGrowthRecord, growthTicketDecision } from "@/lib/v21/growth-market";
 import { levGuardPda } from "@/lib/v22/lev-guard";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { BusyFeeUnreadableError, withTimeout } from "@/lib/v22/busy-fee-unreadable";
+
+export { BusyFeeUnreadableError, BUSY_FEE_UNREADABLE_MESSAGE } from "@/lib/v22/busy-fee-unreadable";
+
+/** One read gets this long; a second (the only retry) gets the same. Worst case about 8.3 s before the order is refused. */
+export const BUSY_READ_TIMEOUT_MS = 4_000;
+const BUSY_RETRY_DELAY_MS = 300;
 
 export interface BusyGuard {
   /** The busy-side rate (bps) the confirm screen showed. */
@@ -80,15 +88,30 @@ export class BusyFeeRoseError extends Error {
 }
 
 /**
- * Runs immediately before the wallet is asked to sign (after any market / catch-up wait). Higher than confirmed => BusyFeeRoseError (nothing
- * signed). Equal or lower => proceeds. Unreadable => proceeds on the chain cap (the guard fails open) and says so in the console.
+ * Runs immediately before the wallet is asked to sign (after any market / catch-up wait). FAILS CLOSED (owner decision 3, round 10):
+ * - higher than confirmed => BusyFeeRoseError (nothing signed);
+ * - equal or lower => proceeds;
+ * - unreadable (an RPC error, a timeout, a missing or unparseable account, any unknown state) => one retry after a short pause, then
+ *   BusyFeeUnreadableError (nothing signed, plain message).
+ *
+ * Who is guarded: every order that carries a `busyGuard`, i.e. every order placed from the trade ticket (opens, adds, flips and any
+ * reduce it sends). They all go through the confirm screen. A market with no growth record answers 0n (a known "no busy fee"), so it
+ * passes. Closes from the Close button (`useClosePosition`) carry no guard: a reduce-only order has no opening part and the wrapper
+ * charges the busy-side fee on the opening part only, so it cannot pay one.
  */
 export async function assertBusyFeeNotRisen(g: BusyGuard | undefined, read: () => Promise<bigint | null>): Promise<void> {
   if (!g) return;
-  const fresh = await read().catch(() => null);
-  if (fresh === null) {
-    console.warn("[busy-fee-guard] the busy-side fee could not be re-read before signing; proceeding with the chain cap");
-    return;
+  let fresh: bigint | null = null;
+  let cause: unknown;
+  for (let attempt = 0; attempt < 2 && fresh === null; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, BUSY_RETRY_DELAY_MS));
+    try {
+      fresh = await withTimeout(read, BUSY_READ_TIMEOUT_MS);
+    } catch (e) {
+      cause = e;
+      fresh = null;
+    }
   }
+  if (fresh === null) throw new BusyFeeUnreadableError(cause);
   if (fresh > g.confirmedBusyFeeBps) throw new BusyFeeRoseError(fresh);
 }

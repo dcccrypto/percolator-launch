@@ -9,7 +9,8 @@ import path from "node:path";
 import { PublicKey } from "@solana/web3.js";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { __setDevnetV21ForTest } from "@/lib/v21/flag";
-import { fetchTradeFeeBps, resolveTradeFeeBps } from "@/lib/limits/trade-fee-resolve";
+import { fetchTradeFeeBps, resolveTradeFeeBps, withConfirmedBusy } from "@/lib/limits/trade-fee-resolve";
+import { BusyFeeUnreadableError } from "@/lib/v22/busy-fee-unreadable";
 
 const FEE = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-fee-channel-2026-10-11.json"), "utf8")) as { markets: Record<string, Record<string, string>> };
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
@@ -48,5 +49,48 @@ describe("resolveTradeFeeBps with a confirmed busy-side rate", () => {
     expect(await fetchTradeFeeBps(failing, k, k, { fallback: 30n, confirmedUtilFeeBps: 498n })).toBe(528n);
     expect(await fetchTradeFeeBps(failing, k, k, { fallback: 30n })).toBe(30n);
     expect(await fetchTradeFeeBps(failing, k, k, { fallback: 30n, confirmedUtilFeeBps: 0n })).toBe(30n);
+  });
+
+  // Round 10: r9 #3814 LOW-1 / LOW-2 and owner decision 3.
+  it("LOW-1: the busy rate is added only to the wrapper base; a ticket cap (already includes the quoted busy fee) is not counted twice; capped at the max", () => {
+    expect(withConfirmedBusy(30n, 498n)).toBe(528n);
+    expect(withConfirmedBusy(556n, 498n, true)).toBe(556n); // ticket cap: 30 + 23 + 498 + 5, no second 498
+    expect(withConfirmedBusy(30n, 498n, false, 400n)).toBe(400n);
+    expect(withConfirmedBusy(556n, 498n, true, 400n)).toBe(400n);
+    expect(withConfirmedBusy(undefined, 498n)).toBeUndefined();
+  });
+  it("LOW-1 through fetchTradeFeeBps: unreadable market, non-strict caller, ticket cap fallback stays 556 (was 1054)", async () => {
+    const failing = { getMultipleAccountsInfo: vi.fn(async () => { throw new Error("rpc"); }) };
+    const k = PublicKey.default;
+    expect(await fetchTradeFeeBps(failing, k, k, { fallback: 556n, confirmedUtilFeeBps: 498n, fallbackIncludesBusy: true })).toBe(556n);
+  });
+  it("LOW-2: a missing market account is handled like a thrown read (same fallback), and refused when strict", async () => {
+    const none = { getMultipleAccountsInfo: vi.fn(async () => [null, null]) };
+    const failing = { getMultipleAccountsInfo: vi.fn(async () => { throw new Error("rpc"); }) };
+    const k = PublicKey.default;
+    const o = { fallback: 30n, confirmedUtilFeeBps: 498n };
+    expect(await fetchTradeFeeBps(none as never, k, k, o)).toBe(await fetchTradeFeeBps(failing, k, k, o));
+    await expect(fetchTradeFeeBps(none as never, k, k, { ...o, strict: true })).rejects.toBeInstanceOf(BusyFeeUnreadableError);
+  });
+  it("owner decision 3: strict never falls back: RPC error, timeout, missing market, unparseable market all refuse, after one retry", async () => {
+    const k = PublicKey.default;
+    const failing = { getMultipleAccountsInfo: vi.fn(async () => { throw new Error("rpc"); }) };
+    await expect(fetchTradeFeeBps(failing, k, k, { fallback: 30n, strict: true })).rejects.toBeInstanceOf(BusyFeeUnreadableError);
+    expect(failing.getMultipleAccountsInfo).toHaveBeenCalledTimes(2);
+    const junk = { getMultipleAccountsInfo: vi.fn(async () => [{ data: Buffer.alloc(16) }, null]) };
+    await expect(fetchTradeFeeBps(junk as never, k, k, { fallback: 30n, strict: true })).rejects.toThrow("Nothing was signed");
+    vi.useFakeTimers();
+    try {
+      const hang = { getMultipleAccountsInfo: vi.fn(() => new Promise<never>(() => {})) };
+      const p = fetchTradeFeeBps(hang as never, k, k, { fallback: 30n, strict: true }).catch((e) => e as Error);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(await p).toBeInstanceOf(BusyFeeUnreadableError);
+    } finally { vi.useRealTimers(); }
+  });
+  it("owner decision 3: strict with a readable market still returns the SDK rule (one retry recovers a transient error)", async () => {
+    const m = FEE.markets.SOL;
+    const k = PublicKey.default;
+    const flaky = { getMultipleAccountsInfo: vi.fn().mockRejectedValueOnce(new Error("429")).mockResolvedValue([{ data: Buffer.from(m.marketB64, "base64") }, { data: Buffer.from(m.matcherCtxB64, "base64") }]) };
+    expect(await fetchTradeFeeBps(flaky as never, k, k, { fallback: 30n, strict: true })).toBe(135n);
   });
 });
