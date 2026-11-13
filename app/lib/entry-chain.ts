@@ -264,13 +264,6 @@ export function rebuildEntry(deltas: readonly ChainDelta[], qNow: bigint, baseFe
 export interface ChainEntryOptions {
   market: PublicKey;
   portfolio: PublicKey;
-  /**
-   * The address whose signatures are walked (default: the portfolio). Fills are still filtered to this portfolio, market and asset. The trader's
-   * WALLET signs every trade but not the keeper's cranks (which flood a trader portfolio's list), so walking it spends the transaction budget on
-   * real trades. A keeper-signed REDUCE (liquidation) is not on the wallet's list: the sizes then do not add up and the caller falls back to the
-   * portfolio walk.
-   */
-  walkAddress?: PublicKey;
   assetIndex?: number;
   /** The signed ADL-effective size the chain holds now. */
   qNow: bigint;
@@ -306,7 +299,7 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
   let topSig: string | undefined;
   try {
     for (;;) {
-      const page = await connection.getSignaturesForAddress(o.walkAddress ?? o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
+      const page = await connection.getSignaturesForAddress(o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
       if (page.length === 0) return { verdict: "incomplete", entry: null, txRead, topSig };
       if (topSig === undefined) topSig = page[0].signature;
       const sigs = page.filter((s) => s.err === null).map((s) => s.signature);

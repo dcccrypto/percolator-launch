@@ -232,20 +232,6 @@ describe("chainFillPrice: the same arithmetic as the ticket, and the r9 'unknown
   });
 });
 
-describe("E2: walkAddress", () => {
-  it("lists the signatures of the walk address (the trader's wallet), while fills are still filtered to the portfolio", async () => {
-    const wallet = Keypair.generate().publicKey;
-    const c = conn({ s1: fill(2n * T, 100_000_000n, 23n), other: fill(T, 90_000_000n, 10n, 0n, OTHER) }, ["other", "s1"]);
-    const r = await run(c, 2n * T, { walkAddress: wallet });
-    expect(r.verdict).toBe("chain");
-    expect((c.getSignaturesForAddress.mock.calls[0][0] as PublicKey).equals(wallet)).toBe(true);
-    // default: the portfolio
-    const c2 = conn({ s1: fill(2n * T, 100_000_000n, 23n) }, ["s1"]);
-    await run(c2, 2n * T);
-    expect((c2.getSignaturesForAddress.mock.calls[0][0] as PublicKey).equals(PORTFOLIO)).toBe(true);
-  });
-});
-
 describe("signedFeeBpsFromTx", () => {
   const msg = (...ixs: { programIdIndex: number; data: Uint8Array }[]) => ({ staticAccountKeys: [WRAPPER, OTHER], compiledInstructions: ixs });
   it("reads fee_bps of the one TradeCpi for the asset; none, several, another program, another asset or a short body = null", () => {
@@ -306,5 +292,35 @@ describe("rebuildEntry: pure", () => {
     const d: ChainDelta = { sig: "s", deltaQ: T, signedFeeBps: 135n, noBusyCap: { feeBps: 135n, maxFeeBps: 700n }, fill: { bookedPriceE6: 100_000_000n, executedQ: T, feeAtoms: 300_000n, notionalAtoms: 100_000_000n, taker: PORTFOLIO, quotedPriceE6: 100_000_000n, legs: 1 } };
     expect(rebuildEntry([d], 2n * T, BASE).verdict).toBe("mismatch");
     expect(rebuildEntry([d], T, BASE).verdict).toBe("chain");
+  });
+});
+
+describe("F1 (wallet-first walk removed): a keeper-signed REDUCE is on the portfolio's list, so the portfolio walk gets these right", () => {
+  const liq = (q: bigint): Tx => ({ logs: reduceEventLogs(WRAPPER, MARKET, PORTFOLIO, { reason: 3, signedReducedQ: q }) });
+  it("A: open 5 @100, add 5 @110, keeper liquidates 5 -> 5 left: the average of BOTH fills (not the add alone)", async () => {
+    const txs = { s1: fill(5n * T, 100_000_000n, 23n), s2: fill(5n * T, 110_000_000n, 23n), k1: liq(-5n * T) };
+    const r = await run(conn(txs, ["k1", "s2", "s1"]), 5n * T);
+    expect(r.verdict).toBe("chain");
+    expect(r.entry?.entryPriceE6).toBe((effective(5n * T, 100_000_000n, 23n) + effective(5n * T, 110_000_000n, 23n)) / 2n);
+    expect(r.entry?.sizeQ).toBe(5n * T);
+  });
+  it("D: a busy open (unknown on device 1), an add, then the keeper liquidates the open size: still UNKNOWN (the busy open is part of the position), never the add's price", async () => {
+    const busy = fill(5n * T, 100_000_000n, 23n, 40n, PORTFOLIO, 40n);
+    const txs = { s1: busy, s2: fill(5n * T, 110_000_000n, 23n), k1: liq(-5n * T) };
+    const r = await run(conn(txs, ["k1", "s2", "s1"]), 5n * T);
+    expect(r.verdict).toBe("unexplained");
+    expect(r.entry).toBeNull();
+  });
+});
+
+describe("F3: the fee tolerance is pinned (a 1 bps busy-side fee must not pass as spread)", () => {
+  const real: ExecFill = { bookedPriceE6: 89_535_739n, executedQ: 223_463n, feeAtoms: 106_043n, notionalAtoms: 20_008_889n, taker: PORTFOLIO, quotedPriceE6: 89_741_672n, legs: 1 };
+  const CAP_135 = { feeBps: 135n, maxFeeBps: 700n };
+  it("rounding noise (a few atoms) passes; 1 bps of notional (2,000 atoms here) does not, on growth and non-growth markets", () => {
+    expect(chainFillPrice({ ...real, feeAtoms: real.feeAtoms + 3n }, 30n, true, 135n, CAP_135)).not.toBeNull();
+    const oneBps = (real.notionalAtoms * 1n) / 10_000n;
+    expect(chainFillPrice({ ...real, feeAtoms: real.feeAtoms + oneBps }, 30n, true, 135n, CAP_135)).toBeNull();
+    expect(chainFillPrice({ ...real, feeAtoms: real.feeAtoms + oneBps }, 30n, false)).toBeNull();
+    expect(chainFillPrice({ ...real, feeAtoms: real.feeAtoms - oneBps }, 30n, false)).toBeNull();
   });
 });

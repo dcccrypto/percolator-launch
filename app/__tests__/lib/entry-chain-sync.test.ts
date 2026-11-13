@@ -89,14 +89,14 @@ describe("syncChainEntry", () => {
     h.entryFromChain.mockResolvedValue({ verdict: "unreadable", entry: null, txRead: 0 });
     expect(await syncChainEntry(conn, target(3n * T))).toBe("unreadable");
     expect(await syncChainEntry(conn, target(3n * T))).toBe("skipped");
-    expect(h.entryFromChain).toHaveBeenCalledTimes(3); // chain (1 walk) + unreadable (wallet walk, then the portfolio walk)
+    expect(h.entryFromChain).toHaveBeenCalledTimes(2);
   });
   it("the attempt survives a reload (storage), so a page refresh does not retry an unreadable chain at once", async () => {
     h.entryFromChain.mockResolvedValue({ verdict: "incomplete", entry: null, txRead: 60 });
     await syncChainEntry(conn, target());
     __resetEntryChainSyncForTests(); // memory gone, storage stays
     expect(await syncChainEntry(conn, target())).toBe("skipped");
-    expect(h.entryFromChain).toHaveBeenCalledTimes(2);
+    expect(h.entryFromChain).toHaveBeenCalledTimes(1);
   });
   it("a flat position never reads the chain", async () => {
     expect(await syncChainEntry(conn, target(0n))).toBe("skipped");
@@ -357,32 +357,5 @@ describe("D4", () => {
     const before = h.sigCalls;
     await syncChainEntry(conn, target(), () => t + 1_000);
     expect(h.sigCalls).toBe(before); // not retried within the window
-  });
-});
-
-describe("E2: the trader's wallet is walked first (cranks flood the portfolio's own list)", () => {
-  it("a wallet walk that settles is the only walk; its newest signature vouches for the record (re-checked on the WALLET)", async () => {
-    let t = 1_000_000;
-    h.entryFromChain.mockResolvedValue(chain(101_000_000n, "walletTop"));
-    expect(await syncChainEntry(conn, target(), () => t)).toBe("chain");
-    expect(h.entryFromChain).toHaveBeenCalledTimes(1);
-    expect(h.entryFromChain.mock.calls[0][2].walkAddress.toBase58()).toBe(WALLET);
-    t += VERIFY_MS;
-    h.sigs = ["walletTop"];
-    const calls = (conn as unknown as { getSignaturesForAddress: ReturnType<typeof vi.fn> }).getSignaturesForAddress;
-    calls.mockClear();
-    await syncChainEntry(conn, target(), () => t);
-    expect(calls.mock.calls[0][0].toBase58()).toBe(WALLET); // not the portfolio: crank transactions would change its newest signature every minute
-    expect(h.entryFromChain).toHaveBeenCalledTimes(1);
-  });
-  it("a wallet walk that cannot settle (e.g. a keeper-signed liquidation is not on its list) falls back to the portfolio walk, which decides", async () => {
-    h.entryFromChain
-      .mockResolvedValueOnce({ verdict: "mismatch", entry: null, txRead: 4 })
-      .mockResolvedValueOnce(chain(99_000_000n, "pfTop"));
-    expect(await syncChainEntry(conn, target())).toBe("chain");
-    expect(h.entryFromChain).toHaveBeenCalledTimes(2);
-    expect(h.entryFromChain.mock.calls[0][2].walkAddress).toBeDefined();
-    expect(h.entryFromChain.mock.calls[1][2].walkAddress).toBeUndefined();
-    expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(99_000_000n);
   });
 });
