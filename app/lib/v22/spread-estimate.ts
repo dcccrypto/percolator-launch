@@ -16,6 +16,7 @@
  */
 import type { MatcherCtxView } from "@/lib/limits/decode";
 import { preTradeQuote, type MatcherExtCaps } from "@/lib/limits/matcher-quote";
+import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 
 /**
  * What the matcher prices on besides the context, for the order's own leg (see lib/limits/matcher-quote.ts `preTradeQuote`):
@@ -78,18 +79,22 @@ export const SPREAD_LABEL = "Spread / price impact";
  * Display only: what is signed is unchanged.
  */
 export function feeBpsWithSpread(feeBps: bigint, e: SpreadEstimate | null, quoteCharged: boolean): bigint {
-  if (!e?.inFee || quoteCharged) return feeBps;
-  return feeBps + BigInt(e.kind === "quote" ? e.bps : e.minBps);
+  if (!e?.inFee) return feeBps;
+  // Round 10 (review of #3820, MED 3): a quote is exact for the state it was read in; the fee the fill pays can be a few bps higher (the volatility
+  // step). The shown fee carries the same margin the signed cap does, so the shown cost is never below what the cap lets through for that drift.
+  const margin = e.kind === "quote" ? BigInt(defaultFeeCapMarginBps()) : 0n;
+  if (quoteCharged) return feeBps + margin;
+  return feeBps + BigInt(e.kind === "quote" ? e.bps : e.minBps) + margin;
 }
 
 /**
  * The price an order is expected to FILL at on a fee-channel market: the mark moved by the matcher's spread for THIS order's size, rounded toward
- * the LP as the matcher does (up for a buy, down for a sell). It is what the position's Entry becomes (booked mark + spread, never the busy-side
+ * the LP as the matcher does (up for a buy, down for a sell), plus the fee-cap margin (an honest upper bound, as the fee row). It is what the position's Entry becomes (booked mark + spread, never the busy-side
  * fee). Null where there is no exact per-size quote or the spread is not charged: the caller keeps its own estimate.
  */
 export function quotedFillPriceE6(oracleE6: bigint, e: SpreadEstimate | null, takerBuys: boolean): bigint | null {
   if (!e || e.kind !== "quote" || !e.inFee || oracleE6 <= 0n) return null;
-  const bps = BigInt(e.bps);
+  const bps = BigInt(e.bps) + BigInt(defaultFeeCapMarginBps());
   const num = takerBuys ? oracleE6 * (10_000n + bps) : oracleE6 * (10_000n - bps);
   if (num <= 0n) return null;
   return takerBuys ? (num + 9_999n) / 10_000n : num / 10_000n;

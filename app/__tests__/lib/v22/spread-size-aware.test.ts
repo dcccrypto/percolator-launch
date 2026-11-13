@@ -14,11 +14,12 @@ import { PublicKey } from "@solana/web3.js";
 import fixture from "../../fixtures/v22-spread-size-aware-sol.json";
 import { decodeAssetVaultLp, decodeMarketEngineView, decodeMatcherCtx, decodePortfolioRisk, signedPositionForAsset } from "@/lib/limits/decode";
 import { lpEffectiveSignedQ } from "@/lib/limits/lp-inventory-room";
-import { preTradeQuote } from "@/lib/limits/matcher-quote";
+import { preTradeQuote, quoteAdaptive, adaptiveFeeBps, SKEW_REF_MAX_INVENTORY_Q } from "@/lib/limits/matcher-quote";
 import { growthFor } from "@/hooks/useMarketLimits";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { matcherExtCapsFromGrowth } from "@/lib/v22/matcher-ext-caps";
-import { quotedFillPriceE6, spreadEstimateFromCtx } from "@/lib/v22/spread-estimate";
+import { feeBpsWithSpread, quotedFillPriceE6, spreadEstimateFromCtx } from "@/lib/v22/spread-estimate";
+import type { GrowthMarketView } from "@/lib/v21/growth-market";
 
 const bytes = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
 const market = bytes(fixture.marketB64);
@@ -121,16 +122,83 @@ describe("size-aware spread quote vs the deployed matcher", () => {
     expect(e).toMatchObject({ kind: "quote", bps: 100 });
   });
 
-  it("the est. fill is the mark moved by that size's spread, rounded toward the LP; unknown / not-in-fee gives null", () => {
+  it("the est. fill is the mark moved by that size's spread PLUS the 2 bp cap margin, rounded toward the LP; unknown / not-in-fee gives null", () => {
     const { ctx, view } = setup();
     const g = golden.find((x) => x.side === "buy" && !x.reducing && x.usd === 1255)!;
     const e = spreadEstimateFromCtx(ctx, PX, BigInt(g.sizeQ), true, true, { ext: matcherExtCapsFromGrowth(view, PX), nowSlot: SLOT })!;
-    expect(quotedFillPriceE6(PX, e, true)).toBe(BigInt(g.execPriceE6!));
+    expect(quotedFillPriceE6(PX, e, true)).toBe((PX * (10_000n + 38n + 2n) + 9_999n) / 10_000n);
+    expect(quotedFillPriceE6(PX, e, true)!).toBeGreaterThanOrEqual(BigInt(g.execPriceE6!)); // never below the charged price
+    expect(quotedFillPriceE6(PX, e, false)).toBe((PX * (10_000n - 38n - 2n)) / 10_000n);
     expect(quotedFillPriceE6(PX, { ...e, inFee: false }, true)).toBeNull();
     expect(quotedFillPriceE6(PX, null, true)).toBeNull();
   });
 
   it("no growth view gives no caps (null): the hook then reports unknown for a growth asset instead of a context-depth quote", () => {
     expect(matcherExtCapsFromGrowth(null, PX)).toBeNull();
+  });
+
+  it("the shown fee carries the 2 bp margin (MED 3): base + quote + 2, whether the estimate already holds the quote or not", () => {
+    const e = { kind: "quote" as const, bps: 38, execPriceE6: null, inFee: true };
+    expect(feeBpsWithSpread(30n, e, false)).toBe(30n + 38n + 2n);
+    expect(feeBpsWithSpread(68n, e, true)).toBe(68n + 2n);
+    expect(feeBpsWithSpread(30n, { ...e, inFee: false }, false)).toBe(30n);
+  });
+
+  it("skew term (skew_mult > 0): the skew reference is capped at the wrapper's inventory cap, as the matcher does", () => {
+    const { ctx, view } = setup();
+    const ext = matcherExtCapsFromGrowth(view, PX)!;
+    // a skew-priced market: LP short 555,540, a taker SELL makes it shorter (surcharge), s_mult 50, skew cap 100 bps
+    const skewCtx = { ...ctx, skewSpreadMultBps: 50, v2: { ...ctx.v2!, skewCapBps: 100, rebateCapBps: 50, thinRebateMultBps: 20 } };
+    const size = BigInt(golden.find((x) => x.side === "sell" && !x.reducing && x.usd === 1000)!.sizeQ);
+    const got = preTradeQuote(skewCtx, PX, size, false, { ext, nowSlot: SLOT })!;
+    const fee = got.adaptiveFeeBps!;
+    const indep = (refInv: bigint) => quoteAdaptive({
+      oracleE6: PX, fill: size, takerBuys: false, invPre: skewCtx.inventoryBase, baseSpreadBps: skewCtx.baseSpreadBps, maxTotalBps: skewCtx.maxTotalBps, feeBps: fee,
+      impactKBps: skewCtx.impactKBps, depthE6: ext.liquidityNotionalE6, sMultBps: 50, rMultBps: 20, skewCapBps: 100, rebateCapBps: 50, refInv,
+    })!;
+    const cap = ext.inventoryCapQ;
+    expect(cap).toBeLessThan(skewCtx.v2!.skewRefInventory);
+    expect(got.totalBps).toBe(indep(cap).totalBps);
+    expect(got.skewBps).toBe(indep(cap).skewBps);
+    // the cap matters: with the context's own (1e14) reference the skew term is ~0 and the quote is lower
+    expect(indep(skewCtx.v2!.skewRefInventory).totalBps).toBeLessThan(got.totalBps!);
+    // a leg with a neutral (>= SKEW_REF_MAX) cap prices on the context alone (cap not active)
+    const neutral = preTradeQuote(skewCtx, PX, size, false, { ext: { inventoryCapQ: SKEW_REF_MAX_INVENTORY_Q, liquidityNotionalE6: ext.liquidityNotionalE6 }, nowSlot: SLOT })!;
+    expect(neutral.skewBps).toBe(indep(skewCtx.v2!.skewRefInventory).skewBps);
+    expect(adaptiveFeeBps(skewCtx.v2!)).toBeGreaterThan(0n);
+  });
+});
+
+describe("matcherExtCapsFromGrowth: depth-bound clamp, ties, closed", () => {
+  const P = 100_000_000n; // $100
+  const view = (over: { capDepthE6: bigint | null; nCapQ: bigint; capital?: bigint; lambda?: number; hlock?: boolean; growthOn?: boolean }) =>
+    ({
+      hlockActive: over.hlock ?? false,
+      long: { growthOn: over.growthOn ?? true, nCapQ: over.nCapQ, capDepthE6: over.capDepthE6, lambdaEffBps: over.lambda ?? 10_000 },
+      record: { lambdaBps: over.lambda ?? 10_000 },
+      quoteInput: { lpCapital: over.capital ?? 1_000_000_000n, lpPnl: 0n, lpFeeCredits: 0n },
+    }) as unknown as GrowthMarketView;
+
+  it("capital-bound with no depth cap: the exact capital liquidity (4 x C_m x lambda)", () => {
+    // C_m 1,000 USDC, lambda 1x, $100: N_cap = 10 whole tokens (1e7 q); liquidity 4,000 USDC
+    const c = matcherExtCapsFromGrowth(view({ capDepthE6: null, nCapQ: 10_000_000n }), P)!;
+    expect(c).toEqual({ inventoryCapQ: 10_000_000n, liquidityNotionalE6: 4_000_000_000n });
+  });
+  it("depth-bound (the depth cap is below the capital cap): liquidity is 4 x the capacity notional, NOT the larger capital liquidity", () => {
+    // depth caps N_cap at 4e6 q ($400 notional); capital would allow 1e7 q
+    const c = matcherExtCapsFromGrowth(view({ capDepthE6: 400_000_000n, nCapQ: 4_000_000n }), P)!;
+    expect(c.inventoryCapQ).toBe(4_000_000n);
+    expect(c.liquidityNotionalE6).toBe(4n * ((4_000_000n * P) / 1_000_000n)); // 1.6e9, not 4e9
+    expect(c.liquidityNotionalE6).toBeLessThan(4_000_000_000n);
+  });
+  it("a TIE between the capital cap and the depth cap takes the min of the two liquidities (never above the program's)", () => {
+    const c = matcherExtCapsFromGrowth(view({ capDepthE6: 1_000_000_000n, nCapQ: 10_000_000n }), P)!;
+    expect(c.liquidityNotionalE6).toBeLessThanOrEqual(4_000_000_000n);
+    expect(c.liquidityNotionalE6).toBe(4n * ((10_000_000n * P) / 1_000_000n));
+  });
+  it("h-lock or no capacity is CLOSED (0, 0); growth off has no caps", () => {
+    expect(matcherExtCapsFromGrowth(view({ capDepthE6: null, nCapQ: 10_000_000n, hlock: true }), P)).toEqual({ inventoryCapQ: 0n, liquidityNotionalE6: 0n });
+    expect(matcherExtCapsFromGrowth(view({ capDepthE6: null, nCapQ: 0n }), P)).toEqual({ inventoryCapQ: 0n, liquidityNotionalE6: 0n });
+    expect(matcherExtCapsFromGrowth(view({ capDepthE6: null, nCapQ: 1n, growthOn: false }), P)).toBeNull();
   });
 });

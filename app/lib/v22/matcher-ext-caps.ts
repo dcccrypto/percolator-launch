@@ -28,6 +28,9 @@ export function matcherExtCapsFromGrowth(view: GrowthMarketView | null | undefin
   const liqCapital = liquidityNotionalE6(cM, lam);
   const capitalCap = nCapQ(cM, lam, priceE6, GROWTH_POS_SCALE);
   const fromCap = ((nCap * priceE6) / GROWTH_POS_SCALE) * GROWTH_DEPTH_MULT;
-  const liq = liqCapital !== null && capitalCap !== null && capitalCap === nCap ? liqCapital : liqCapital !== null && liqCapital < fromCap ? liqCapital : fromCap;
+  // No venue-depth cap (clamp off or no depth): the capital branch of the program, exact. With a depth cap in play (even when it ties the
+  // capital cap) the program takes min(capital liquidity, 4 x depth notional); `fromCap` can only be at or below the depth term.
+  const noDepthCap = view.long.capDepthE6 === null && capitalCap !== null && capitalCap === nCap;
+  const liq = liqCapital !== null && noDepthCap ? liqCapital : liqCapital !== null && liqCapital < fromCap ? liqCapital : fromCap;
   return { inventoryCapQ: cap, liquidityNotionalE6: liq };
 }

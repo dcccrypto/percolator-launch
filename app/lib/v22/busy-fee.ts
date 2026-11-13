@@ -31,6 +31,18 @@ export interface ConfirmedTerms {
   direction: "long" | "short";
   leverage: number;
   busyFeeBps: bigint;
+  /**
+   * Round 10 (review of #3820, MED 2): the fee cap the trader reviewed (null = none was quoted). It is fixed when the confirm opens: the live
+   * cap now moves with the order's size-aware quote and the volatility step, and must not rise after the review (a rise past it is refused by
+   * the wrapper: 98, FeeChangedAfterReviewError). Undefined = a caller with no confirm screen (the live cap).
+   */
+  signedFeeBps?: bigint | null;
+}
+
+/** The fee cap to sign: the reviewed one for a confirmed order, else the live one. */
+export function feeCapToSend(confirmed: ConfirmedTerms | undefined, live: bigint | undefined): bigint | undefined {
+  if (confirmed && confirmed.signedFeeBps !== undefined) return confirmed.signedFeeBps ?? undefined;
+  return live;
 }
 
 /**

@@ -4,10 +4,12 @@
  * line is secondary. "Profit becomes withdrawable" shows only for a positive net; the loading fee estimate shows no optimistic number.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
 import type { SpreadEstimate } from "@/lib/v22/spread-estimate";
+// Round 10: these pin the fee PARTS (what is added once, never twice); the display margin has its own tests (spread-size-aware).
+vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "0");
 
 const USDC = 1_000_000n;
 const props = {

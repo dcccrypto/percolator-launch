@@ -267,8 +267,10 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       L.matcherSyncLive === true && L.lpRealQ != null ? { ...L.matcher, inventoryBase: L.lpRealQ } : L.matcher;
     // The deployed matcher prices a growth leg on the wrapper's capital-derived depth and skew cap (ext v3), so the quote (and the fee signed from
     // it) grows with the order's size. `ext` null = a leg with no caps (growth off); a closed / unreadable view is never priced on the context's depth.
+    // A growth asset whose view is not built yet (growthRoom loading / error) is UNKNOWN: no quote at all, never the context's depth.
+    const growthUnknown = !i.growth && (L.growthRoom === "loading" || L.growthRoom === "error");
     const ext = i.growth ? matcherExtCapsFromGrowth(i.growth, mark) : null;
-    out.quote = preTradeQuote(quoteCtx, mark, out.clampToQ ?? i.sizeQ, i.direction === "long", {
+    out.quote = growthUnknown ? null : preTradeQuote(quoteCtx, mark, out.clampToQ ?? i.sizeQ, i.direction === "long", {
       bandBps: L.bandBps ?? undefined,
       headroomQ: lim && lim.maxQ !== UNLIMITED_CAPACITY ? lim.maxQ : undefined,
       ext,

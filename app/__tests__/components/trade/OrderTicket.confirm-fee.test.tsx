@@ -58,6 +58,8 @@ vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 
 import { modeFixtures } from "../../helpers/v22-fixtures";
 import { OrderTicket } from "@/components/trade/OrderTicket";
+// Round 10: these pin the fee PARTS (what is added once, never twice); the display margin has its own tests (spread-size-aware).
+vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "0");
 
 const SLAB = "CjdnH8fTmxNMsuUevBt9VjSi87E3ESTcuWuoSrjUjvXE";
 const WALLET = new PublicKey("11111111111111111111111111111111");

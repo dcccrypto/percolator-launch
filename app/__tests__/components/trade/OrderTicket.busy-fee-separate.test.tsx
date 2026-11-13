@@ -61,6 +61,8 @@ import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { effectivePriceE6, execFillFromLogs } from "@/lib/v22/exec-fill";
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { getSavedEntry } from "@/lib/entry-price";
+// Round 10: these pin the fee PARTS (what is added once, never twice); the display margin has its own tests (spread-size-aware).
+vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "0");
 
 const SLAB = "CjdnH8fTmxNMsuUevBt9VjSi87E3ESTcuWuoSrjUjvXE";
 const WALLET = new PublicKey("11111111111111111111111111111111");
