@@ -191,10 +191,16 @@ describe("matcherExtCapsFromGrowth: depth-bound clamp, ties, closed", () => {
     expect(c.liquidityNotionalE6).toBe(4n * ((4_000_000n * P) / 1_000_000n)); // 1.6e9, not 4e9
     expect(c.liquidityNotionalE6).toBeLessThan(4_000_000_000n);
   });
-  it("a TIE between the capital cap and the depth cap takes the min of the two liquidities (never above the program's)", () => {
-    const c = matcherExtCapsFromGrowth(view({ capDepthE6: 1_000_000_000n, nCapQ: 10_000_000n }), P)!;
-    expect(c.liquidityNotionalE6).toBeLessThanOrEqual(4_000_000_000n);
-    expect(c.liquidityNotionalE6).toBe(4n * ((10_000_000n * P) / 1_000_000n));
+  it("a TIE between the capital cap and the depth cap takes the min of the two liquidities (never above the program's); reverting the tie fix fails this", () => {
+    // $33.333333: N_cap = floor(1e9 x 1e6 / 33,333,333) = 30,000,000 q (capital cap), and a depth cap that gives the SAME N_cap (tie).
+    // Capital liquidity = 4,000,000,000 exactly; 4 x floor(N_cap x P / 1e6) = 3,999,999,960 is BELOW it, so the min is the second.
+    const P2 = 33_333_333n;
+    const c = matcherExtCapsFromGrowth(view({ capDepthE6: 1_000_000_000n, nCapQ: 30_000_000n }), P2)!;
+    expect(c.inventoryCapQ).toBe(30_000_000n);
+    expect(c.liquidityNotionalE6).toBe(3_999_999_960n);
+    expect(c.liquidityNotionalE6).toBeLessThan(4_000_000_000n);
+    // with no depth cap at all the capital branch is exact (the program's `growth_matcher_caps`)
+    expect(matcherExtCapsFromGrowth(view({ capDepthE6: null, nCapQ: 30_000_000n }), P2)!.liquidityNotionalE6).toBe(4_000_000_000n);
   });
   it("h-lock or no capacity is CLOSED (0, 0); growth off has no caps", () => {
     expect(matcherExtCapsFromGrowth(view({ capDepthE6: null, nCapQ: 10_000_000n, hlock: true }), P)).toEqual({ inventoryCapQ: 0n, liquidityNotionalE6: 0n });

@@ -86,7 +86,7 @@ import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
 import { saveEntryPrice, clearEntryPrice, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
-import { confirmDriftRefusal, feeCapToSend, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
+import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
@@ -432,8 +432,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     feeBaseBps: bigint;
     feeQuoteCharged: boolean;
     feeNotional: bigint;
-    /** Round 10: the fee cap shown at review (null = none), signed as is: it never moves after the confirm opened. */
-    signedFeeBps: bigint | null;
     /** Owner decision 2026-11-12 (item 3): the busy-side part, its own line on the confirm screen (0 / 0n = none). */
     busyFeeBps: bigint;
     busyFeeAtoms: bigint;
@@ -1233,7 +1231,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // estimate. Add it unless the estimate's quote is already charged in it (a busy-side fee above base says nothing about the quote).
   const quoteChargedInEstimate = !!ticketFeeForEstimate(ticketLimits)?.charged;
   const spreadQuote = hasOrder ? spreadFor(positionSize, direction === "long", isReducingOrder(existingPositionSize, direction, positionSize)) : null;
-  const estFeeBps = feeBpsWithSpread(estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits)), spreadQuote, quoteChargedInEstimate);
+  const estFeeBps = feeBpsWithSpread(estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits)), spreadQuote, quoteChargedInEstimate, feeMarginBps);
   // L-5: the quote fee is named in the Fee tooltip whenever it is in the number, whether the P2 estimate or the spread add put it there.
   const quoteFeeAdded = !!spreadQuote?.inFee && !quoteChargedInEstimate;
   const feeExtrasText = quoteFeeAdded
@@ -1241,13 +1239,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     : feeExtrasLabel(ticketFeeForEstimate(ticketLimits));
   // Round 10 (owner decision 4): the est. fill follows the matcher's spread for THIS order's size (the chain charges more on a big order), the same
   // price the position's Entry takes after the fill. Without an exact per-size quote it stays the mark adjusted for the base fee.
-  // Review of #3820 (LOW 5): where the ticket's own polled quote is charged it is the source of the Fee row, so the est. fill reads the SAME quote and
-  // the two cannot disagree; otherwise the per-size read of the quoter.
-  const ticketQuoteBps = ticketLimits.fee?.charged && ticketLimits.quote?.totalBps != null ? ticketLimits.quote.totalBps : null;
+  // Where the ticket's own quote is charged it is the source of the Fee row, so the est. fill reads the SAME rounded value (`fee.requestedBps`, the quoted
+  // price rounded up) and the two cannot differ; otherwise the per-size read of the quoter. The margin is the trader's own (the one the ticket signs).
+  const ticketFeeQuoteBps = ticketLimits.fee?.charged ? Number(ticketLimits.fee.requestedBps) : null;
   const quotedFill = hasOrder
-    ? ticketQuoteBps !== null
-      ? quotedFillPriceE6(oracleE6, { kind: "quote", bps: Number(ticketQuoteBps), execPriceE6: null, inFee: true }, direction === "long")
-      : quotedFillPriceE6(oracleE6, spreadQuote, direction === "long")
+    ? ticketFeeQuoteBps !== null
+      ? quotedFillPriceE6(oracleE6, { kind: "quote", bps: ticketFeeQuoteBps, execPriceE6: null, inFee: true }, direction === "long", feeMarginBps)
+      : quotedFillPriceE6(oracleE6, spreadQuote, direction === "long", feeMarginBps)
     : null;
   const estFillShown = quotedFill ?? estEntry;
   const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
@@ -1455,7 +1453,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const entryBusyQuoted: bigint | null = busyMayApply || entryBusyFeeBps > 0n ? entryBusyFeeBps : null;
     // The cap signed is what it was before (the P2 fee-channel cap when on, else the hook's chain cap). Council r9 Attacker A is answered by
     // `confirmedFeeCap` (no silent raise on a 98) and `busyGuard` (a fresh read of the busy-side rate right before the wallet).
-    const feeCapToSign: bigint | undefined = feeCapToSend(confirmed, ticketLimits.fee?.channel.enabled ? ticketLimits.fee.signedFeeBps : undefined);
+    // NOTE (round 10): on a v2.2 market useTrade does NOT sign this value: it signs the chain's worst-case cap (fetchTradeFeeBps: base + worst-case matcher fee + 5, round 9
+    // behaviour), and this is only its FALLBACK (and the signed value on non-v2.2 builds). The size-aware quote fixes the SHOWN spread; it does not change what is signed.
+    const feeCapToSign: bigint | undefined = ticketLimits.fee?.channel.enabled ? ticketLimits.fee.signedFeeBps : undefined;
     const busyGuard = confirmed
       ? { confirmedBusyFeeBps: confirmed.busyFeeBps, direction, takerEffQ: existingPositionSize, sizeQ: snapshotSize ?? positionSize }
       : undefined;
@@ -2320,7 +2320,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // L-7: the confirm's fee is computed at render from the quote read when the confirm opened (the same read as its spread row), not from
   // the click-time estimate, so a refreshed quote moves both rows together.
   const confirmQuoteNow = confirmSnapshot ? spreadFor(confirmSnapshot.positionSize, direction === "long", isReducingOrder(existingPositionSize, direction, confirmSnapshot.positionSize)) : null;
-  const confirmFeeBpsNow = confirmSnapshot ? feeBpsWithSpread(confirmSnapshot.feeBaseBps, confirmQuoteNow, confirmSnapshot.feeQuoteCharged) : tradingFeeBps;
+  const confirmFeeBpsNow = confirmSnapshot ? feeBpsWithSpread(confirmSnapshot.feeBaseBps, confirmQuoteNow, confirmSnapshot.feeQuoteCharged, feeMarginBps) : tradingFeeBps;
   const confirmFeeNow = confirmSnapshot ? computeTradingFee(confirmSnapshot.feeNotional, confirmFeeBpsNow) : 0n;
 
   return (
@@ -2974,7 +2974,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               feeBaseBps: estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits)),
               feeQuoteCharged: quoteChargedInEstimate,
               feeNotional: (positionSize * oracleE6) / 1_000_000n,
-              signedFeeBps: ticketLimits.fee?.channel.enabled ? ticketLimits.fee.signedFeeBps : null,
               busyFeeBps: busyFee > 0n ? busyFeeBps : 0n,
               busyFeeAtoms: busyFee,
               busyFixed1x,
@@ -3158,7 +3157,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               snapshot.worstFillPriceE6,
               snapshot.depositAtoms,
               snapshot.busyFeeBps,
-              { direction: snapshot.direction, leverage: snapshot.leverage, busyFeeBps: snapshot.busyFeeBps, signedFeeBps: snapshot.signedFeeBps },
+              { direction: snapshot.direction, leverage: snapshot.leverage, busyFeeBps: snapshot.busyFeeBps },
             );
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}

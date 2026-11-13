@@ -1,7 +1,8 @@
 /**
- * Review of #3820 (HIGH 1, MED 2): the ticket passes the REDUCING flag of its own order to the spread quoter, and a confirmed order signs the fee
- * cap that was shown when the confirm opened: a cap that rises afterwards is never signed silently (the wrapper then refuses with 98 and the
- * trader reviews again). The REAL ticket mounts the REAL confirm modal.
+ * Review of #3820: (a) the ticket passes the REDUCING flag of its own order to the spread quoter; (b) with the P2 flag OFF (the preview's
+ * configuration: no ticket quote, no ticket fee) the Fee row, Est. fill and the confirm's fee show the size-aware spread from the quoter (+ the margin);
+ * (c) with P2 on, Est. fill reads the SAME rounded quote as the Fee row. The REAL ticket mounts the REAL confirm modal.
+ * What is signed is NOT asserted here: on v2.2 useTrade signs the chain's worst-case cap (round 9 behaviour), unchanged by this PR.
  */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
@@ -30,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   auto: null as null | "long" | "short",
   quoterCalls: [] as Array<[bigint, boolean, boolean | undefined]>,
   cap: null as null | bigint,
+  charged: false,
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: mocks.useWalletCompat, useConnectionCompat: mocks.useConnectionCompat }));
@@ -44,7 +46,7 @@ vi.mock("@/hooks/useSpreadQuoter", () => ({
 // The ticket's own fee read: a fee-channel market whose signed cap the test moves between the review and the click.
 vi.mock("@/lib/limits/ticket", async (orig) => {
   const m = await orig<typeof import("@/lib/limits/ticket")>();
-  return { ...m, deriveTicketLimits: (i: Parameters<typeof m.deriveTicketLimits>[0]) => { const r = m.deriveTicketLimits(i); return mocks.cap === null ? r : { ...r, fee: { channel: { enabled: true, protocolMaxBps: 100 }, signedFeeBps: mocks.cap, requestedBps: 23n, marginBps: 2n, verdict: "ok" as const, charged: false } }; } };
+  return { ...m, deriveTicketLimits: (i: Parameters<typeof m.deriveTicketLimits>[0]) => { const r = m.deriveTicketLimits(i); return mocks.cap === null ? r : { ...r, fee: { channel: { enabled: true, protocolMaxBps: 100 }, signedFeeBps: mocks.cap, requestedBps: 23n, marginBps: 2n, verdict: "ok" as const, charged: mocks.charged } }; } };
 });
 // P2 off (the deployed configuration): the estimate's QUOTE is not charged; a busy-side fee can still be in it (M9).
 vi.mock("@/lib/limits/estimated-fee", async (orig) => ({
@@ -117,6 +119,7 @@ beforeEach(() => {
   mocks.charged = false;
   mocks.auto = null;
   mocks.cap = null;
+  mocks.charged = false;
   mocks.quoterCalls.length = 0;
   mocks.growthRoom = null;
   mocks.effArgs.length = 0;
@@ -162,23 +165,44 @@ describe("the ticket's spread quote is asked as a reduce only when the order red
   });
 });
 
-describe("MED 2: the confirmed order signs the cap shown at review", () => {
-  it("the live cap rises after the confirm opened: the reviewed cap is signed, not the new one", async () => {
-    mocks.cap = 70n;
-    await openConfirm();
-    mocks.cap = 95n; // the quote / volatility moved while the confirm was open
-    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5.5" } }); // the ticket re-derives
-    await confirmClick();
-    expect(mocks.trade).toHaveBeenCalledTimes(1);
-    expect(mocks.trade.mock.calls[0][0].feeBps).toBe(70n);
-    expect(mocks.trade.mock.calls[0][0]).toMatchObject({ confirmedFeeCap: true });
+const cellValue = (label: string) => (screen.getByText(label).closest("div") as HTMLElement).textContent ?? "";
+
+describe("P2 OFF (the preview): the size-aware spread is what the ticket shows", () => {
+  it("Fee row = base 30 + the quoter's 38 + the 2 bp margin = 70 bps; Est. fill = mark moved by 40 bps; the confirm's fee is the same 70 bps", async () => {
+    mocks.quoteBps = 38; // the quoter's per-size read (the ticket has no quote of its own with P2 off: mocks.cap = null)
+    await typeSize("5");
+    // a 5 USDC order: 70 bps = 0.035 (shown 0.034999)
+    expect(cellValue("Fee (est.)")).toMatch(/0\.0349/);
+    expect(cellValue("Est. fill")).toMatch(/1\.2048/); // 1.20 x (1 + 40 bps) rounded up
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    expect(screen.getByText("Trading Fee (est.):").parentElement?.textContent).toMatch(/0\.0349/);
   });
-  it("no fee channel quoted at review: no cap is signed, even if one appears afterwards", async () => {
-    mocks.cap = null;
-    await openConfirm();
-    mocks.cap = 95n;
-    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5.5" } });
-    await confirmClick();
-    expect(mocks.trade.mock.calls[0][0].feeBps).toBeUndefined();
+  it("a bigger quote moves all of them together (the spread follows the size the quoter was asked for)", async () => {
+    mocks.quoteBps = 60;
+    await typeSize("5");
+    expect(cellValue("Fee (est.)")).toMatch(/0\.0459/); // 92 bps of 5
+    expect(cellValue("Est. fill")).toMatch(/1\.2074/); // 62 bps
+  });
+});
+
+describe("P2 ON: Est. fill reads the Fee row's own rounded quote, not a different one", () => {
+  it("ticket quote 23 bps (fee.requestedBps) vs the quoter's 40: Est. fill and the Fee row both use 23 + 2", async () => {
+    mocks.cap = 70n;
+    mocks.charged = true;
+    mocks.quoteBps = 40; // must NOT be what Est. fill shows
+    await typeSize("5");
+    expect(cellValue("Est. fill")).toMatch(/1\.203/);
+    expect(cellValue("Est. fill")).not.toMatch(/1\.2048/);
+    expect(cellValue("Fee (est.)")).toMatch(/0\.0274/); // (30 + 23 + 2) bps of 5 = 0.0275
+  });
+  it("the trader's own margin is used in the figures: the ticket's margin (10 bp, set at mount) moves Est. fill and the Fee row by 10, not the env default 2", async () => {
+    vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "10");
+    mocks.quoteBps = 38;
+    withPosition(0n);
+    render(<OrderTicket slabAddress={SLAB} />); // the margin state is read here
+    vi.unstubAllEnvs(); // the default is 2 again from now on: only the ticket's own value can give 10
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    expect(cellValue("Est. fill")).toMatch(/1\.20576/); // 48 bps
+    expect(cellValue("Fee (est.)")).toMatch(/0\.0389/); // 78 bps of 5
   });
 });
