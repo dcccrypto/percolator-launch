@@ -10,6 +10,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { PublicKey } from "@solana/web3.js";
+import { after } from "next/server";
 import { type DiscoveredMarket, type V17MarketGroupOI, type RiskParams } from "@percolatorct/sdk";
 import { discoverMarkets } from "@/lib/v22/discovery";
 import { lotExpOf } from "@/lib/v22/lot";
@@ -321,11 +322,6 @@ export async function discoverMarketsOnChain(
   }
 }
 
-/**
- * The discovered rows /api/markets serves when Supabase is not configured (see the module comment).
- * `filter` narrows the rows before the LP overlay (the route's ?program_id= / ?search=), so a narrowed
- * request does not pay the LP reads for rows it drops. [] when discovery finds nothing or fails.
- */
 // ── One shared, short-lived copy per server instance (same pattern as loadMergedMarketRows) ──────────
 //
 // Without Supabase (the v2.2 preview) every /api/markets and /api/stats request ran this whole path: a Blob
@@ -336,6 +332,9 @@ export async function discoverMarketsOnChain(
 // `s-maxage=5, stale-while-revalidate=20`: a copy younger than 5 s is served as is; one 5-25 s old is served
 // while ONE background read refreshes it (so a caller never waits on the RPC fan-out while a recent copy
 // exists); older than that, the caller waits for a fresh read. A row is never older than the header allows.
+// An in-flight read is shared only while it is younger than the fresh window, so a hung RPC fan-out costs at
+// most one extra read per 5 s per instance. `maxAgeMs` (the route's post-registration ?fresh=) caps the
+// accepted age and never serves stale. A lowered MARKET_ROWS_MEMO_MS also drops the stale window.
 const DISCOVERED_ROWS_MEMO_MAX_MS = 5_000;
 const DISCOVERED_ROWS_STALE_MS = 20_000;
 
@@ -368,25 +367,40 @@ export function resetDiscoveredRowsCache(): void {
  * nothing) is not cached.
  */
 export async function loadDiscoveredMarketRows(
-  opts: { filter?: (row: Row) => boolean } = {},
+  opts: { filter?: (row: Row) => boolean; maxAgeMs?: number } = {},
 ): Promise<Row[]> {
   const ttl = discoveredRowsMemoTtlMs();
   // Memo off: the original path, where `filter` runs before the LP overlay so a narrowed request skips LP reads.
   if (ttl === 0) return loadDiscoveredMarketRowsUncached(opts.filter);
-  const rows = await sharedDiscoveredRows(ttl);
+  const rows = await sharedDiscoveredRows(ttl, opts.maxAgeMs);
   return opts.filter ? rows.filter(opts.filter) : rows.slice();
 }
 
-function sharedDiscoveredRows(ttl: number): Promise<Row[]> {
+function sharedDiscoveredRows(ttl: number, maxAgeMs?: number): Promise<Row[]> {
   const now = Date.now();
-  if (discoveredMemo && now - discoveredMemo.at < ttl) return Promise.resolve(discoveredMemo.rows);
-  if (discoveredMemo && now - discoveredMemo.at < ttl + DISCOVERED_ROWS_STALE_MS) {
+  const fresh = maxAgeMs === undefined ? ttl : Math.min(ttl, Math.max(0, maxAgeMs));
+  // A capped memo (MARKET_ROWS_MEMO_MS below the default) or a ?fresh= caller never gets the stale window.
+  const stale = maxAgeMs === undefined && ttl === DISCOVERED_ROWS_MEMO_MAX_MS ? DISCOVERED_ROWS_STALE_MS : 0;
+  if (discoveredMemo && now - discoveredMemo.at < fresh) return Promise.resolve(discoveredMemo.rows);
+  if (discoveredMemo && now - discoveredMemo.at < fresh + stale) {
     // Stale but within stale-while-revalidate: serve it, refresh in the background (errors are swallowed —
     // a failed refresh keeps the stale copy until it ages out, then a caller waits for a fresh read).
-    refreshDiscoveredRows(ttl, now).catch(() => undefined);
+    keepAliveAfterResponse(refreshDiscoveredRows(fresh, now).catch(() => undefined));
     return Promise.resolve(discoveredMemo.rows);
   }
-  return refreshDiscoveredRows(ttl, now);
+  return refreshDiscoveredRows(fresh, now);
+}
+
+/**
+ * Keep a background refresh running after the response is sent (Next `after`: on Vercel the function is not
+ * frozen until it settles). Outside a request scope (tests, scripts) `after` throws; the promise still runs.
+ */
+function keepAliveAfterResponse(p: Promise<unknown>): void {
+  try {
+    after(p);
+  } catch {
+    /* not in a request scope */
+  }
 }
 
 function refreshDiscoveredRows(ttl: number, now: number): Promise<Row[]> {

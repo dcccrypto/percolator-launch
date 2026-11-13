@@ -208,7 +208,10 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
       null;
     const searchTrimmed = searchParam?.trim().toLowerCase() ?? null;
 
+    // ?fresh= (post-registration, see GET below): a shared copy at most FRESH_MAX_AGE_MS old, never a stale one.
+    const fresh = request?.nextUrl?.searchParams?.has("fresh") ?? false;
     const rows = await loadDiscoveredMarketRows({
+      ...(fresh ? { maxAgeMs: FRESH_MAX_AGE_MS } : {}),
       filter: (m) => {
         if (programIdParam && m.program_id !== programIdParam) return false;
         if (!listable(m)) return false;

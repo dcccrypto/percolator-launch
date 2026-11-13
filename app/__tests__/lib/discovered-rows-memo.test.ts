@@ -112,8 +112,45 @@ describe("discovered-rows memo", () => {
     h.discover.mockRejectedValueOnce(new Error("rpc down"));
     vi.setSystemTime(1_000_000 + 6_000);
     expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort());
-    await Promise.resolve();
-    expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort());
+    await vi.waitFor(() => expect(h.discover).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 0)); // let the rejected refresh settle
+    expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort()); // still the stale copy
+    expect(h.discover).toHaveBeenCalledTimes(3); // and the next stale caller started a new refresh
+  });
+
+  it("?fresh= (maxAgeMs) accepts a copy at most that old and never serves stale", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+    await loadDiscoveredMarketRows();
+    vi.setSystemTime(1_000_000 + 2_999);
+    await loadDiscoveredMarketRows({ maxAgeMs: 3_000 });
+    expect(h.discover).toHaveBeenCalledTimes(1);
+    h.discover.mockResolvedValueOnce([market(2)]);
+    vi.setSystemTime(1_000_000 + 3_000);
+    expect(slabs(await loadDiscoveredMarketRows({ maxAgeMs: 3_000 }))).toEqual([B]); // waited for the new read
+    expect(h.discover).toHaveBeenCalledTimes(2);
+  });
+
+  it("a MARKET_ROWS_MEMO_MS below 5 s also drops the stale window", async () => {
+    vi.stubEnv("MARKET_ROWS_MEMO_MS", "1000");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+    await loadDiscoveredMarketRows();
+    h.discover.mockResolvedValueOnce([market(2)]);
+    vi.setSystemTime(1_000_000 + 1_000);
+    expect(slabs(await loadDiscoveredMarketRows())).toEqual([B]);
+  });
+
+  it("a reset while a read is in flight: that read does not repopulate the memo", async () => {
+    let release!: (v: unknown) => void;
+    h.discover.mockImplementationOnce(() => new Promise((r) => { release = r; }));
+    const pending = loadDiscoveredMarketRows();
+    await vi.waitFor(() => expect(h.discover).toHaveBeenCalledTimes(1));
+    resetDiscoveredRowsCache();
+    release([market(1)]);
+    expect(slabs(await pending)).toEqual([A]); // its own caller still gets it
+    expect(slabs(await loadDiscoveredMarketRows())).toEqual([A, B].sort()); // but the next caller reads again
+    expect(h.discover).toHaveBeenCalledTimes(2);
   });
 
   it("an empty result (discovery failed / found nothing) is not cached", async () => {
