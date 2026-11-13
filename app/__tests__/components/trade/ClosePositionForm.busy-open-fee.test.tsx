@@ -40,8 +40,8 @@ function realised(): bigint {
   const openFee = (notionalOpen * 30n) / 10_000n + spreadFee + BUSY;
   const closeNotional = (SIZE * MARK) / 1_000_000n;
   const closeFee = (closeNotional * 52n) / 10_000n;
-  const opened = applyFill(null, { q: SIZE, bookedPriceE6: RISK, feeAtoms: openFee });
-  return applyFill(opened.book, { q: -SIZE, bookedPriceE6: MARK, feeAtoms: closeFee }).closedResult as bigint;
+  const opened = applyFill(null, { q: SIZE, bookedPriceE6: RISK, feeAtoms: openFee, funding: { netPaid: 0n, legs: 1 } });
+  return applyFill(opened.book, { q: -SIZE, bookedPriceE6: MARK, feeAtoms: closeFee, funding: { netPaid: 0n, legs: 0 } }).closedResult as bigint;
 }
 
 describe("close dialog: the busy-side fee paid at open is in the net result", () => {
@@ -87,5 +87,50 @@ describe("close dialog: the busy-side fee paid at open is in the net result", ()
     expect(net.className).toContain("--long");
     expect(screen.queryByTestId("close-net-excl-busy")).toBeNull();
     expect(screen.queryByTestId("close-busy-open-fee")).toBeNull();
+  });
+});
+
+describe("r10 owner decision 1: the close dialog's estimate includes the funding paid so far", () => {
+  const base = { ...props, busyOpenFeeAtoms: BUSY, busyFeeMayApply: true };
+  const netAtoms = () => Math.round(num(screen.getByTestId("close-net-result")) * 1e6);
+  it("funding paid is subtracted from the net, shown on its own row, and the estimate equals the realised result by the trade book (same funding)", () => {
+    const { unmount } = render(<ClosePositionForm {...base} fundingPaidAtoms={0n} />);
+    const without = netAtoms();
+    unmount();
+    render(<ClosePositionForm {...base} fundingPaidAtoms={51_132n} />);
+    expect(netAtoms()).toBe(without - 51_132);
+    expect(screen.getByTestId("close-funding").textContent).toContain("Funding paid so far");
+    expect(screen.getByTestId("close-funding").textContent).toContain("0.051132");
+    expect(screen.queryByTestId("close-net-excl-funding")).toBeNull();
+    // realised by the book: same fills, funding counters 0 -> 51,132 over the hold
+    const notionalOpen = (SIZE * RISK) / 1_000_000n;
+    const openFee = (notionalOpen * 30n) / 10_000n + (SIZE * (ENTRY - RISK)) / 1_000_000n + BUSY;
+    const closeFee = (((SIZE * MARK) / 1_000_000n) * 52n) / 10_000n;
+    const o = applyFill(null, { q: SIZE, bookedPriceE6: RISK, feeAtoms: openFee, funding: { netPaid: 0n, legs: 1 } });
+    const real = applyFill(o.book, { q: -SIZE, bookedPriceE6: MARK, feeAtoms: closeFee, funding: { netPaid: 51_132n, legs: 0 } }).closedResult as bigint;
+    expect(Math.abs(netAtoms() - Number(real))).toBeLessThanOrEqual(5);
+  });
+  it("funding RECEIVED adds to the net and is labelled received", () => {
+    render(<ClosePositionForm {...base} fundingPaidAtoms={-3_007n} />);
+    expect(screen.getByTestId("close-funding").textContent).toContain("Funding received so far");
+  });
+  it("a partial close takes its share of the funding", () => {
+    const { unmount } = render(<ClosePositionForm {...base} fundingPaidAtoms={0n} />);
+    fireEvent.click(screen.getAllByTestId("close-percent-chip").find((c) => c.getAttribute("data-percent") === "50") as HTMLElement);
+    const w0 = netAtoms();
+    unmount();
+    render(<ClosePositionForm {...base} fundingPaidAtoms={10_000n} />);
+    fireEvent.click(screen.getAllByTestId("close-percent-chip").find((c) => c.getAttribute("data-percent") === "50") as HTMLElement);
+    expect(Math.abs(netAtoms() - (w0 - 5_000))).toBeLessThanOrEqual(1);
+  });
+  it("NEGATIVE: unknown funding keeps the net but tags it 'excl. funding' and never green", () => {
+    // a mark far above the entry so the net would be a clear profit
+    render(<ClosePositionForm {...base} busyOpenFeeAtoms={0n} currentPrice={95_000_000n} fundingPaidAtoms={null} />);
+    expect(screen.getByTestId("close-net-excl-funding")).toBeInTheDocument();
+    expect(screen.getByTestId("close-net-result").className).not.toContain("--long");
+  });
+  it("the old 'funding not included' wording is gone", () => {
+    render(<ClosePositionForm {...base} fundingPaidAtoms={0n} />);
+    expect(document.body.textContent).not.toMatch(/funding.{0,30}not included/i);
   });
 });

@@ -47,6 +47,8 @@ import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import type { AssetAdlFactors } from "@/lib/v17-adl";
 import { adlEffectiveQuantityCeil, effectiveLeg } from "@/lib/limits/effective-quantity";
 import { computeEngineLiqPrice } from "@/lib/liquidation-risk";
+import { fundingNetOf, fundingPaidSoFar, pendingFundingPaidAtoms } from "@/lib/funding-flow";
+import { loadBookByWallet } from "@/lib/trade-book";
 import { riskEntryFromSettled, riskLegOf, settledRiskAnchorE6, type RiskLegCarrier, type RiskLegSnap } from "@/lib/risk-entry";
 
 export interface PositionPnlInput {
@@ -109,6 +111,13 @@ export interface PositionPnlInput {
    */
   riskLeg?: RiskLegSnap | null;
   activeLegCount?: number | null;
+  /**
+   * r10: the portfolio's net funding counter now (paid - received, atoms; the Account carries it) and the trade book kept on this device
+   * (`fundingBase` = the counter when the trade opened, `q` = the size the book follows). With the leg's pending funding they give the funding the
+   * position has paid so far. The book counts only while its size equals the measured effective size (the same rule the cached entry follows).
+   */
+  fundingNetPaidAtoms?: bigint | null;
+  cachedFundingBook?: { fundingBase: bigint | null; q: bigint } | null;
 }
 
 export interface PositionPnl {
@@ -135,6 +144,12 @@ export interface PositionPnl {
    * that charges one.
    */
   busyFeePaidAtoms?: bigint | null;
+  /**
+   * r10: funding the position has paid so far (atoms, whole position, negative = received): settled since the trade opened + accrued and not
+   * yet settled. Part of the trade result. Null = not knowable here (no trade book on this device, another device, a pending value that cannot
+   * be read, several legs): callers say "excl. funding" rather than treat it as zero.
+   */
+  fundingPaidAtoms?: bigint | null;
   /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed (needs a RECORDED entry: server or cache). */
   pnlKnown: boolean;
   /**
@@ -296,6 +311,10 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     riskEntry,
     riskEntrySettled: settledEntry !== null,
     busyFeePaidAtoms: resolved.source === "cache" && cacheCurrent ? input.cachedBusyFeeAtoms ?? null : null,
+    fundingPaidAtoms:
+      effectiveSize !== null && effectiveSize !== 0n && !resetObligation && input.activeLegCount === 1 && input.cachedFundingBook != null && input.cachedFundingBook.q === effectiveSize
+        ? fundingPaidSoFar(input.cachedFundingBook.fundingBase, input.fundingNetPaidAtoms, pendingFundingPaidAtoms(adlFactors?.settle, input.riskLeg, basisQ, aBasis))
+        : null,
     riskKnown:
       flat || (effectiveSize !== null && !resetObligation && resolved.source !== "unknown" && resolved.entry > 0n && markE6 > 0n),
     liquidationPriceE6:
@@ -366,9 +385,13 @@ export function lookupKnownEntries(
   cachedBusyFeeAtoms: bigint | null;
   /** What the cached entry was saved for (r8); `null` when nothing is cached. Feed it to `computePositionPnl` with the entry. */
   cachedEntryCheck: EntryCheck | null;
+  /** r10: the device's trade book for the position (funding base + size), for the funding so far; null = none. */
+  cachedFundingBook: { fundingBase: bigint | null; q: bigint } | null;
 } {
   const saved = getSavedEntry(slab, accountIdx, wallet);
+  const book = wallet ? loadBookByWallet(wallet, slab) : null;
   return {
+    cachedFundingBook: book ? { fundingBase: book.fundingBase, q: book.q } : null,
     serverEntryE6: null, // TODO(indexer#211): server-authoritative entry slots in here
     cachedEntryE6: saved?.entryPriceE6 ?? 0n,
     cachedRiskEntryE6: saved?.bookedPriceE6 ?? 0n,
@@ -429,6 +452,11 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
     cachedRiskEntryE6: cachedLive.riskEntryE6,
     cachedBusyFeeAtoms: cachedLive.busyFeeAtoms,
     cachedEntryCheck: cachedLive.check,
+    fundingNetPaidAtoms: fundingNetOf(pos.account),
+    cachedFundingBook: (() => {
+      const b = pos.entryCacheWallet && pos.slabAddress !== undefined ? loadBookByWallet(pos.entryCacheWallet, pos.slabAddress) : null;
+      return b ? { fundingBase: b.fundingBase, q: b.q } : null;
+    })(),
     onChainPnl: pos.account?.pnl ?? 0n,
     initialMarginBps: pos.initialMarginBps,
     maintenanceMarginBps: pos.maintenanceMarginBps,
@@ -483,6 +511,8 @@ export function terminalPositionPnl(args: {
     serverEntryE6: known.serverEntryE6,
     cachedEntryE6: onChainEntry > 0n ? onChainEntry : known.cachedEntryE6,
     ...(onChainEntry > 0n ? {} : { cachedRiskEntryE6: known.cachedRiskEntryE6, cachedBusyFeeAtoms: known.cachedBusyFeeAtoms, cachedEntryCheck: known.cachedEntryCheck }),
+    fundingNetPaidAtoms: fundingNetOf(account),
+    cachedFundingBook: known.cachedFundingBook,
     onChainPnl: account.pnl,
     initialMarginBps: args.initialMarginBps,
     maintenanceMarginBps: args.maintenanceMarginBps,

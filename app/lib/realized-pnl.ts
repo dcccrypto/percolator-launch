@@ -1,6 +1,7 @@
 /**
  * M7: the result of a finished trade, worded for the UI. The number itself comes from lib/trade-book.ts (price PnL on booked prices
- * over the trade's whole lifetime minus every fee_atoms, which carry the spread). Funding is not included, and the copy says so.
+ * over the trade's whole lifetime minus every fee_atoms, which carry the spread, minus the funding the chain moved on the position:
+ * lib/funding-flow.ts). The same figure is the close toast, the Portfolio's realised sum and the close dialogs' estimate once closed.
  */
 import { formatTokenAmount } from "@/lib/format";
 
@@ -24,7 +25,7 @@ export function closeResultText(o: {
 }): string {
   const parts = [o.base];
   if (o.execPriceText) parts.push(`Effective price ${o.execPriceText}.`);
-  if (o.result !== null) parts.push(`Trade result ${formatSignedAtoms(o.result, o.decimals, o.symbol)} (trading fees, spread and other non-base fees included; funding and maintenance fees not included). Counted from trades made on this device; a trade on another device can make this figure wrong.`);
+  if (o.result !== null) parts.push(`Trade result ${formatSignedAtoms(o.result, o.decimals, o.symbol)} (trading fees, spread, other fees and funding included). Counted from trades made on this device; a trade on another device can make this figure wrong.`);
   return parts.join(" ");
 }
 

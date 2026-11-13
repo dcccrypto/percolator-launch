@@ -224,3 +224,23 @@ describe("wiring: the risk surfaces read the risk entry, display keeps the entry
     expect(src("hooks/usePortfolio.ts")).toContain("riskEntryPrice: pnlResult.riskEntry,");
   });
 });
+
+// r10 owner decision 1: funding paid so far on the open position = (counter now - counter at open, from the device's book) + pending.
+describe("computePositionPnl.fundingPaidAtoms", () => {
+  const withIdx = (fLong: bigint): Partial<PositionPnlInput> => ({ adlFactors: { ...FACTORS, settle: { ...SETTLE, fLong } }, fundingNetPaidAtoms: 1_060n, cachedFundingBook: { fundingBase: 1_000n, q: UNIT } });
+  it("settled since open (60) + pending (7) = 67 paid", () => {
+    expect(computePositionPnl(input(withIdx(-7n * ADL_ONE))).fundingPaidAtoms).toBe(67n);
+  });
+  it("nothing pending: just the settled part; received funding reads negative", () => {
+    expect(computePositionPnl(input(withIdx(0n))).fundingPaidAtoms).toBe(60n);
+    expect(computePositionPnl(input(withIdx(5n * ADL_ONE))).fundingPaidAtoms).toBe(55n);
+  });
+  it("NEGATIVE: no book on this device, a book of another size, a null base, several legs or an unreadable index: unknown, never zero", () => {
+    expect(computePositionPnl(input({ ...withIdx(0n), cachedFundingBook: null })).fundingPaidAtoms).toBeNull();
+    expect(computePositionPnl(input({ ...withIdx(0n), cachedFundingBook: { fundingBase: 1_000n, q: 2n * UNIT } })).fundingPaidAtoms).toBeNull();
+    expect(computePositionPnl(input({ ...withIdx(0n), cachedFundingBook: { fundingBase: null, q: UNIT } })).fundingPaidAtoms).toBeNull();
+    expect(computePositionPnl(input({ ...withIdx(0n), activeLegCount: 2 })).fundingPaidAtoms).toBeNull();
+    expect(computePositionPnl(input({ ...withIdx(0n), adlFactors: { ...FACTORS, settle: null } })).fundingPaidAtoms).toBeNull();
+    expect(computePositionPnl(input({ ...withIdx(0n), fundingNetPaidAtoms: null })).fundingPaidAtoms).toBeNull();
+  });
+});

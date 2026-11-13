@@ -82,7 +82,7 @@ describe("computePositionPnl", () => {
 describe("lookupKnownEntries", () => {
   beforeEach(() => localStorage.clear());
   it("reads this device's cache; the server slot is the single place indexer#211 plugs in", () => {
-    expect(lookupKnownEntries("S", 0, "W")).toEqual({ serverEntryE6: null, cachedEntryE6: 0n, cachedRiskEntryE6: 0n, cachedBusyFeeAtoms: null, cachedEntryCheck: null });
+    expect(lookupKnownEntries("S", 0, "W")).toEqual({ serverEntryE6: null, cachedEntryE6: 0n, cachedRiskEntryE6: 0n, cachedBusyFeeAtoms: null, cachedEntryCheck: null, cachedFundingBook: null });
     saveEntryPrice("S", 0, 123n, undefined, "W", 7n);
     expect(lookupKnownEntries("S", 0, "W")).toMatchObject({ cachedEntryE6: 123n, cachedRiskEntryE6: 123n, cachedEntryCheck: { sizeQ: 7n, pending: false } });
   });

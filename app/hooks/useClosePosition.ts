@@ -50,6 +50,7 @@ import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
 import { recordFill } from "@/lib/trade-book";
+import { readFundingSample } from "@/lib/funding-flow";
 import { formatLotPriceE6 } from "@/lib/v22/lot";
 import { closeResultText, recordRealized } from "@/lib/realized-pnl";
 import { PortfolioTargetError, TARGET_COPY, isPortfolioTargetError, verifyPortfolioTarget } from "@/lib/portfolio-target";
@@ -179,7 +180,7 @@ function getFreshPortfolioData(
 /**
  * M7: what a landed close actually did, from the FILL event of its own transaction: the price the trader EFFECTIVELY received (booked
  * price adjusted by the spread part of the fee, lib/v22/exec-fill.ts) and, when the app saw the whole trade, the trade's result over
- * its lifetime (lib/trade-book.ts: price PnL on booked prices minus every fee). The book is updated whatever the toast waits for;
+ * its lifetime (lib/trade-book.ts: price PnL on booked prices minus every fee and the funding paid). The book is updated whatever the toast waits for;
  * the toast waits at most `budgetMs`. Either half is null when unknown; nothing is guessed. No account re-read is involved, so a
  * lagging node cannot hand back a pre-close balance.
  */
@@ -198,7 +199,9 @@ async function measureCloseResult(o: {
   const work = (async (): Promise<{ effectiveE6: bigint | null; result: bigint | null }> => {
     const fill = await readExecFill(o.connection, o.sig, o.programId, { market: new PublicKey(o.slabAddress), taker: o.taker ?? null }, undefined, 3).catch(() => null);
     if (!fill) return { effectiveE6: null, result: null };
-    const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms }, o.onChainQBefore);
+    // r10: the funding counters at the fill's own slot, so the result includes the funding the chain moved on this position.
+    const funding = fill.slot !== undefined ? await readFundingSample(o.connection, fill.taker, fill.slot) : null;
+    const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms, funding }, o.onChainQBefore);
     if (result !== null) recordRealized(o.wallet, o.slabAddress, result);
     return { effectiveE6: effectivePriceE6(fill, o.baseFeeBps), result };
   })().catch(() => ({ effectiveE6: null, result: null }));

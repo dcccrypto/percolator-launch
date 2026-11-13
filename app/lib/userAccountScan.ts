@@ -78,6 +78,7 @@ import {
 } from "@percolatorct/sdk";
 import { parsePortfolio } from "@/lib/v22/layout";
 import { riskLegFields } from "@/lib/risk-entry";
+import { fundingFields } from "@/lib/funding-flow";
 
 // ---------------------------------------------------------------------------
 // Shared UserAccountInfo shape + v17→legacy Account mapper.
@@ -158,6 +159,8 @@ export function portfolioV17ToAccount(portfolio: PortfolioV17): Account {
     adlEpochSnap: activeLeg ? activeLeg.epochSnap : 0n,
     // #3534: the leg snapshots + active-leg count risk math needs to tell a fully settled leg (lib/risk-entry.ts).
     ...riskLegFields(portfolio.legs),
+    // r10: the net funding counter, for the funding paid so far (lib/funding-flow.ts).
+    ...fundingFields(portfolio),
     schedPresent: null,
     schedRemainingQ: null,
     schedAnchorQ: null,

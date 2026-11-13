@@ -52,6 +52,7 @@ import {
 } from "@/lib/portfolio-invalidation";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { riskLegFields } from "@/lib/risk-entry";
+import { fundingFields } from "@/lib/funding-flow";
 
 const MAINNET_STATIC_MARKETS = [
   {
@@ -556,6 +557,8 @@ export function buildV17Position(
     adlEpochSnap: activeLeg ? activeLeg.epochSnap : 0n,
     // #3534: see lib/userAccountScan.ts portfolioV17ToAccount.
     ...riskLegFields(portfolio.legs),
+    // r10: the net funding counter, for the funding paid so far (lib/funding-flow.ts).
+    ...fundingFields(portfolio),
     schedPresent: null,
     schedRemainingQ: null,
     schedAnchorQ: null,

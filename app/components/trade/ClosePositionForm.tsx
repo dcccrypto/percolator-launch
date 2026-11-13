@@ -49,6 +49,13 @@ export interface ClosePositionFormProps {
    * "excl. busy-side fee" (never a green profit that the realised result could contradict). false / omitted = as before.
    */
   busyFeeMayApply?: boolean;
+  /**
+   * r10 owner decision 1: funding the position has paid so far (collateral atoms, WHOLE position, negative = received): what the chain has
+   * already moved since the trade opened plus what has accrued and is not yet settled (lib/funding-flow.ts). It is part of the net result, so
+   * the estimate and the realised "Trade result" agree. null = it could not be worked out (opened on another device, a read failed): the net then
+   * stands but is tagged "excl. funding" (never green). Omitted = the caller does not supply it (no tag, nothing subtracted).
+   */
+  fundingPaidAtoms?: bigint | null;
   currentPrice: bigint;
   capital: bigint;
   /** Index asset symbol for position size (e.g. "SOL"). */
@@ -124,6 +131,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   riskEntryPrice,
   busyOpenFeeAtoms = null,
   busyFeeMayApply = false,
+  fundingPaidAtoms,
   currentPrice: liveCurrentPrice,
   capital,
   symbol,
@@ -230,10 +238,14 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     const busyKnown = busyOpenFeeAtoms !== null && busyOpenFeeAtoms >= 0n;
     const busyOpenFee = busyKnown ? busyFeeShareAtoms(busyOpenFeeAtoms, closeAbs, absPosition) : 0n;
     const netExclBusy = !busyKnown && busyFeeMayApply;
-    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee - openFee - busyOpenFee : null;
+    // r10: the closed part's share of the funding the position has paid so far (signed, toward zero), never a guess when unknown.
+    const fundingKnown = fundingPaidAtoms != null;
+    const fundingShare = fundingKnown && absPosition > 0n ? (fundingPaidAtoms * closeAbs) / absPosition : 0n;
+    const netExclFunding = fundingPaidAtoms === null;
+    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee - openFee - busyOpenFee - fundingShare : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, busyOpenFee, netExclBusy, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
-  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals, busyOpenFeeAtoms, busyFeeMayApply]);
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, busyOpenFee, fundingShare, netExclFunding, netExclBusy, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
+  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals, busyOpenFeeAtoms, busyFeeMayApply, fundingPaidAtoms]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
@@ -250,7 +262,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   const net = netNearZero ? 0n : rawNet;
   // Excluding the spread, a positive figure is not a safe "profit": it stays neutral (a loss is still red).
   const netColor =
-    net === null || net === 0n || (net > 0n && (preview.netExclSpread || preview.netExclBusy))
+    net === null || net === 0n || (net > 0n && (preview.netExclSpread || preview.netExclBusy || preview.netExclFunding))
       ? "text-[var(--text-muted)]"
       : net > 0n
         ? "text-[var(--long)]"
@@ -386,6 +398,11 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
                   excl. spread
                 </span>
               )}
+              {preview.netExclFunding && (
+                <span className="ml-1 text-[10px] text-[var(--text-muted)]" title="The funding this position has paid or received could not be worked out here, so this result excludes it" data-testid="close-net-excl-funding">
+                  excl. funding
+                </span>
+              )}
               {preview.netExclBusy && (
                 <span className="ml-1 text-[10px] text-[var(--text-muted)]" title="This position may have paid a busy-side fee when it was opened, and the amount is not recorded on this device, so this result excludes it" data-testid="close-net-excl-busy">
                   excl. busy-side fee
@@ -438,6 +455,14 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
             <span className="text-[var(--text-dim)]">Busy-side fee (paid when you opened):</span>
             <span className="font-mono font-medium text-[var(--text-secondary)]">
               −{formatTokenAmount(preview.busyOpenFee, decimals)} {colSym}
+            </span>
+          </div>
+        )}
+        {entryKnown && preview.fundingShare !== 0n && (
+          <div className="flex justify-between" data-testid="close-funding">
+            <span className="text-[var(--text-dim)]">{preview.fundingShare > 0n ? "Funding paid so far:" : "Funding received so far:"}</span>
+            <span className="font-mono font-medium text-[var(--text-secondary)]">
+              {preview.fundingShare > 0n ? "−" : "+"}{formatTokenAmount(abs(preview.fundingShare), decimals)} {colSym}
             </span>
           </div>
         )}

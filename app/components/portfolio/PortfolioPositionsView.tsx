@@ -185,6 +185,7 @@ function PortfolioCloseFlow({
       entryPrice={closePnl.pnlKnown ? closePnl.entry : 0n}
       riskEntryPrice={closePnl.pnlKnown ? closePnl.riskEntry : 0n}
       busyOpenFeeAtoms={closePnl.busyFeePaidAtoms ?? null}
+      fundingPaidAtoms={closePnl.fundingPaidAtoms ?? null}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}
       symbol={baseSymbol}
@@ -906,7 +907,7 @@ export function PortfolioPositionsView() {
                   {formatSignedUsd(usdTotals.realizedNetUsd)}
                 </span>
                 <span className="text-xs font-medium text-[var(--text-secondary)]">
-                  realized from trades made on this device (trading fees, spread and other non-base fees included; funding and maintenance fees not included). A trade on another device can make this figure wrong.
+                  realized from trades made on this device (trading fees, spread, other fees and funding included). A trade on another device can make this figure wrong.
                 </span>
               </div>
             )}
