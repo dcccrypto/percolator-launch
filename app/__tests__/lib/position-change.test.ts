@@ -112,6 +112,22 @@ describe("measurePositionChange + pinning", () => {
   });
 });
 
+describe("measurePositionChange retries a failed post-trade read (r10 live check: devnet 429)", () => {
+  it("a read that fails once and then works still measures the change (the funding rides on it)", async () => {
+    h.legs = [leg(0, 80n)];
+    const c = conn({ slot: 600 });
+    let n = 0;
+    c.getMultipleAccountsInfo.mockImplementation(async (_k: PublicKey[], cfg: { minContextSlot?: number }) => {
+      c.calls.push(cfg);
+      if (n++ === 0) throw new Error("429 Too Many Requests");
+      return [acct, acct];
+    });
+    expect(await measurePositionChange(c as unknown as C, PF, MK, "s429", 40n)).toMatchObject({ beforeQ: 40n, afterQ: 80n });
+    expect(c.getMultipleAccountsInfo).toHaveBeenCalledTimes(2);
+    expect(c.calls.every((x) => x.minContextSlot === 600)).toBe(true);
+  });
+});
+
 describe("recordPositionChange / takePositionChange", () => {
   it("hands the measurement to the caller once", async () => {
     recordPositionChange("sig1", Promise.resolve({ beforeQ: 0n, afterQ: 5n }));

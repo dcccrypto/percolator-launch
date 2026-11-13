@@ -2,7 +2,7 @@
 
 import { catchUpAvailableLine } from "@/lib/limits/catchup-estimate";
 import { priceBehindLine } from "@/lib/oracle-stale-gate";
-import { FC, useId, useMemo, useState } from "react";
+import { FC, useEffect, useId, useMemo, useRef, useState } from "react";
 import { formatTokenAmount } from "@/lib/format";
 import { SPREAD_LABEL, feeBpsWithSpread, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
@@ -121,6 +121,37 @@ export interface ClosePositionFormProps {
   onSubmitIntent?: () => void;
 }
 
+/** How long the last good funding figure of the same position is kept while the figure is being read again. After that it is "excl. funding". */
+export const FUNDING_HOLD_MS = 20_000;
+
+/**
+ * r10 live check: a funding read that fails for a moment (public RPC rate limits) must not flip the dialog to "excl. funding". While `value` is
+ * null, the last good value is kept for the SAME position (same side, size and entry: `key`) for up to FUNDING_HOLD_MS. A different position or
+ * size never gets it. After the hold, or with nothing good to hold, null stays null.
+ */
+function useHeldFunding(value: bigint | null | undefined, key: string): bigint | null | undefined {
+  const good = useRef<{ key: string; value: bigint } | null>(null);
+  const nullSince = useRef<number | null>(null);
+  const [, bump] = useState(0);
+  const now = Date.now();
+  if (typeof value === "bigint") {
+    good.current = { key, value };
+    nullSince.current = null;
+  } else if (value === null) {
+    if (nullSince.current === null) nullSince.current = now;
+  } else {
+    nullSince.current = null; // omitted: the caller does not supply funding
+  }
+  if (good.current && good.current.key !== key) good.current = null; // another position or size: never reuse
+  const holding = value === null && good.current !== null && nullSince.current !== null && now - nullSince.current < FUNDING_HOLD_MS;
+  useEffect(() => {
+    if (!holding || nullSince.current === null) return;
+    const t = setTimeout(() => bump((n) => n + 1), Math.max(0, FUNDING_HOLD_MS - (Date.now() - nullSince.current)) + 5);
+    return () => clearTimeout(t);
+  }, [holding, key]);
+  return holding ? good.current!.value : value;
+}
+
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
 }
@@ -133,7 +164,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   riskEntryPrice,
   busyOpenFeeAtoms = null,
   busyFeeMayApply = false,
-  fundingPaidAtoms,
+  fundingPaidAtoms: fundingPaidAtomsRaw,
   holdingFeeExcluded,
   currentPrice: liveCurrentPrice,
   capital,
@@ -172,6 +203,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
 
   const colSym = collateralSymbol ?? symbol;
   const absPosition = abs(positionSize);
+  const fundingPaidAtoms = useHeldFunding(fundingPaidAtomsRaw, `${isLong ? "L" : "S"}:${absPosition}:${entryPrice}`);
 
   const closeAbsForFills =
     percent >= 100 ? absPosition : (absPosition * BigInt(clampClosePercent(percent))) / 100n;
