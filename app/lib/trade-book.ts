@@ -37,6 +37,12 @@ export interface FillIn {
   feeAtoms: bigint;
   /** The portfolio's funding counters sampled at the slot of THIS fill (after it). Absent / null = not read. */
   funding?: FundingSample | null;
+  /**
+   * Council r10 recheck D1: the net funding counter read just BEFORE an open from flat with no active leg, the value written into the open's
+   * memo (lib/funding-memo.ts). Counters cannot move while no leg is held, so it is the base at the open exactly, and the same number every other
+   * device rebuilds from chain. Used only for an open from flat; wins over `funding` there.
+   */
+  fundingBefore?: bigint | null;
 }
 
 const abs = (n: bigint): bigint => (n < 0n ? -n : n);
@@ -54,7 +60,7 @@ function fundingAfter(f: FillIn, remaining: bigint): bigint | null {
  */
 export function applyFill(book: Book | null, f: FillIn): { book: Book | null; closedResult: bigint | null; closedFunding: bigint | null } {
   if (f.q === 0n) return { book, closedResult: null, closedFunding: null };
-  if (!book || book.q === 0n) return { book: { q: f.q, avgE6: f.bookedPriceE6, fees: f.feeAtoms, pnl: 0n, fundingBase: fundingAfter(f, f.q) }, closedResult: null, closedFunding: null };
+  if (!book || book.q === 0n) return { book: { q: f.q, avgE6: f.bookedPriceE6, fees: f.feeAtoms, pnl: 0n, fundingBase: f.fundingBefore ?? fundingAfter(f, f.q) }, closedResult: null, closedFunding: null };
   const sameSide = (book.q > 0n) === (f.q > 0n);
   if (sameSide) {
     const total = abs(book.q) + abs(f.q);

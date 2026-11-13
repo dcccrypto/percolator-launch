@@ -22,16 +22,27 @@
  * so a fill whose fee is not base + the matcher's own request within rounding is NOT priced: the Entry is unknown, as on the trading device.
  * A device that placed such a trade also leaves an explicit "unknown" marker (lib/entry-price.ts) the rebuild never overwrites.
  *
- * Bounds. At most `maxTx` transactions are read per rebuild (default 60), in pages of `pageSize` signatures, sequentially in small groups; a
- * rebuild runs only for a position this device has no current entry for, at most once per cooldown per portfolio and size (memory + storage).
+ * Bounds (Council r10 recheck D6). Keeper cranks land on a trader's portfolio about every 20 s while a position is open and change nothing, so
+ * the walk must not spend its budget on them:
+ *   - a transaction that does not name the wrapper program among its accounts cannot have touched the position and is skipped unread for
+ *     events (a third party cannot push the walk to "unknown" with a truncated log in a transaction that never ran the wrapper);
+ *   - `maxTx` (default 60) counts only transactions that CHANGED this position (a fill or a REDUCE); `maxRead` (default 2,000, about 16 hours
+ *     of cranks at the busiest rate seen) bounds every transaction read, cranks included;
+ *   - reads go in batches (`getTransactions`, one HTTP request) when the connection has it, paced by `paceMs` between batches;
+ *   - `resume`: the position as an earlier walk rebuilt it at `topSig`. A later rebuild reads only the transactions newer than that and joins
+ *     them on, so a position held for days costs only what changed since the last look.
+ * A rebuild runs only for a position this device has no current entry for, at most once per cooldown per portfolio and size (memory + storage).
  *
- * What this does NOT rebuild: the trade book behind the "Trade result" (it also needs the funding counter at the open, which no transaction
- * records). That stays device-local.
- */
+ * Funding (Council r10 recheck D1). The opening fill of a position opened by this app carries the portfolio's funding counter in a memo
+ * (lib/funding-memo.ts). The walk keeps it on that fill, so `bookFromDeltas` can rebuild the trade book behind the Trade result on any device:
+ * the same fills, fees and funding base the trading device recorded.
+  */
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { decodeTxEventsV22 } from "@/lib/v22/sdk/v22-fill-events";
 import { execFillFromLogs, quotedSpreadBpsFloor, type ExecFill } from "@/lib/v22/exec-fill";
 import { busyFeeAfterTrade, entryAfterTrade } from "@/lib/entry-price";
+import { fundingBaseFromTx } from "@/lib/funding-memo";
+import { applyFill, type Book } from "@/lib/trade-book";
 
 /** REDUCE reasons whose `signed_reduced_q` is in ADL-effective position units (the same unit as the fills' executed_q). */
 const EFFECTIVE_UNIT_REDUCE = new Set([2, 3, 6, 7, 8]);
@@ -66,6 +77,20 @@ export interface ChainEntryResult {
   topSig?: string;
   /** The signatures of the changes that make up the current position (set when the walk reached its start): lets a caller tell whether a given transaction belongs to it. */
   positionSigs?: string[];
+  /** The changes that make up the current position, OLDEST first (set with `positionSigs`): what a later walk resumes from. */
+  positionDeltas?: ChainDelta[];
+  /** The size the first of `positionDeltas` started from (0 = flat; the other side when it flipped through flat). */
+  startQ?: bigint;
+  /** Transactions that changed this position among those read (what `maxTx` bounds). */
+  changesRead?: number;
+}
+
+/** A stored walk to continue from: the current position's changes (oldest first) as they stood at `topSig`. */
+export interface ChainResume {
+  topSig: string;
+  qAtTop: bigint;
+  startQ: bigint;
+  deltas: ChainDelta[];
 }
 
 /** One change of the position, from a landed transaction. */
@@ -79,6 +104,8 @@ export interface ChainDelta {
   signedFeeBps?: bigint | null;
   /** The market's own no-busy cap for that transaction's matcher context (what `fetchTradeFeeBps` signs with no busy rate); null = not readable. */
   noBusyCap?: NoBusyCap | null;
+  /** The funding counter the transaction's memo states (lib/funding-memo.ts); null / absent = none. Meaningful only on an opening fill. */
+  fundingBase?: bigint | null;
 }
 
 /** The fee cap an order with NO busy rate signs, and the market maximum it is clamped to. */
@@ -274,13 +301,66 @@ export interface ChainEntryOptions {
   noBusyCap?: (matcherCtx: PublicKey | null) => Promise<NoBusyCap | null>;
   /** Signatures per page (default 50). */
   pageSize?: number;
-  /** Transactions read at most (default 60). */
+  /** Transactions that CHANGED this position read at most (default 60). Transactions that changed nothing are not counted here. */
   maxTx?: number;
-  /** Transactions fetched at once (default 4). */
+  /** Transactions read at most, of any kind (default 2,000). */
+  maxRead?: number;
+  /** Transactions fetched at once (default 10). */
   concurrency?: number;
+  /** Wait between fetch groups, ms (default 0). The page-level sync paces the shared RPC with it. */
+  paceMs?: number;
+  /** Continue an earlier walk (see the header). A resume that does not join up exactly is dropped and the walk starts over. */
+  resume?: ChainResume | null;
 }
 
-type Conn = Pick<Connection, "getSignaturesForAddress" | "getTransaction">;
+type Conn = Pick<Connection, "getSignaturesForAddress" | "getTransaction"> & Partial<Pick<Connection, "getTransactions">>;
+type TxResp = Awaited<ReturnType<Connection["getTransaction"]>>;
+
+/** True when the transaction names `wrapper` among its accounts (static or loaded): only then can it have run the wrapper and changed a position. */
+export function txNamesProgram(tx: { transaction?: { message?: unknown }; meta?: { loadedAddresses?: { writable?: readonly unknown[]; readonly?: readonly unknown[] } | null } | null } | null, program: PublicKey): boolean {
+  const m = tx?.transaction?.message as { staticAccountKeys?: readonly PublicKey[]; accountKeys?: readonly PublicKey[] } | undefined;
+  const keys = m?.staticAccountKeys ?? m?.accountKeys;
+  // Unknown shape: cannot prove the wrapper did not run, so treat it as named (read its events).
+  if (!keys) return true;
+  const eq = (k: unknown): boolean => {
+    if (k instanceof Object && typeof (k as PublicKey).equals === "function") return (k as PublicKey).equals(program);
+    return typeof k === "string" && k === program.toBase58();
+  };
+  if (keys.some(eq)) return true;
+  const la = tx?.meta?.loadedAddresses;
+  return !!la && [...(la.writable ?? []), ...(la.readonly ?? [])].some(eq);
+}
+
+async function fetchTxs(connection: Conn, sigs: string[], conc: number): Promise<(TxResp | null)[]> {
+  const cfg = { commitment: "confirmed" as const, maxSupportedTransactionVersion: 0 };
+  if (typeof connection.getTransactions === "function") {
+    const out: (TxResp | null)[] = [];
+    for (let i = 0; i < sigs.length; i += conc) out.push(...((await connection.getTransactions(sigs.slice(i, i + conc), cfg)) as (TxResp | null)[]));
+    return out;
+  }
+  const out: (TxResp | null)[] = [];
+  for (let i = 0; i < sigs.length; i += conc) out.push(...(await Promise.all(sigs.slice(i, i + conc).map((s) => connection.getTransaction(s, cfg)))));
+  return out;
+}
+
+/**
+ * The trade book (lib/trade-book.ts) of the current position, rebuilt from its chain changes (oldest first). The same fill numbers the trading
+ * device feeds its own book, plus the opening fill's funding memo as the funding base, so the Trade result and the close estimate agree on every
+ * device. Null when it cannot be rebuilt: the position started by flipping through flat (its funding base is after a settle no memo can state),
+ * or a REDUCE (ADL, liquidation) changed it (the book follows fills only). A missing memo gives a book whose funding base is unknown.
+ */
+export function bookFromDeltas(deltas: readonly ChainDelta[], startQ: bigint, qNow: bigint): Book | null {
+  if (startQ !== 0n || deltas.length === 0) return null;
+  let book: Book | null = null;
+  for (let i = 0; i < deltas.length; i++) {
+    const d = deltas[i];
+    if (!d.fill) return null;
+    const base = i === 0 && d.fundingBase != null ? { netPaid: d.fundingBase, legs: 1 } : null;
+    book = applyFill(book, { q: d.fill.executedQ, bookedPriceE6: d.fill.bookedPriceE6, feeAtoms: d.fill.feeAtoms, funding: base }).book;
+    if (i === 0 && book && d.fundingBase == null) book = { ...book, fundingBase: null };
+  }
+  return book && book.q === qNow ? book : null;
+}
 
 /**
  * Walks the portfolio's transactions newest to oldest and rebuilds the Entry. Never throws. See the header for what each verdict means.
@@ -289,53 +369,78 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
   const assetIndex = o.assetIndex ?? 0;
   const pageSize = o.pageSize ?? 50;
   const maxTx = o.maxTx ?? 60;
-  const conc = Math.max(1, o.concurrency ?? 4);
+  const maxRead = o.maxRead ?? 2000;
+  const conc = Math.max(1, o.concurrency ?? 10);
+  const pace = o.paceMs ?? 0;
+  const resume = o.resume ?? null;
   if (o.qNow === 0n) return { verdict: "no-position", entry: null, txRead: 0 };
   const newestFirst: ChainDelta[] = [];
   let q = o.qNow; // the position AFTER the change being examined
   let txRead = 0;
+  let changesRead = 0;
   let before: string | undefined;
   let flip: { len: number; startQ: bigint } | null = null;
   let topSig: string | undefined;
+  const finish = (used: ChainDelta[], startQ: bigint): ChainEntryResult => {
+    const oldestFirst = used.slice().reverse();
+    const r = rebuildEntry(oldestFirst, o.qNow, o.baseFeeBps, startQ, o.mayChargeBusy ?? true);
+    return { verdict: r.verdict, entry: r.entry, txRead, topSig, positionSigs: used.map((d) => d.sig), positionDeltas: oldestFirst, startQ, changesRead };
+  };
   try {
     for (;;) {
       const page = await connection.getSignaturesForAddress(o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
-      if (page.length === 0) return { verdict: "incomplete", entry: null, txRead, topSig };
+      if (page.length === 0) return { verdict: "incomplete", entry: null, txRead, topSig, changesRead };
       if (topSig === undefined) topSig = page[0].signature;
-      const sigs = page.filter((s) => s.err === null).map((s) => s.signature);
+      // Resume: everything at and below the stored top was read before. Stop at it.
+      const stopAt = resume ? page.findIndex((s) => s.signature === resume.topSig) : -1;
+      const sigs = (stopAt >= 0 ? page.slice(0, stopAt) : page).filter((s) => s.err === null).map((s) => s.signature);
       for (let i = 0; i < sigs.length; i += conc) {
-        if (txRead >= maxTx) return { verdict: "incomplete", entry: null, txRead, topSig };
-        const group = sigs.slice(i, i + conc).slice(0, maxTx - txRead);
-        const txs = await Promise.all(group.map((s) => connection.getTransaction(s, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })));
+        if (txRead >= maxRead || changesRead >= maxTx) return { verdict: "incomplete", entry: null, txRead, topSig, changesRead };
+        if (i > 0 && pace > 0) await new Promise((r) => setTimeout(r, pace));
+        const group = sigs.slice(i, i + conc).slice(0, maxRead - txRead);
+        const txs = await fetchTxs(connection, group, conc);
         txRead += group.length;
         for (let j = 0; j < group.length; j++) {
           const tx = txs[j];
-          if (!tx?.meta) return { verdict: "unreadable", entry: null, txRead, topSig };
-          const sf = signedFeeFromTx(tx.transaction?.message as Parameters<typeof signedFeeFromTx>[0], wrapper, assetIndex);
+          if (!tx?.meta) return { verdict: "unreadable", entry: null, txRead, topSig, changesRead };
+          // A transaction that never named the wrapper cannot have changed the position: skipped, not counted.
+          if (tx.meta.err !== null || !txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
+          const msg = tx.transaction?.message as Parameters<typeof signedFeeFromTx>[0];
+          const sf = signedFeeFromTx(msg, wrapper, assetIndex);
           const cap = sf && o.noBusyCap ? await o.noBusyCap(sf.matcherCtx).catch(() => null) : null;
           const ds = deltasFromLogs(group[j], tx.meta.logMessages, tx.meta.err === null, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex }, { feeBps: sf?.feeBps ?? null, noBusyCap: cap });
-          if (ds === null) return { verdict: "unreadable", entry: null, txRead, topSig };
-          if (ds === "irreconcilable") return { verdict: "mismatch", entry: null, txRead, topSig };
+          if (ds === null) return { verdict: "unreadable", entry: null, txRead, topSig, changesRead };
+          if (ds === "irreconcilable") return { verdict: "mismatch", entry: null, txRead, topSig, changesRead };
+          if (ds.length === 0) continue;
+          changesRead++;
+          const memo = ds.some((d) => d.fill) ? fundingBaseFromTx(msg as Parameters<typeof fundingBaseFromTx>[0]) : null;
           // Inside one transaction the changes are applied in order; undo them last to first.
           for (let k = ds.length - 1; k >= 0; k--) {
-            newestFirst.push(ds[k]);
-            q -= ds[k].deltaQ;
+            const d = ds[k].fill && memo !== null ? { ...ds[k], fundingBase: memo } : ds[k];
+            newestFirst.push(d);
+            q -= d.deltaQ;
             // A change that flipped through flat starts the position with its opening half, but q_before is only the chain's size minus
             // the fills: silent ADL scaling would fake it. So the walk goes on until the earlier trade unwinds to flat exactly too.
-            if (flip === null && flipsThrough(q, ds[k].deltaQ)) flip = { len: newestFirst.length, startQ: q };
-            if (q === 0n) {
-              const used = flip ? newestFirst.slice(0, flip.len) : newestFirst;
-              const r = rebuildEntry(used.slice().reverse(), o.qNow, o.baseFeeBps, flip ? flip.startQ : 0n, o.mayChargeBusy ?? true);
-              return { verdict: r.verdict, entry: r.entry, txRead, topSig, positionSigs: used.map((d) => d.sig) };
-            }
+            if (flip === null && flipsThrough(q, d.deltaQ)) flip = { len: newestFirst.length, startQ: q };
+            if (q === 0n) return finish(flip ? newestFirst.slice(0, flip.len) : newestFirst, flip ? flip.startQ : 0n);
           }
         }
       }
+      if (resume && stopAt >= 0) {
+        // Joined the stored walk. It must meet it at exactly the size it stored; anything else (silent ADL scaling, a missed change) means
+        // the stored part cannot be trusted: walk again from scratch.
+        if (q === resume.qAtTop && resume.deltas.length > 0) {
+          // The stored part was already walked down to its start, so a flip in the newer part is proven too.
+          if (flip) return finish(newestFirst.slice(0, flip.len), flip.startQ);
+          return finish([...newestFirst, ...resume.deltas.slice().reverse()], resume.startQ);
+        }
+        return entryFromChain(connection, wrapper, { ...o, resume: null });
+      }
       before = page[page.length - 1].signature;
-      if (page.length < pageSize) return { verdict: "incomplete", entry: null, txRead, topSig };
+      if (page.length < pageSize) return { verdict: "incomplete", entry: null, txRead, topSig, changesRead };
     }
   } catch {
-    return { verdict: "unreadable", entry: null, txRead, topSig };
+    return { verdict: "unreadable", entry: null, txRead, topSig, changesRead };
   }
 }
 
@@ -343,4 +448,53 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
 function flipsThrough(qBefore: bigint, deltaQ: bigint): boolean {
   const after = qBefore + deltaQ;
   return qBefore !== 0n && after !== 0n && (qBefore > 0n) !== (after > 0n);
+}
+
+// ── storage form of a walk (lib/entry-chain-sync.ts keeps it per portfolio) ─────────────────────────────────────────────────────────
+type S = string;
+export interface StoredDelta {
+  sig: S;
+  dq: S;
+  f?: { b: S; q: S; fee: S; n: S; t: S; qp: S; l: number };
+  sf?: S | null;
+  cap?: { f: S; m: S } | null;
+  fb?: S | null;
+}
+const isInt = (v: unknown): v is string => typeof v === "string" && /^-?\d+$/.test(v);
+
+export function storeDeltas(ds: readonly ChainDelta[]): StoredDelta[] {
+  return ds.map((d) => ({
+    sig: d.sig,
+    dq: d.deltaQ.toString(),
+    ...(d.fill
+      ? { f: { b: d.fill.bookedPriceE6.toString(), q: d.fill.executedQ.toString(), fee: d.fill.feeAtoms.toString(), n: d.fill.notionalAtoms.toString(), t: d.fill.taker.toBase58(), qp: d.fill.quotedPriceE6.toString(), l: d.fill.legs } }
+      : {}),
+    ...(d.signedFeeBps !== undefined ? { sf: d.signedFeeBps === null ? null : d.signedFeeBps.toString() } : {}),
+    ...(d.noBusyCap !== undefined ? { cap: d.noBusyCap === null ? null : { f: d.noBusyCap.feeBps.toString(), m: d.noBusyCap.maxFeeBps.toString() } } : {}),
+    ...(d.fundingBase != null ? { fb: d.fundingBase.toString() } : {}),
+  }));
+}
+
+/** Back from storage; null when anything is malformed (the caller then walks from scratch). */
+export function loadDeltas(raw: unknown, toKey: (s: string) => PublicKey): ChainDelta[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: ChainDelta[] = [];
+  try {
+    for (const r of raw as StoredDelta[]) {
+      if (!r || typeof r.sig !== "string" || !isInt(r.dq)) return null;
+      const d: ChainDelta = { sig: r.sig, deltaQ: BigInt(r.dq) };
+      if (r.f) {
+        const f = r.f;
+        if (![f.b, f.q, f.fee, f.n, f.qp].every(isInt) || typeof f.t !== "string" || typeof f.l !== "number") return null;
+        d.fill = { bookedPriceE6: BigInt(f.b), executedQ: BigInt(f.q), feeAtoms: BigInt(f.fee), notionalAtoms: BigInt(f.n), taker: toKey(f.t), quotedPriceE6: BigInt(f.qp), legs: f.l };
+      }
+      if (r.sf !== undefined) d.signedFeeBps = r.sf === null ? null : isInt(r.sf) ? BigInt(r.sf) : null;
+      if (r.cap !== undefined) d.noBusyCap = r.cap && isInt(r.cap.f) && isInt(r.cap.m) ? { feeBps: BigInt(r.cap.f), maxFeeBps: BigInt(r.cap.m) } : null;
+      if (isInt(r.fb)) d.fundingBase = BigInt(r.fb);
+      out.push(d);
+    }
+  } catch {
+    return null;
+  }
+  return out;
 }

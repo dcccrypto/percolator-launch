@@ -105,6 +105,7 @@ const measurePositionChange = vi.fn(async (_c: unknown, _p: PublicKey, _m: Publi
 vi.mock("@/lib/position-change", async (orig) => ({
   ...(await orig<typeof import("@/lib/position-change")>()),
   readBeforeTrade: (...a: unknown[]) => readBeforeTrade(...(a as [])),
+  readBeforeTradeFull: async (...a: unknown[]) => { const q = await readBeforeTrade(...(a as [])); return q === null ? null : { q, funding: null }; },
   measurePositionChange: (...a: Parameters<typeof measurePositionChange>) => measurePositionChange(...a),
 }));
 vi.mock("@/lib/tx", async (orig) => ({

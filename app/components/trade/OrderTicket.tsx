@@ -35,6 +35,7 @@
  * market order — nothing about that path changes here.
  */
 
+import { ticketFillIn } from "@/lib/funding-memo";
 import { errorText } from "@/lib/error-text";
 import { FC, memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { balanceKey, NO_BALANCE_KNOWN, resolveTokenBalance, type KnownBalance, type TokenRead } from "@/lib/token-balance";
@@ -1817,7 +1818,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               return;
             }
             const before = change ? change.beforeQ : 0n;
-            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms, funding: change?.funding ?? null }, before);
+            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), ticketFillIn(ef, change?.funding, before, sig), before);
             if (r !== null) recordRealized(publicKey.toBase58(), slabAddress, r);
           }
         });

@@ -1615,7 +1615,7 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
     for (const p of positions) {
       if (!shouldSyncPosition(p, wallet) || !p.portfolioPk) continue;
       void syncChainEntry(connection, { slab: p.slabAddress, idx: p.idx, wallet, portfolio: p.portfolioPk, wrapper: p.market.programId, qNow: p.effectiveSize }).then((v) => {
-        if (v === "chain" && !cancelled) {
+        if ((v === "chain" || v === "unexplained") && !cancelled) {
           forceNextLoad.current = true;
           setRefreshCounter((c) => c + 1);
         }

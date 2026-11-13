@@ -385,3 +385,23 @@ export function clearEntryPrice(slab: string, accountIdx: number, wallet?: strin
     // ignore
   }
 }
+
+/**
+ * Council r10 recheck D6: after a reduce (a partial close) the remaining position keeps its average, so the saved record moves to the new size
+ * instead of going stale (a record for the old size reads as "unknown entry"). Only when the reduce is reconciled: the record was current for the
+ * size the chain held right before the fill, and the fill is a pure reduce (same side, smaller, not flat). The busy-side fee share scales with the
+ * size left (busyFeeAfterTrade). A position carrying the explicit "unknown" marker is left alone. Returns true when it saved.
+ */
+export function keepEntryAfterReduce(slab: string, accountIdx: number, wallet: string | undefined, beforeQ: bigint, afterQ: bigint): boolean {
+  if (beforeQ === 0n || afterQ === 0n || (beforeQ > 0n) !== (afterQ > 0n) || absQ(afterQ) >= absQ(beforeQ)) return false;
+  if (isEntryMarkedUnknown(slab, accountIdx, wallet, beforeQ)) return false;
+  const saved = getSavedEntry(slab, accountIdx, wallet);
+  if (!saved || saved.sizeQ === null || saved.sizeQ !== beforeQ) return false;
+  const busy = busyFeeAfterTrade({ beforeQ, afterQ, saved: { entryPriceE6: saved.entryPriceE6, sizeQ: beforeQ, busyFeeAtoms: saved.busyFeeAtoms }, fillBusyFeeAtoms: null });
+  saveEntryPrice(slab, accountIdx, saved.entryPriceE6, saved.leverage ?? undefined, wallet, afterQ, {
+    bookedPriceE6: saved.bookedPriceE6,
+    busyFeeAtoms: busy,
+    ...(saved.chainSig ? { chainSig: saved.chainSig } : {}),
+  });
+  return true;
+}
