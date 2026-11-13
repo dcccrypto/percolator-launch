@@ -20,7 +20,6 @@ import { selectChartEngine, tvLibraryVersion } from "@/lib/tv/config";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { MarketLimitsStrip } from "@/components/limits/MarketLimitsStrip";
 import { MarketHeaderStatus, TradeMarketHealthBanner } from "@/components/market/MarketHealthBadges";
-import { AnalyticsDock } from "@/components/trade/AnalyticsDock";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -33,7 +32,6 @@ import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
 import { ADMIN_BURN_COPY, creatorAdminBurned } from "@/lib/admin-burn-copy";
 import { MultiAssetNotice } from "@/components/trade/MultiAssetNotice";
-import { ResolvedClaimPanel } from "@/components/trade/ResolvedClaimPanel";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { isMultiAssetMarket } from "@/lib/v22/market-cap";
 import { fetchMarketsList, listedMarketRows } from "@/lib/markets-list-client";
@@ -51,6 +49,20 @@ const CHART_SKELETON_MOBILE_HEIGHT =
   selectChartEngine({ libraryVersion: tvLibraryVersion(), envEngine: process.env.NEXT_PUBLIC_CHART_ENGINE, query: null }) === "tv"
     ? "h-[clamp(420px,62svh,640px)]"
     : "h-[clamp(460px,68svh,700px)]";
+
+// The desktop status bar is fixed to the viewport bottom and hidden below lg (no layout to shift
+// when it arrives); its cards' code loads after the page instead of in the first-load JS.
+const AnalyticsDock = dynamic(
+  () => import("@/components/trade/AnalyticsDock").then((m) => m.AnalyticsDock),
+  { ssr: false },
+);
+
+// A settled market's claim panel renders nothing on a live market (nearly every visit), so its code
+// (and its claims hook) loads after the page instead of in the trade page's first-load JS.
+const ResolvedClaimPanel = dynamic(
+  () => import("@/components/trade/ResolvedClaimPanel").then((m) => m.ResolvedClaimPanel),
+  { ssr: false },
+);
 
 const TradingChart = dynamic(
   () => import("@/components/trade/ChartSwitch").then((m) => m.ChartSwitch),
