@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
 // #3314: the position measurement for the saved entry (lib/position-change.ts, tested on its own).
 vi.mock("@/lib/position-change", () => ({
   readBeforeTrade: mocks.readBeforeTrade,
+  // the pre-trade read with funding counters (none here: no memo), routed through the same mock
+  readBeforeTradeFull: async (...a: unknown[]) => { const q = await (mocks.readBeforeTrade as (...x: unknown[]) => Promise<bigint | null>)(...a); return q === null || q === undefined ? null : { q, funding: null }; },
   measurePositionChange: mocks.measurePositionChange,
   recordPositionChange: mocks.recordPositionChange,
 }));

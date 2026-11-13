@@ -41,7 +41,8 @@ import {
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
 import { recordFeeRaise, type FeeRaise } from "@/lib/v22/fee-raise-note";
-import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/lib/position-change";
+import { measurePositionChange, readBeforeTradeFull, recordPositionChange } from "@/lib/position-change";
+import { newPortfolioFundingMemoIx, openFundingMemoIx, sendWithFundingMemo } from "@/lib/funding-memo";
 import { signedPositionForAsset } from "@/lib/limits/decode";
 import { readU64LE } from "@/lib/u64le";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
@@ -225,7 +226,7 @@ export function useFirstTrade(slabAddress: string) {
 
         // v2.2 QA U-1 / R-1 / Q-7b (lib/v22/trade-refresh.ts): the multi-asset refresh shape when the LP or the taker
         // holds >= 3 legs, and the stale peers' refresh cranks in the SAME tx when the order is refused 121.
-        const sendRefreshed = async (body: TransactionInstruction[], takerPortfolio: PublicKey | null, o: { signers?: Keypair[]; cap: number }): Promise<string> => {
+        const sendRefreshed = async (body: TransactionInstruction[], takerPortfolio: PublicKey | null, o: { signers?: Keypair[]; cap: number; memo?: TransactionInstruction | null }): Promise<string> => {
           // `kind` (multi-asset markets): a refresh tx or an order carrying cranks may need up to the 1.4M maximum and
           // never gets the self-heal catch-up crank in front; the order alone keeps today's cap and self-heal. Only the
           // order carries the new portfolio's keypair signer (a refresh tx has no account to create).
@@ -249,7 +250,8 @@ export function useFirstTrade(slabAddress: string) {
               console.info(`[first-trade] multi-asset order: ${r.path}, ${r.cycles} refresh cycle(s)`);
               return r.signature;
             }
-            return await send(body);
+            // Council r10 recheck D1: an open from flat carries the funding counter in a memo (lib/funding-memo.ts).
+            return await sendWithFundingMemo(body, o.memo ?? null, (ixs) => send(ixs), owner);
           } catch (e) {
             if (!multiAsset && isLossStaleError(e, programId.toBase58())) {
               const first = await planTradeRefresh(connection, input, { withPeers: true });
@@ -274,14 +276,16 @@ export function useFirstTrade(slabAddress: string) {
           // #3314: the ADL-effective position before the trade, for the saved entry (as useTrade).
           // Without it an add or flip through a bundled deposit left OrderTicket nothing to measure:
           // it cleared the entry and saved none, so Entry / PnL fell back to "--" or an estimate.
-          const beforeEffectiveQ = readBeforeTrade(connection, existing, market);
+          const beforeFull = readBeforeTradeFull(connection, existing, market).catch(() => null);
+          const beforeEffectiveQ = beforeFull.then((r) => (r === null ? null : r.q));
+          const memo = openFundingMemoIx(await beforeFull);
           // The position BEFORE the trade, for the fill measurement (null = unread -> "unknown").
           const beforeInfo = await connection.getAccountInfo(existing, "confirmed").catch(() => null);
           const beforeQ = beforeInfo ? signedPositionForAsset(new Uint8Array(beforeInfo.data), 0, marketId) : null;
           const signature = await withPresignWait(() =>
             sendWithConfirmedFeeCap(async (raised) => {
               if (raised) await raiseFee();
-              return sendRefreshed(buildFundAndTradeIxs(ixp(existing), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }), existing, { cap: FUND_AND_TRADE_CU_CAP });
+              return sendRefreshed(buildFundAndTradeIxs(ixp(existing), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }), existing, { cap: FUND_AND_TRADE_CU_CAP, memo });
             }, p.confirmedFeeCap === true, explainBusy),
           );
           recordFeeRaise(signature, feeRaise);
@@ -314,7 +318,7 @@ export function useFirstTrade(slabAddress: string) {
             const signature = await withPresignWait(() =>
               sendWithConfirmedFeeCap(async (raised) => {
                 if (raised) await raiseFee();
-                return sendRefreshed(buildIxs(), null, { signers: [kp], cap: FIRST_TRADE_CU_CAP });
+                return sendRefreshed(buildIxs(), null, { signers: [kp], cap: FIRST_TRADE_CU_CAP, memo: newPortfolioFundingMemoIx() });
               }, p.confirmedFeeCap === true, explainBusy),
             );
             // A brand-new portfolio holds no position before this transaction.

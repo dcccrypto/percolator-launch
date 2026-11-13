@@ -96,6 +96,11 @@ export function readBeforeTrade(connection: Connection, portfolio: PublicKey, ma
   return readEffectivePositionQ(connection, portfolio, market, lastSlot.get(portfolio.toBase58()));
 }
 
+/** As `readBeforeTrade`, with the funding counters of the same read (Council r10 recheck D1: the open's funding memo). */
+export function readBeforeTradeFull(connection: Connection, portfolio: PublicKey, market: PublicKey): Promise<{ q: bigint; funding: FundingSample | null } | null> {
+  return readEffectivePosition(connection, portfolio, market, lastSlot.get(portfolio.toBase58()));
+}
+
 /** The post-trade read at the confirmed trade's own slot; null when the slot isn't known. */
 export async function measurePositionChange(
   connection: Connection,

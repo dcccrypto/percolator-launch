@@ -43,7 +43,8 @@ import { limitsFlags } from "@/lib/limits/flags";
 import { decodeMarketEngineView, signedPositionForAsset } from "@/lib/limits/decode";
 import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
 import { recordFeeRaise, type FeeRaise } from "@/lib/v22/fee-raise-note";
-import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/lib/position-change";
+import { measurePositionChange, readBeforeTradeFull, recordPositionChange } from "@/lib/position-change";
+import { openFundingMemoIx, sendWithFundingMemo } from "@/lib/funding-memo";
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
 import { fetchTradeFeeBps, sendWithConfirmedFeeCap } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
@@ -549,9 +550,9 @@ export function useTrade(slabAddress: string) {
 
         // #3314: the taker's effective position before the trade, for the saved entry. Started
         // here so it runs alongside the identity reads; awaited only after confirmation.
-        const beforeEffectiveQ: Promise<bigint | null> = isV17Market
-          ? readBeforeTrade(connection, accountA, slabPk)
-          : Promise.resolve(null);
+        // Council r10 recheck D1: the same read carries the funding counters, which an open from flat writes into its memo.
+        const beforeFull = isV17Market ? readBeforeTradeFull(connection, accountA, slabPk).catch(() => null) : Promise.resolve(null);
+        const beforeEffectiveQ: Promise<bigint | null> = beforeFull.then((r) => (r === null ? null : r.q));
 
         // v18 wire: live-read BOTH portfolios' identity + the asset marketId right
         // before building the trade — these anti-replay/CAS fields are rejected
@@ -791,6 +792,7 @@ export function useTrade(slabAddress: string) {
           const multiAsset = v22Refresh !== null && (marketAssetSlots(raw as Uint8Array) ?? 1) > 1;
           // v2.2 QA U-2: a 98 (the signed cap does not cover the busy-side utilisation fee) is rebuilt ONCE with the cap
           // that covers it and sent again inside this action; before, "Try again" re-signed the same cap forever.
+          const fundingMemo = isV17Market && isDevnetV22Enabled() ? openFundingMemoIx(await beforeFull) : null;
           let instructions0 = instructions;
           const withRaisedFee = async (): Promise<void> => {
             const raised = await fetchTradeFeeBps(connection, slabPk, matcherCtx, { fallback: signedFeeBps, withUtilMax: true });
@@ -809,7 +811,9 @@ export function useTrade(slabAddress: string) {
                 console.info(`[useTrade] multi-asset order: ${r.path}, ${r.cycles} refresh cycle(s)`);
                 return r.signature;
               }
-              return await sendTrade(instructions);
+              // Council r10 recheck D1: an open from flat carries the funding counter in a memo (lib/funding-memo.ts), so every device can
+              // rebuild the funding paid since the open. Dropped (never blocking) when the transaction would be too large.
+              return await sendWithFundingMemo(instructions, fundingMemo, (ixs) => sendTrade(ixs), wallet.publicKey);
             } catch (e) {
               if (v22Refresh && !multiAsset && isLossStaleError(e, programId.toBase58())) {
                 // 121: refresh the stale positioned peers in this transaction instead of waiting for the keeper.

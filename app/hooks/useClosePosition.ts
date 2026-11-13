@@ -45,7 +45,7 @@ import { readSweepableCapital, SWEEP_COPY } from "@/lib/close-sweep";
 import { useOptionalToast } from "@/hooks/useToast";
 import { formatTokenAmount } from "@/lib/format";
 import { closeLimitFromEngine } from "@/lib/close-limit";
-import { clearEntryPrice } from "@/lib/entry-price";
+import { clearEntryPrice, keepEntryAfterReduce } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
@@ -196,11 +196,16 @@ async function measureCloseResult(o: {
   wallet: string;
   /** The signed effective position the chain had before this close. */
   onChainQBefore: bigint;
+  /** The entry-store index of the closed account (null = a non-canonical target: its entry is not this key's to touch). */
+  entryIdx?: number | null;
   budgetMs?: number;
 }): Promise<{ effectiveE6: bigint | null; result: bigint | null }> {
   const work = (async (): Promise<{ effectiveE6: bigint | null; result: bigint | null }> => {
     const fill = await readExecFill(o.connection, o.sig, o.programId, { market: new PublicKey(o.slabAddress), taker: o.taker ?? null }, undefined, 3).catch(() => null);
     if (!fill) return { effectiveE6: null, result: null };
+    // Council r10 recheck D6: a partial close keeps the Entry of what is left (a reduce never moves the average). Without this the saved
+    // record stayed at the old size and the rest of the position read "unknown entry" on the device that closed it.
+    if (o.entryIdx != null) keepEntryAfterReduce(o.slabAddress, o.entryIdx, o.wallet, o.onChainQBefore, o.onChainQBefore + fill.executedQ);
     // r10: the funding counters at the fill's own slot, so the result includes the funding the chain moved on this position.
     const funding = fill.slot !== undefined ? await readFundingSample(o.connection, fill.taker, fill.slot) : null;
     const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms, funding }, o.onChainQBefore);
@@ -740,6 +745,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
             baseFeeBps: freshEngine ? freshEngine.tradeFeeBaseBps : null,
             wallet: publicKey.toBase58(),
             onChainQBefore: freshPositionSize,
+            entryIdx: !targetPk || userAccount?.pubkey?.equals(targetPk) ? userIdx : null,
           });
         }
         const closeDetail = (base: string): string =>

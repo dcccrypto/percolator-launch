@@ -149,8 +149,9 @@ export interface PositionPnl {
   busyFeePaidAtoms?: bigint | null;
   /**
    * r10: funding the position has paid so far (atoms, whole position, negative = received): settled since the trade opened + accrued and not
-   * yet settled. Part of the trade result. Null = not knowable here (no trade book on this device, another device, a pending value that cannot
-   * be read, several legs): callers say "excl. funding" rather than treat it as zero.
+   * yet settled. Part of the trade result. The trade book is this device's own or, on any other device, rebuilt from the position's on-chain
+   * fills and the funding memo of its opening fill (lib/entry-chain-sync.ts). Null = not knowable (the opening fill carries no memo, a pending
+   * value that cannot be read, several legs): callers say "excl. funding" rather than treat it as zero.
    */
   fundingPaidAtoms?: bigint | null;
   /** r10: the market may charge holding rent that no figure here includes: the close net is tagged "excl. holding fee" and is never green. */

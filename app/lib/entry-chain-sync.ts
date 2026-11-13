@@ -5,13 +5,14 @@
  * a record this device just wrote is the same numbers by construction and costs no RPC. Which source wins: a chain-derived entry replaces the
  * device record; when the chain history cannot be read completely the device cache is left exactly as it was (nothing is written, nothing guessed).
  *
- * Bounds (devnet RPC is shared): one rebuild at a time per page (a module-level queue), at most `maxTx` transactions each (lib/entry-chain.ts),
- * and a cooldown per portfolio and size: a completed rebuild is not repeated for that size; an unreadable / incomplete one waits
+ * Bounds (devnet RPC is shared): one rebuild at a time per page (a module-level queue), the walk's own bounds (lib/entry-chain.ts), paced at
+ * about `PACE_TX_PER_S` transactions a second, and a cooldown per portfolio and size: a completed rebuild is not repeated for that size; an unreadable / incomplete one waits
  * `COOLDOWN_MS` (10 min) unless the size changed. The memory map and the storage record both carry it, so a reload does not retry at once.
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
-import { entryFromChain, type ChainEntryVerdict, type NoBusyCap } from "@/lib/entry-chain";
+import { bookFromDeltas, entryFromChain, loadDeltas, storeDeltas, type ChainEntryResult, type ChainEntryVerdict, type ChainResume, type NoBusyCap, type StoredDelta } from "@/lib/entry-chain";
+import { loadBook, saveBook } from "@/lib/trade-book";
 import { resolveTradeFeeBps } from "@/lib/limits/trade-fee-resolve";
 import { clearEntryPrice, clearEntryUnknownMark, entryRecordCurrent, getEntryLeverage, getEntryUnknownMark, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice } from "@/lib/entry-price";
 import { readEffectivePositionQ } from "@/lib/position-change";
@@ -23,6 +24,28 @@ export const COOLDOWN_MS = 10 * 60 * 1000;
 /** How often a chain-rebuilt record is re-checked (one `getSignaturesForAddress(limit 1)`): a newer signature may be a close + reopen at the same size. */
 export const VERIFY_MS = 60 * 1000;
 const KEY = (portfolio: string) => `perc:entrychain:v1:${portfolio}`;
+/** About 10 transactions a second: half the app's RPC proxy budget per browser (200 per 10 s), so the page's own reads keep working. */
+export const PACE_TX_PER_S = 10;
+
+/**
+ * Council r10 recheck D1: the trade book rebuilt from the walk (fills + the opening memo's funding base) is stored where every close surface
+ * and the close toast already read it, unless this device holds a book for the same size (its own, made from the same fills). A book of the
+ * same size with no funding base gets the chain's base.
+ */
+export function storeChainBook(t: Pick<SyncTarget, "wallet" | "slab" | "portfolio" | "qNow">, r: Pick<ChainEntryResult, "positionDeltas" | "startQ">): boolean {
+  if (!r.positionDeltas || r.startQ === undefined) return false;
+  const book = bookFromDeltas(r.positionDeltas, r.startQ, t.qNow);
+  if (!book) return false;
+  const pk = t.portfolio.toBase58();
+  const own = loadBook(t.wallet, t.slab, pk);
+  if (own && own.q === t.qNow) {
+    if (own.fundingBase !== null || book.fundingBase === null) return false;
+    saveBook(t.wallet, t.slab, pk, { ...own, fundingBase: book.fundingBase });
+    return true;
+  }
+  saveBook(t.wallet, t.slab, pk, book);
+  return true;
+}
 
 interface Attempt {
   q: string;
@@ -30,6 +53,15 @@ interface Attempt {
   ts: number;
   /** The portfolio's newest signature when a "chain" attempt read it: the record is vouched for only while it is still the newest. */
   topSig?: string;
+  /** Council r10 recheck D6: the walk as it stood at `walkTop` (the current position's changes, oldest first), for an incremental rebuild. */
+  walk?: { top: string; q: string; startQ: string; deltas: StoredDelta[] };
+}
+
+function resumeOf(a: Attempt | null): ChainResume | null {
+  const w = a?.walk;
+  if (!w || typeof w.top !== "string" || !/^-?\d+$/.test(w.q) || !/^-?\d+$/.test(w.startQ)) return null;
+  const deltas = loadDeltas(w.deltas, (k) => new PublicKey(k));
+  return deltas && deltas.length > 0 ? { topSig: w.top, qAtTop: BigInt(w.q), startQ: BigInt(w.startQ), deltas } : null;
 }
 
 const memory = new Map<string, Attempt>();
@@ -174,12 +206,19 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   }
   const facts = await marketFacts(connection, t.slab, t.assetIndex ?? 0);
   if (facts === null) {
-    writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now() });
+    writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now(), ...(prior?.walk ? { walk: prior.walk } : {}) });
     return;
   }
   // The walk is over the PORTFOLIO's own signature list only. (A wallet-first walk was tried and removed: a keeper-signed REDUCE is not on the
   // wallet's list, so the sizes can add up at a false flat point and give a wrong Entry.)
-  const r = await entryFromChain(connection, t.wrapper, { market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, qNow: t.qNow, baseFeeBps: facts.baseFeeBps, mayChargeBusy: facts.mayChargeBusy, noBusyCap: (ctx) => noBusyCapFor(connection, facts, t.assetIndex ?? 0, ctx) });
+  const r = await entryFromChain(connection, t.wrapper, {
+    market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, qNow: t.qNow, baseFeeBps: facts.baseFeeBps, mayChargeBusy: facts.mayChargeBusy,
+    noBusyCap: (ctx) => noBusyCapFor(connection, facts, t.assetIndex ?? 0, ctx),
+    concurrency: PACE_TX_PER_S, paceMs: 1000, resume: resumeOf(prior),
+  });
+  // The walk reached the position's start: keep it for the next (incremental) rebuild, and rebuild the trade book from it.
+  const walk = r.positionDeltas && r.topSig && r.startQ !== undefined ? { top: r.topSig, q: t.qNow.toString(), startQ: r.startQ.toString(), deltas: storeDeltas(r.positionDeltas) } : undefined;
+  if (r.verdict === "chain" || r.verdict === "unexplained") storeChainBook(t, r);
   // An "unknown" marker stands for as long as the position it was written for does. The walk can tell: when that fill is not part of the current
   // position any more (closed and reopened elsewhere, even at the same size), the marker is retired and the rebuild goes on. Otherwise nothing is
   // ever saved over it.
@@ -188,7 +227,7 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
     const readToStart = (r.verdict === "chain" || r.verdict === "unexplained") && r.positionSigs !== undefined;
     if (readToStart && mark.sig && !r.positionSigs?.includes(mark.sig)) clearEntryUnknownMark(t.slab, t.idx, t.wallet);
     else {
-      writeAttempt(pk, { q: t.qNow.toString(), verdict: "unexplained", ts: now() });
+      writeAttempt(pk, { q: t.qNow.toString(), verdict: "unexplained", ts: now(), ...(walk ? { walk } : {}) });
       return;
     }
   }
@@ -218,7 +257,7 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   // A record the chain wrote earlier that the chain can no longer vouch for (newer signature, and now unknown / unexplained / mismatched) is
   // removed rather than shown as exact. An unreadable chain proves nothing, so it stays.
   if (verdict !== "chain" && verdict !== "unreadable" && stale?.chainSig) clearEntryPrice(t.slab, t.idx, t.wallet);
-  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}) });
+  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
 }
 
 export function __resetEntryChainSyncForTests(): void {

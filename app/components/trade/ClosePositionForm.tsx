@@ -52,8 +52,9 @@ export interface ClosePositionFormProps {
   /**
    * r10 owner decision 1: funding the position has paid so far (collateral atoms, WHOLE position, negative = received): what the chain has
    * already moved since the trade opened plus what has accrued and is not yet settled (lib/funding-flow.ts). It is part of the net result, so
-   * the estimate and the realised "Trade result" agree. null = it could not be worked out (opened on another device, a read failed): the net then
-   * stands but is tagged "excl. funding" (never green). Omitted = the caller does not supply it (no tag, nothing subtracted).
+   * the estimate and the realised "Trade result" agree. On a device that did not place the trade it comes from the book rebuilt from chain (the
+   * opening fill's funding memo). null = the chain cannot state it (no memo on the opening fill, a read failed): the net then stands but is tagged
+   * "excl. funding" (never green). Omitted = the caller does not supply it (no tag, nothing subtracted).
    */
   fundingPaidAtoms?: bigint | null;
   /** r10 (#3817 MED-1): the market may charge holding rent, which no figure here includes: the net is tagged "excl. holding fee" (never green). */
