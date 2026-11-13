@@ -106,6 +106,8 @@ export interface StepControlRoomProps {
   onLaunch: () => void;
   launchDisabled?: boolean;
   launchDisabledReason?: string;
+  /** The wallet can't cover the seed (or its balance isn't known): a notice under the launch key, with the faucet link on devnet. */
+  seedNotice?: { message: string; faucetHref?: string; onRetry?: () => void };
   instantLaunch?: boolean;
   /** Resuming an unfinished launch: it runs step by step (never the one-approval batch). */
   resuming?: boolean;
@@ -169,6 +171,7 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
   onLaunch,
   launchDisabled,
   launchDisabledReason,
+  seedNotice,
   instantLaunch,
   resuming = false,
   onBack,
@@ -346,6 +349,23 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             disabledReason={launchDisabledReason}
             instant={instantLaunch}
           />
+          {seedNotice && (
+            <p data-testid="seed-notice" role="status" className="mt-3 text-center text-[11px] leading-relaxed text-[var(--warning)]">
+              {seedNotice.message}
+              {seedNotice.faucetHref && (
+                <>
+                  {" "}
+                  <a href={seedNotice.faucetHref} className="underline decoration-dotted underline-offset-2 hover:text-[var(--text)]">Get test USDC</a>
+                </>
+              )}
+              {seedNotice.onRetry && (
+                <>
+                  {" "}
+                  <button type="button" onClick={seedNotice.onRetry} className="underline decoration-dotted underline-offset-2 hover:text-[var(--text)]">Retry</button>
+                </>
+              )}
+            </p>
+          )}
           {/* Skip when HoldToLaunch already shows this exact text (one status region, not two). */}
           {!registrable && !(launchDisabled && launchDisabledReason === (notRegistrableReason ?? "This token cannot be priced")) && (
             <p data-testid="not-registrable-reason" role="status" className="mt-3 text-center text-[11px] leading-relaxed text-[var(--warning)]">
