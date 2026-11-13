@@ -22,21 +22,29 @@ export function LotExpLoaderBridge(): null {
     if (!isDevnetV22Enabled()) return;
     let cancelled = false;
     let uninstall: (() => void) | null = null;
-    void import("@/lib/v22/lot-registry").then(({ lotExpOfStrict, observeLotExp, setLotExpLoader }) => {
-      if (cancelled) return;
-      setLotExpLoader(async (slab) => {
-        const info = await connection.getAccountInfo(new PublicKey(slab), "confirmed");
-        if (!info?.data) return null;
-        const bytes = new Uint8Array(info.data);
-        // r10 (#3821 LOW-3): the same bytes give the exponent AND the holding-fee flag, so a surface that only has the loader never sees one
-        // without the other (an unseen market answers "may apply" and would hide the trade result on every normal market).
-        observeLotExp(slab, bytes);
-        return lotExpOfStrict(bytes);
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const install = (attempt: number): void => {
+      import("@/lib/v22/lot-registry").then(({ lotExpOfStrict, observeLotExp, setLotExpLoader }) => {
+        if (cancelled) return;
+        setLotExpLoader(async (slab) => {
+          const info = await connection.getAccountInfo(new PublicKey(slab), "confirmed");
+          if (!info?.data) return null;
+          const bytes = new Uint8Array(info.data);
+          // r10 (#3821 LOW-3): the same bytes give the exponent AND the holding-fee flag, so a surface that only has the loader never sees one
+          // without the other (an unseen market answers "may apply" and would hide the trade result on every normal market).
+          observeLotExp(slab, bytes);
+          return lotExpOfStrict(bytes);
+        });
+        uninstall = () => setLotExpLoader(null);
+      }, () => {
+        // Chunk failed to load: retry a few times rather than leave the app without a loader.
+        if (!cancelled && attempt < 3) retry = setTimeout(() => install(attempt + 1), 2_000 * (attempt + 1));
       });
-      uninstall = () => setLotExpLoader(null);
-    });
+    };
+    install(0);
     return () => {
       cancelled = true;
+      clearTimeout(retry);
       uninstall?.();
     };
   }, [connection]);
