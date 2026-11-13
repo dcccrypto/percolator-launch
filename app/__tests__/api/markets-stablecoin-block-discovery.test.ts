@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GET /api/markets on the on-chain-discovery path (no Supabase): on v2.2 a registered market whose mainnet_ca is a dollar
  * stablecoin (owner 2026-11-09) is not listed; the same row is listed off v2.2. Real route, real filter; only I/O mocked.

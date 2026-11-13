@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * C: three incompatible volume conventions used to collide across the
  * leaderboard stack:

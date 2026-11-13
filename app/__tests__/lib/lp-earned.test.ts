@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { computeExactLpEarned, computeLpEarnedForVault, parseLpCostBasis, type LpCostBasis } from "@/lib/lp-earned";
 

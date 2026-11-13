@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2335 / PR#2336 follow-up: /api/devnet-pre-fund's FALLBACK rate limiter (used
  * when the Supabase-backed primary gate is unavailable) must be reserved

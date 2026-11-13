@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Review E2 (2026-10-14): /api/markets on the Supabase path answers ?program_id= without a read,
  * shares the edge cache policy with /api/stats, and keeps ?fresh= out of the CDN.

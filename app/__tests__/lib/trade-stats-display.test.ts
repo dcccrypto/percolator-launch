@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The trades panel reported "Fees Paid: 0" for a trader who had paid a fee on
  * every fill.

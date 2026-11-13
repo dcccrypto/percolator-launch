@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * POST /api/markets also accepts a dex_pool_address. A pool quoted in a token that is neither
  * WSOL nor a USD stable is refused (2026-10-02 SI/MM) BEFORE any slab / DB work; a USD-priceable

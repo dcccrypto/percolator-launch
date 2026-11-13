@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for name field validation in /api/mobile/create-market (#998).
  *

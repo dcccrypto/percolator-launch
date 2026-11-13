@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1448: Homepage markets count must use shared isPhantomOpenInterest()
  * (strict < on vault_balance) instead of local <= check.

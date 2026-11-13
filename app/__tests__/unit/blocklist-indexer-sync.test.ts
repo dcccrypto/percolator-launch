@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Cross-REPO blocklist sync: app ⊆ indexer.
  *

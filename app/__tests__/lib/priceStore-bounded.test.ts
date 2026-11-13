@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 
 // #2320 — `entries` was only ever written, never pruned. WebSocket resources were

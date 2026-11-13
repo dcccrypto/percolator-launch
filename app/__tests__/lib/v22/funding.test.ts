@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * v2.2 funding decoder (QA FUND-7). Fixture: REAL devnet market accounts fetched read-only (getAccountInfo, confirmed,
  * slot 510,879,329-331, 2026-10-14) for swordcat 6fonYScx…, SOL BYFuWyuo…, JUP GtUe5hYy…. The expected numbers are hand-derived

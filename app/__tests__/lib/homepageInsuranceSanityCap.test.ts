@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1175 — Homepage insurance fund sanity cap
  *

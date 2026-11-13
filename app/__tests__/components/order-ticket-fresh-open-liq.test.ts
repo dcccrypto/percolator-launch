@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PoC + regression — the order ticket's fresh-open liquidation PREVIEW must price
  * against the full cross-margined account capital, not just the order's margin.

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PoC + regression — computePnlPercent must be guarded in usePortfolio.
  *

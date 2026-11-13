@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for validateNumericParam — strict integer enforcement (GH#1490 follow-up).
  * Ensures floats, trailing-garbage strings, and out-of-range values are rejected.

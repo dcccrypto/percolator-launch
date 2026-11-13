@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * estimateEntryFromPnl — unit-correctness regression tests.
  *

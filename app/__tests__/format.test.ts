@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { formatTokenAmount, formatBps, formatUsd, formatPnl, formatSlotAge, shortenAddress } from "../lib/format";
 

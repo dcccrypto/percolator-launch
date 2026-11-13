@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for /api/chart/[mint] input validation + graceful fallback.
  *

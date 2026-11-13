@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1538: /api/stats activeTotal must apply phantom OI zeroing before isActiveMarket().
  *

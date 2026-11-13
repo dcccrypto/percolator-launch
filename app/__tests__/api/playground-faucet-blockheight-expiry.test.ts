@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2598 — the Playground USDC faucet must not bind post-broadcast
  * confirmation to lastValidBlockHeight on the load-balanced devnet RPC.

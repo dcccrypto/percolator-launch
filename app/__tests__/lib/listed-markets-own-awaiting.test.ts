@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * percolator-indexer#223: the creator's own market whose live price is not connected yet shows in
  * THEIR markets list (marked awaiting) and nowhere else. Every other listing rule still applies, and

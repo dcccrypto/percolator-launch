@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Enforces the "KEEP IN SYNC" contract between the two blocklists.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for GH#1586 fix: /api/airdrop OwnerMismatch when server keypair is not
  * the mint authority for legacy markets.

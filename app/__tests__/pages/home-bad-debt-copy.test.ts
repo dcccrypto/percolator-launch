@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The home page said bad debt hits the insurance fund "never the wrapper, never other traders".
  * Losses past a market's own backing do reach other users: winning traders' profits are

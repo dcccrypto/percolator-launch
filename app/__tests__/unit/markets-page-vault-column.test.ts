@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * /markets labelled the engine vault "liquidity". /api/markets fills vault_balance from the engine
  * vault (LP capital + trader margin + insurance), while the trade page's "Market LP" is the LP

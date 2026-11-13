@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1606: Phantom markets with vault=0, valid price, and stale positive OI
  * must return total_open_interest_usd: 0 (not null).

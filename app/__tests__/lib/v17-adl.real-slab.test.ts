@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Layout pinned against a REAL captured account, not a hand-built buffer whose
  * offsets the test itself wrote (which is how a wrong "273" comment survived).

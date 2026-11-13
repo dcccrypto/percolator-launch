@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Trading UI Phase 2 — unit tests
  *

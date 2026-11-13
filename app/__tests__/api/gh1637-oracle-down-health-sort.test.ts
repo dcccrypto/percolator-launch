@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1637: sort=health puts oracle-down markets (null prices) ABOVE healthy markets.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 // @ts-expect-error - .mjs build script without type declarations
 import { blobAuthFromEnv, downloadFromBlob } from "../../../scripts/fetch-tv-library.mjs";

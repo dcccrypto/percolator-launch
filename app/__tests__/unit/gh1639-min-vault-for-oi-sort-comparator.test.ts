@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1639 — Client-side health sort comparator must apply MIN_VAULT_FOR_OI vault guard
  *

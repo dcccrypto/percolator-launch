@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { isLaunchablePriceUsd, lowestLeverageTrackablePriceUsd } from "@/lib/launch-price-floor";
 import { minTrackablePriceE6 } from "@/lib/initial-price";

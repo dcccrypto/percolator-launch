@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * N27: every amount / size / leverage field stripped a decimal comma, so on a comma-locale phone
  * (inputMode="decimal" shows a "," key) "0,5" became "05" = 5, "2,5"x became 25x and "1,5" USDC

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Discord report: a white line flashed under the /markets table header on every sort click.
  * Rows have `transition-all` and only rows past the first had a top border, colour included. A re-sort

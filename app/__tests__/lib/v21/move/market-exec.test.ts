@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { makeMarketExecutors, type MarketBridge } from "@/lib/v21/move/market-exec";
 import { V1_PROGRAM_IDS } from "@/lib/v21/move/ids";

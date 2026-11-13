@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Binds the Stake page's Insurance Pools search + capped-scroll wiring to source
  * (the ordering itself is unit-tested in lib/stake-pool-order.test.ts). The

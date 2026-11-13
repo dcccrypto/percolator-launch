@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1610: 29 admin-oracle markets with real vault + OI atoms > 0 but oracle
  * price = null (keeper never cranked) returned total_open_interest_usd: null.

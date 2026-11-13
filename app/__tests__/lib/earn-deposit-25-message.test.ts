@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { resolveUserMessage } from "@/lib/limits/user-message";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Council GO1106-UX #2 (LP / Creator / Skeptic): "Every vault row and the rail show TVL '—'. The header reads
  * 'TOTAL VALUE LOCKED $0 — Excludes 6 vaults ... that can't be valued right now'." The v2.2 preview has no

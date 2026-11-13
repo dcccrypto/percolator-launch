@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { assertNoV21OnlyTags, guardAction, runMove, type Executors } from "@/lib/v21/move/run";

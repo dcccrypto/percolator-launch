@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PoC + regression — the USD price formatters must reject values above the
  * on-chain price cap (MAX_PRICE_E6 = 1e12 / $1M), not the stale 1e15 (=$1B).

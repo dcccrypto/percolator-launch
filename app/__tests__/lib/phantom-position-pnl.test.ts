@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PERC-297: Phantom position PnL display bug
  *

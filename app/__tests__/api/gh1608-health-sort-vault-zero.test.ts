@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1608: sort=health returns vault=0 markets first instead of highest-health markets.
  *

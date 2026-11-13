@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { Keypair } from "@solana/web3.js";
 import { MAX_BACKING_BUCKET_EXPIRY_SLOT } from "@percolatorct/sdk";

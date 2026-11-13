@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1599: Markets with zero OI AND zero vault should return
  * total_open_interest_usd: 0 (not null).

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Two-pot Earn vault payout. Wrapper 553d76f0 (PR #522): a non-bound 77 pays across both pots by
  * itself, so the app sends 77 alone (the #2764 [91, 77] prefix is gone). A 100% exit can still fail

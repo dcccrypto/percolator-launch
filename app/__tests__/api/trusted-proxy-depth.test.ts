@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3483: TRUSTED_PROXY_DEPTH was parsed in three places as `Math.max(0, Number(raw ?? 1))`, so
  * "abc", "", "-1" and "1.5" skipped (or indexed past) the X-Forwarded-For peel, and each copy then

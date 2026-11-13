@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1455: /api/markets activeTotal must be consistent regardless of include_zombie param.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { checkSeedBalance, decideSeed, type TopUp } from "@/lib/create-seed-check";
 

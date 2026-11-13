@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #856: Tests for corrupt price sanitization in GET /api/markets.
  * Ensures unscaled admin-set prices (billions/trillions) are nulled out,

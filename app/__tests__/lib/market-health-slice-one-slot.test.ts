@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { v17MarketAccountLen } from "@percolatorct/sdk";
 import { MARKET_HEALTH_SLICE_LEN } from "@/lib/market-health";

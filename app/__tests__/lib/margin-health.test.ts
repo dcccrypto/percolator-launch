@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The liquidation price is absent for most playground positions, because
  * cross-margin collateral exceeds their notional — and the surfaces that lead

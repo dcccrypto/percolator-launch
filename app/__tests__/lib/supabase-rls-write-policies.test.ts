@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression — GH#2499: `supabase/schema.sql` must not define PUBLIC write policies.
  *

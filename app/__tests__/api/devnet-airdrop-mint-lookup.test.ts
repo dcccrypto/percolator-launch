@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for GH#1703 fix: /api/devnet-airdrop mint validation fallback
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2953 review: the one-shot rewrite ("Nothing was sent. Try again in a moment.") is only true
  * for PRE-SEND waits. A fund-and-trade whose confirmation timed out WAS broadcast and may still

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * v2.2 QA RT5-1 (2026-10-12): QA's 10k PENGU long could not be closed from the app: every close failed at
  * simulation with InstructionError [2, Custom 9]. The app signed fee_bps 35 (base 30 + 5) where the program

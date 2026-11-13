@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * SOL-3 / S-2 (v2.2 QA 2026-10-11): the CSP frame-src must allow Solflare's connect iframe
  * (https://connect.solflare.com). Nothing else in the policy changes.

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1618: total_open_interest_usd returns float artifact (e.g. 4620.241999999999)
  * in raw API responses due to IEEE-754 floating-point multiplication.

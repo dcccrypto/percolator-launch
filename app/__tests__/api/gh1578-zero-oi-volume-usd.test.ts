@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1578: total_open_interest_usd and volume_24h_usd return null instead of 0
  * when raw integer values are 0 and mark_price is valid.

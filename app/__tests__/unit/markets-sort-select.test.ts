@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** UX WP-10 (audit §4.8): on phones the /markets sort is one "Sort" select; tabs only from md up. */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";

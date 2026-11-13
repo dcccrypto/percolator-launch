@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1531: /markets page counter shows 115 (activeTotal) but list renders 168.
  *

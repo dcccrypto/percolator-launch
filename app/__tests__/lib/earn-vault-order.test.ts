@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { orderEarnVaults, type EarnOrderable, type EarnOrderOptions } from "../../lib/earn-vault-order";
 

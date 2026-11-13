@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression: the shared per-IP fund limiter must be ENFORCED BY EACH ROUTE.
  *

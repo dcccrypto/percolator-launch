@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * orderHeading: the confirm-modal heading for an Open-tab order, classified against the
  * account's open position (reduce / exact close / close and open the rest / open).

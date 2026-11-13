@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3604: on a band market without lots (lotExp 0: every token priced at $10 or more), bandMinLeg rounded the minimum up
  * to a whole "lot", which there is a whole token. A $5,000 token with a 100 USDC minimum showed "1 lots (about 5,000

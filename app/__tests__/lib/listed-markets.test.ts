@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * isListedMarketRow is the ONE definition of "which markets exist" shared by
  * /markets and the landing page's Live Markets rail (the rail was empty while

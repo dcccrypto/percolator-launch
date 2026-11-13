@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * gate-100 (39b138c8): every wrapper error ordinal the app maps comes from ONE generated module,
  * pinned here to the oracle's rustc ordinals for EVERY PercolatorError variant. A shifted enum

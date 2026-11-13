@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import { detectOracleMode, resolveMarketPriceE6, priceE6ToUsd, sanitizePriceE6, MAX_PRICE_E6 } from "../../lib/oraclePrice";

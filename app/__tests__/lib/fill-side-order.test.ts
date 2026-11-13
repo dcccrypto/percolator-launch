@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { fillSide, fillSideLabel, fillSideColor } from "@/lib/fill-side";
 import { readU64LE } from "@/lib/u64le";

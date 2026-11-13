@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1963 / PERC-8326: /api/markets POST input validation
  *

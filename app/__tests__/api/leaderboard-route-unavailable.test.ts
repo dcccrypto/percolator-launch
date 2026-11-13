@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2709: a DB failure must not masquerade as an empty leaderboard. The route
  * returned 200 { leaderboard: [] } with public CDN cache headers, so the page

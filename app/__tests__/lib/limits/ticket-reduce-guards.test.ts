@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * r8 Council (#3807): the room / equity / guard caps are derived whatever size is typed, but the ORDER-specific checks (growth gate, guard
  * refusal, band halt) skip a pure reduce and still apply to a flip. A reduce can always close the whole position: no guard cap sits below it.

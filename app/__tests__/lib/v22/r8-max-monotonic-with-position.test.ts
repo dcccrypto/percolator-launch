@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * r8 BUG B: with a position already open, Buying power and Max FELL as leverage rose (live preview, $20 SOL short open:
  * 1,252.93 at 1x-5x, 87.17 at 10x).

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * "≈ $200.12" under a position's base-unit size: the size is engine Q (1e6
  * scale whatever the mint's decimals), valued at the mark. No mark, no line.

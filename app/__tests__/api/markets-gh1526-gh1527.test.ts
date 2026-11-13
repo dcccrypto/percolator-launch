@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1526: oracle_mode filter should map frontend values ("manual", "live_feed")
  *          to DB-stored values ("admin", "hyperp") before filtering.

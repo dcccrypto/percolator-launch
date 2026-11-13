@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 // #2321 — hasVolumeData gated the volume pane on `(c.volume ?? 0) > 0`.

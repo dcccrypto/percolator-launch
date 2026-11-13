@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1566: /api/markets sort=oi / sort=volume / sort=health return markets in random order.
  *

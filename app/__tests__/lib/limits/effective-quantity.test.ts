@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * M-3: port of engine 35ddd692 `kernel_adl_effective_quantity_ceil` (v16.rs:1677) and
  * `effective_abs_quantity_for_leg` (:1695). Vectors are hand-derived from those bodies.

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GET /api/markets on the on-chain-discovery path (no Supabase, devnet
  * playground) must hide markets whose creation never finished (#2641), WITHOUT

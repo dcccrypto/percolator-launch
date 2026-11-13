@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Non-bound Earn around the wrapper 7a3ac04c+ upgrade (NAV floor fdf07759 + security review
  * 2026-10-03 H-1 / B-2):

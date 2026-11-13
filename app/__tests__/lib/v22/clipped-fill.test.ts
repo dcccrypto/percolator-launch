@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * v2.2 QA (partial fill): the CLIPPED flag of the landed FILL event drives "Partially filled: X of Y".
  * The fixture is a REAL devnet transaction (swordcat open 4gyLCVZG…, read-only getTransaction 2026-10-14):

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * M7: what a v2.2 fill COST. FILL `price_e6` is the BOOKED price = the asset's effective_price (the MARK); the matcher's spread is
  * charged through fee_atoms (fee channel). The price the trader effectively paid is booked +/- (fee - base fee)/|q|. Real decoded

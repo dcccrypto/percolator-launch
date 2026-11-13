@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #80: the root layout's title template appends " | Percolator", and /developers set
  * "Developers - Percolator", so its tab read "Developers - Percolator | Percolator".

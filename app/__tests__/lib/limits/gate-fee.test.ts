@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3553 on v2.2: Max at the market's max leverage was refused Custom(49) (EngineInsufficientInitialMargin) on a market that charges the
  * matcher's quote fee. The program charges the WHOLE fee (base + quote + busy-side) before its IM gate (percolator-prog v16_program.rs

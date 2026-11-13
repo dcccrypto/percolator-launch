@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { Keypair, TransactionInstruction } from "@solana/web3.js";
 import { planTakerCrank, type TakerCrankSim } from "@/lib/taker-crank";

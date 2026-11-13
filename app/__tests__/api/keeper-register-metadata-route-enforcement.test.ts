@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression: the metadata validator must be ENFORCED BY THE ROUTE, not merely
  * exist as a library.

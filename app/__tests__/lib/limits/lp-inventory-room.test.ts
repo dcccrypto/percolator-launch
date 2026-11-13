@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * LP inventory room from the REAL engine position (matcher-inventory drift, 2026-10-03).
  * Numbers are the live drifted markets from ~/percolator-ops/ledger/matcher-inventory-drift-2026-10-03.md §1/§4.

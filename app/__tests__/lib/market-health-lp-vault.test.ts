@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2882: "Paused (lp-depleted)" read "no liquidity for new positions", and the ticket promised the
  * market would recover. What refills a depleted counterparty depends on the market: a bound P3

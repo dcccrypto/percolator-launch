@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PERC-8181: TradingChart renders correct colors in light/dark mode
  *

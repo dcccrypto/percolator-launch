@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2510 — `queryTraderStatsAggregate` maps a single aggregated DB row onto the
  * stats contract.

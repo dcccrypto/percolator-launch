@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1512: Tests for search, sort, order, oracle_mode query params on GET /api/markets.
  * Previously these params were completely ignored — all markets returned regardless.

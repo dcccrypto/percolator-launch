@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * AUD-T4-2: with the v2.2 flag on, the health slice is sized for the 4,059 B v2.2 market, so a 3,675 B v2.1 market used to
  * fail with a plain Error ("need 4059 bytes, got 3675"). It must be the typed UnknownLayoutError, which every caller already

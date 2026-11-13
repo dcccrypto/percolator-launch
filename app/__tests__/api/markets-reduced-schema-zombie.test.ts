@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * REDUCED SCHEMA (2026-07) — a row that omits the liveness columns must not be
  * classified as a zombie.

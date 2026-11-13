@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1631 — Complete oracle-down badge fix
  *

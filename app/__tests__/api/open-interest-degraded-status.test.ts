@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PoC + regression — /api/open-interest/[slab] must signal a degraded state on an
  * all-paths-failure, not return HTTP 200 with fabricated zeros.

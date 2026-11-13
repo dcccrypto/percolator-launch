@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Cache semantics of lib/matcherCaps.ts — the audit finding this pins:
  * SetMatcherConfig (tag 68) can re-point or disable a market's matcher

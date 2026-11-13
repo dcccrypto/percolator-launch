@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * SEC-RC §S16AC Info I-S1: the S1-6 a/c resolved-close wait is recognised ONLY on a deployed S1-6 a/c wrapper.
  * Fixtures: the first 4096 ELF bytes of the 4 canonical builds (RC-S16AC.md §2/§8.1 and RC.md):

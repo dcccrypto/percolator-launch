@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { relativeStrengthIndex } from "@/lib/indicators/rsi";
 import { candlesFromCloses } from "./helpers";

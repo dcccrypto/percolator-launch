@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { buildMovePlan, nextActions, summarizePlan, type StepKind } from "@/lib/v21/move/plan";
 import { input, market, SOL_SLAB } from "./fixtures";

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3726: every close preview showed the base trading fee only. On a fee-channel market the program charges a close base + the matcher's
  * requested fee as well (the matcher attaches the request on every filled leg, no reduce exemption), but no busy-side fee (growth_v19.rs).

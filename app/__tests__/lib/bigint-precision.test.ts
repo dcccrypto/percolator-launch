@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { bigintToFloat, bigintRatio } from "@/lib/formatters";
 import { toE6 } from "@/lib/format";

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PoC + regression — shared admin-secret check: fixed-length compare (no length
  * leak) + per-capability secret with fallback.

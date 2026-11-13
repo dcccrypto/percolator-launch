@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1535: /api/stats must expose activeTotal consistent with /api/markets activeTotal.
  *
