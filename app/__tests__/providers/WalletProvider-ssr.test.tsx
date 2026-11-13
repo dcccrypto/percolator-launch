@@ -10,7 +10,9 @@ import { renderToString } from "react-dom/server";
 import type { ReactNode } from "react";
 
 vi.mock("@/components/providers/PrivyProviderClient", () => ({
-  default: ({ children }: { children: ReactNode }) => <>{children}</>,
+  default: ({ appId, children }: { appId: string; children: ReactNode }) => (
+    <div data-privy-app-id={appId}>{children}</div>
+  ),
 }));
 vi.mock("@/components/providers/AutoFundProvider", () => ({
   AutoFundProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -19,10 +21,12 @@ vi.mock("@/components/devnet/DevnetFaucetModal", () => ({
   DevnetFaucetModal: () => null,
 }));
 
+const VALID_ID = "clabcdefghijklmnopqrstuvw"; // Privy requires exactly 25 chars
+
 describe("WalletProvider server render", () => {
   const prev = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   beforeEach(() => {
-    process.env.NEXT_PUBLIC_PRIVY_APP_ID = "test-app-id";
+    process.env.NEXT_PUBLIC_PRIVY_APP_ID = VALID_ID;
   });
   afterEach(() => {
     if (prev === undefined) delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -38,5 +42,21 @@ describe("WalletProvider server render", () => {
     );
     expect(html).toContain("Percolator Guide");
     expect(html).not.toContain("BAILOUT_TO_CLIENT_SIDE_RENDERING");
+    expect(html).toContain(`data-privy-app-id="${VALID_ID}"`);
+  });
+
+  it("trims a stray newline from the app ID before handing it to Privy", async () => {
+    process.env.NEXT_PUBLIC_PRIVY_APP_ID = `${VALID_ID}\n`;
+    const { WalletProvider } = await import("@/components/providers/WalletProvider");
+    const html = renderToString(<WalletProvider><p>body</p></WalletProvider>);
+    expect(html).toContain(`data-privy-app-id="${VALID_ID}"`);
+  });
+
+  it("falls back to read-only (no Privy) instead of crashing on an invalid app ID", async () => {
+    process.env.NEXT_PUBLIC_PRIVY_APP_ID = "not-a-privy-id";
+    const { WalletProvider } = await import("@/components/providers/WalletProvider");
+    const html = renderToString(<WalletProvider><p>body</p></WalletProvider>);
+    expect(html).toContain("body");
+    expect(html).not.toContain("data-privy-app-id");
   });
 });

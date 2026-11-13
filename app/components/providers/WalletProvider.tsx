@@ -44,7 +44,9 @@ class PrivyErrorBoundary extends Component<
 }
 
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  // Trimmed like lib/privy-auth.ts: a stray newline in the env value makes Privy
+  // throw "invalid Privy app ID" (it requires exactly 25 chars).
+  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
   const preferredWallet = usePreferredWalletState();
 
   // LAUNCH-H2: Warn at startup if the WSS key equals the HTTP key.
@@ -71,8 +73,10 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
     </PrivyAvailableContext.Provider>
   );
 
-  // No app ID configured: read-only mode (skip Privy entirely)
-  if (!appId) {
+  // No (valid) app ID: read-only mode (skip Privy entirely). Privy now renders on
+  // the server, where PrivyErrorBoundary can't catch its throw on a bad ID, so
+  // check its 25-char rule here instead of 500ing every page.
+  if (!appId || appId.length !== 25) {
     return readOnlyFallback;
   }
 
