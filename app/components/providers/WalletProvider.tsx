@@ -1,8 +1,8 @@
 "use client";
 
 import { Component, FC, ReactNode, useMemo, useState, useEffect } from "react";
-import dynamic from "next/dynamic";
 import { AutoFundProvider } from "./AutoFundProvider";
+import PrivyProviderClient from "./PrivyProviderClient";
 import { PrivyAvailableContext, PrivyLoginContext } from "@/hooks/usePrivySafe";
 import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModal";
 import {
@@ -43,16 +43,6 @@ class PrivyErrorBoundary extends Component<
   }
 }
 
-/**
- * Dynamically import the Privy wrapper with SSR disabled.
- * This prevents Privy SDK from being evaluated during server-side rendering,
- * which crashes because Privy accesses browser-only APIs (window, localStorage).
- */
-const PrivyProviderClient = dynamic(
-  () => import("./PrivyProviderClient").then((mod) => mod.default),
-  { ssr: false }
-);
-
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   const preferredWallet = usePreferredWalletState();
@@ -86,7 +76,10 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
     return readOnlyFallback;
   }
 
-  // Mount Privy client-side only via dynamic import (ssr: false)
+  // Privy is imported statically (NOT next/dynamic ssr:false): this provider wraps
+  // every page, and an ssr:false boundary here made the server bail out of
+  // rendering the whole page tree, so crawlers saw an empty shell (SEO P1).
+  // Privy's hooks are SSR-safe and report ready=false until mounted.
   return (
     <PrivyErrorBoundary fallback={readOnlyFallback}>
       <PrivyAvailableContext.Provider value={true}>

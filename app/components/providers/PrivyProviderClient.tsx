@@ -8,8 +8,8 @@ import { SentryUserContext } from "@/components/providers/SentryUserContext";
 import { PrivyLoginContext } from "@/hooks/usePrivySafe";
 
 /**
- * Client-only Privy provider wrapper. Loaded via next/dynamic with ssr:false
- * to prevent Privy SDK from crashing during server-side rendering.
+ * Privy provider wrapper. Imported statically by WalletProvider so the pages it
+ * wraps are server-rendered; browser-only work (window.location below) is guarded.
  */
 const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
   appId,
