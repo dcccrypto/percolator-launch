@@ -13,6 +13,7 @@ import {
 } from "@percolatorct/sdk";
 import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
+import { createSwrMemo, marketMemoCapMs } from "@/lib/swr-memo";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 import { qToUsd } from "@/lib/q-usd";
@@ -273,6 +274,30 @@ function sanitizePrice(v: unknown): number | null {
 }
 export const dynamic = "force-dynamic";
 
+/**
+ * No-Supabase detail (the v2.2 preview): every request ran 4 sequential RPC reads (slab, then the LP resolve's
+ * market + LP + matcher ctx) plus a Blob read, and the preview is cookie-gated so the CDN does not collapse them.
+ * One per-instance copy per slab instead: fresh for 5 s, then served for up to 20 s more while one background
+ * read refreshes it — inside this response's own `s-maxage=10, stale-while-revalidate=60`. Only 200s are stored
+ * (a 404 / 422 is never cached, so arbitrary slab ids cannot fill it); MARKET_ROWS_MEMO_MS=0 turns it off.
+ */
+type DetailSnapshot = { status: number; body: unknown; headers: Record<string, string> };
+const detailMemo = createSwrMemo<string, DetailSnapshot>({
+  freshMs: 5_000,
+  staleMs: 20_000,
+  max: 256,
+  shouldStore: (s) => s.status === 200,
+  ttlCapMs: marketMemoCapMs,
+});
+
+async function memoizedOnChainSlabFallback(slab: string): Promise<NextResponse> {
+  const snap = await detailMemo.get(slab, async () => {
+    const res = await onChainSlabFallback(slab);
+    return { status: res.status, body: await res.json(), headers: Object.fromEntries(res.headers.entries()) };
+  });
+  return NextResponse.json(snap.body, { status: snap.status, headers: snap.headers });
+}
+
 function isValidPublicKey(s: string): boolean {
   try {
     new PublicKey(s);
@@ -318,8 +343,8 @@ export async function GET(
   try {
     supabaseClient = getServiceClient();
   } catch {
-    // Supabase not configured — fall back to on-chain direct fetch.
-    return await onChainSlabFallback(slab);
+    // Supabase not configured — fall back to on-chain direct fetch (memoized per slab; see detailMemo).
+    return await memoizedOnChainSlabFallback(slab);
   }
 
   try {
