@@ -101,7 +101,7 @@ export function legacyTxSize(ixs: readonly TransactionInstruction[], feePayer: P
 /** The memo when the transaction still fits with it and the headroom; otherwise null (the trade goes without it). */
 export function memoIfFits(ixs: readonly TransactionInstruction[], memo: TransactionInstruction | null, feePayer: PublicKey | null | undefined): TransactionInstruction | null {
   if (!memo || !feePayer) return null;
-  return legacyTxSize([...ixs, memo], feePayer) + MEMO_SIZE_HEADROOM <= PACKET ? memo : null;
+  return legacyTxSize([memo, ...ixs], feePayer) + MEMO_SIZE_HEADROOM <= PACKET ? memo : null;
 }
 
 /**
@@ -113,14 +113,25 @@ export async function sendWithFundingMemo(ixs: TransactionInstruction[], memoIn:
   if (!memo) return send(ixs);
   let sig: string;
   try {
-    sig = await send([...ixs, memo]);
+    // First: refresh planners read the trade as the last instruction of the body (lib/v22/trade-refresh.ts executeV22MultiAssetOrder).
+    sig = await send([memo, ...ixs]);
   } catch (e) {
     if (isTxTooLarge(e)) return send(ixs);
     throw e;
   }
-  const base = fundingBaseFromTx({ staticAccountKeys: [MEMO_PROGRAM_ID], compiledInstructions: [{ programIdIndex: 0, data: memo.data }] });
-  if (base !== null) noteMemoBase(sig, base);
+  noteMemoIx(sig, memo);
   return sig;
+}
+
+/** The base a memo instruction of ours states (null for anything else). */
+export function memoIxBase(memo: TransactionInstruction): bigint | null {
+  return fundingBaseFromTx({ staticAccountKeys: [MEMO_PROGRAM_ID], compiledInstructions: [{ programIdIndex: 0, data: memo.data }] });
+}
+
+/** Records the base of a memo that landed with `sig` (see memoBaseFor). */
+export function noteMemoIx(sig: string, memo: TransactionInstruction): void {
+  const base = memoIxBase(memo);
+  if (base !== null) noteMemoBase(sig, base);
 }
 
 // The base this device wrote into a landed open, by signature: the trading device's own trade book uses the same number as every other

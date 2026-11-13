@@ -44,7 +44,7 @@ import { decodeMarketEngineView, signedPositionForAsset } from "@/lib/limits/dec
 import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
 import { recordFeeRaise, type FeeRaise } from "@/lib/v22/fee-raise-note";
 import { measurePositionChange, readBeforeTradeFull, recordPositionChange } from "@/lib/position-change";
-import { openFundingMemoIx, sendWithFundingMemo } from "@/lib/funding-memo";
+import { isTxTooLarge, memoIfFits, noteMemoIx, openFundingMemoIx } from "@/lib/funding-memo";
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
 import { fetchTradeFeeBps, sendWithConfirmedFeeCap } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
@@ -792,7 +792,12 @@ export function useTrade(slabAddress: string) {
           const multiAsset = v22Refresh !== null && (marketAssetSlots(raw as Uint8Array) ?? 1) > 1;
           // v2.2 QA U-2: a 98 (the signed cap does not cover the busy-side utilisation fee) is rebuilt ONCE with the cap
           // that covers it and sent again inside this action; before, "Try again" re-signed the same cap forever.
-          const fundingMemo = isV17Market && isDevnetV22Enabled() ? openFundingMemoIx(await beforeFull) : null;
+          // Council r10 recheck D1: an open from flat carries the funding counter in a memo (lib/funding-memo.ts), so every device can rebuild
+          // the funding paid since the open. It goes INTO the order body, so every path that rebuilds the order from the body (the 121 peer
+          // refresh, the multi-asset shapes, the allocate retry, a raised fee cap) keeps it. Only when it fits; dropped on a too-large error.
+          const fundingMemo = isV17Market && isDevnetV22Enabled() ? memoIfFits(instructions, openFundingMemoIx(await beforeFull), wallet.publicKey) : null;
+          // FIRST in the body: the multi-asset refresh reads the trade as the body's last instruction (lib/v22/trade-refresh.ts).
+          if (fundingMemo) instructions.unshift(fundingMemo);
           let instructions0 = instructions;
           const withRaisedFee = async (): Promise<void> => {
             const raised = await fetchTradeFeeBps(connection, slabPk, matcherCtx, { fallback: signedFeeBps, withUtilMax: true });
@@ -811,9 +816,7 @@ export function useTrade(slabAddress: string) {
                 console.info(`[useTrade] multi-asset order: ${r.path}, ${r.cycles} refresh cycle(s)`);
                 return r.signature;
               }
-              // Council r10 recheck D1: an open from flat carries the funding counter in a memo (lib/funding-memo.ts), so every device can
-              // rebuild the funding paid since the open. Dropped (never blocking) when the transaction would be too large.
-              return await sendWithFundingMemo(instructions, fundingMemo, (ixs) => sendTrade(ixs), wallet.publicKey);
+              return await sendTrade(instructions);
             } catch (e) {
               if (v22Refresh && !multiAsset && isLossStaleError(e, programId.toBase58())) {
                 // 121: refresh the stale positioned peers in this transaction instead of waiting for the keeper.
@@ -847,14 +850,26 @@ export function useTrade(slabAddress: string) {
           // the market itself. A Custom(121) EngineLossStale (insurance does not yet cover the
           // stale portfolios' hidden-loss bound; the keeper's sweep shrinks it) is retried a few
           // times ~1-2 s apart, never bundled with refreshes (lib/v21/loss-stale-retry.ts).
-          sig =
+          const sendAll = (): Promise<string> =>
             isV17Market && lossStaleHandlingEnabled()
-              ? await withLossStaleRetry(sendOrder, {
+              ? withLossStaleRetry(sendOrder, {
                   wrapperProgramId: programId.toBase58(),
                   onRefreshing: params.onRefreshingPositions,
                   abortSignal: params.abortSignal,
                 })
-              : await sendOrder();
+              : sendOrder();
+          try {
+            sig = await sendAll();
+          } catch (e) {
+            // The memo never blocks a trade: a transaction too large with it goes once more without it.
+            if (!fundingMemo || !isTxTooLarge(e)) throw e;
+            const drop = (ixs: TransactionInstruction[]) => ixs.filter((ix) => ix !== fundingMemo);
+            instructions.splice(instructions.indexOf(fundingMemo), 1);
+            instructions0 = drop(instructions0);
+            if (v22Refresh) v22Refresh.body = drop(v22Refresh.body);
+            sig = await sendAll();
+          }
+          if (fundingMemo && instructions0.includes(fundingMemo)) noteMemoIx(sig, fundingMemo);
         }
 
         recordFeeRaise(sig, feeRaise);

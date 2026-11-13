@@ -2287,6 +2287,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             riskEntryPriceE6={existingRecordedEntryKnown ? existingRiskEntryE6 : 0n}
             busyOpenFeeAtoms={existingBusyFeePaidAtoms}
             fundingPaidAtoms={closeView?.fundingPaidAtoms ?? null}
+            fundingLoading={closeView?.fundingLoading === true}
             holdingFeeExcluded={closeView?.holdingFeeExcluded}
             capital={capital}
             symbol={baseTicker}
