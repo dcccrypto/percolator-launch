@@ -718,15 +718,15 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
             <p data-testid="burn-what-it-clears" className="mt-2 text-[11px] text-[var(--text-secondary)]">
               {ADMIN_BURN_COPY.confirm}
             </p>
-            {/* Tag 90 (WithdrawCreatorFee) is gated on asset 0's asset_admin only: once burned, no
-                creator fee on this market can ever be claimed again, and any unclaimed pot is
-                re-booked to the protocol at close (wrapper bd4fe5f8). */}
-            <p data-testid="burn-forfeits-fees" className="mt-2 text-[11px] text-[var(--text-secondary)]">
-              You also give up this market&apos;s creator fees for good: fees can only be claimed with this key.
+            {/* prog #587 (#644): the burn first records this wallet as the creator-fee payee (tag 125, same tx) unless one is
+                already set, so after the burn tag 90 pays that payee (anyone may send it) and CloseSlab waits for it instead
+                of re-booking the pot to the protocol. */}
+            <p data-testid="burn-fees-to-payee" className="mt-2 text-[11px] text-[var(--text-secondary)]">
+              {ADMIN_BURN_COPY.feesAfterBurn}
             </p>
             {hasClaimableFees && (
-              <p data-testid="burn-claim-first" className="mt-2 text-[11px] font-semibold text-[var(--warning)]">
-                You have unclaimed fees on this market. Claim them before burning, or they are lost.
+              <p data-testid="burn-claim-first" className="mt-2 text-[11px] text-[var(--text-secondary)]">
+                {ADMIN_BURN_COPY.unclaimedAfterBurn}
               </p>
             )}
             <p className="mt-4 text-[11px] font-semibold text-[var(--short)]">

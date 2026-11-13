@@ -22,7 +22,8 @@ import { updateAssetAuthorityKeys, ZERO_PUBKEY } from "@/lib/update-asset-author
 // UnpauseMarket (tag 58) do not exist in v17. Admin rotation uses UpdateAuthority (tag 32).
 import { sendTx } from "@/lib/tx";
 import type { DiscoveredMarket } from "@percolatorct/sdk";
-import { readAssetMarketId, readAssetControlSeqs, readAssetAdmin } from "@/lib/v18-wire";
+import { readAssetMarketId, readAssetControlSeqs, readAssetAdmin, readAssetP4Flags } from "@/lib/v18-wire";
+import { creatorFeePayeeBeforeBurn, wrapperVersionOf } from "@/lib/creator-fee-payee";
 
 const INLINE_ORACLE_ADMIN_REMOVED_ERROR =
   "Admin oracle update instructions were removed on-chain in beta.29. Migrate this action to the server-side oracle flow before using it.";
@@ -229,19 +230,31 @@ export function useAdminActions() {
         // authority_epoch (live current values), same as the keeper-cosign flow.
         const marketId = readAssetMarketId(slabData, 0);
         const authorityEpoch = readAssetControlSeqs(slabData, 0).authorityEpoch;
+        // prog #587 (#644): keep the creator fee claimable after the burn. If no fee payee is recorded yet, the SAME transaction
+        // first records this wallet (the asset admin) as the payee (tag 125, while the key is still live), then burns. Tag 125
+        // advances asset 0's authority epoch by one, so the burn carries epoch + 1. A payee recorded earlier is left as it is.
+        const { ixs: payeeIxs, burnEpoch } = creatorFeePayeeBeforeBurn({
+          programId: market.programId,
+          market: market.slabAddress,
+          assetAdmin: wallet.publicKey,
+          marketId,
+          authorityEpoch,
+          p4Flags: readAssetP4Flags(slabData, 0),
+          wrapperVersion: wrapperVersionOf(slabData),
+        });
         const data = encodeUpdateAssetAuthority({
           assetIndex: 0,
           marketId,
           kind: ASSET_AUTH_KIND.AssetAdmin,
           newPubkey: zeroPk,
-          authorityEpoch,
+          authorityEpoch: burnEpoch,
         });
         // A burn needs only the current admin's signature; the zero key rides
         // along read-only (see lib/update-asset-authority-keys.ts).
         const keys = updateAssetAuthorityKeys(wallet.publicKey, zeroPk, market.slabAddress);
         const ix = buildIx({ programId: market.programId, keys, data });
         try {
-          return await sendTx({ connection, wallet, instructions: [ix] });
+          return await sendTx({ connection, wallet, instructions: [...payeeIxs, ix] });
         } catch (err) {
           // A burn that LANDED can still come back as an error from the send path
           // (seen on devnet: Phantom approved, the tx landed with SUCCESS, and the

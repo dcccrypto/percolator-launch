@@ -109,3 +109,38 @@ describe("CreatorClaimPanel — copy must not sell the loss backstop as revenue"
     expect(container.textContent ?? "").not.toMatch(/cooldown/i);
   });
 });
+
+describe("CreatorClaimPanel — prog #587 payee route (admin burned after a payee was recorded)", () => {
+  const PAYEE = new PublicKey("ErNbLjU6E8tSbZH3REsMeTDP3Z8G52k6YedWwvBpAJ7v");
+  const payeeValue = (over: Record<string, unknown> = {}) =>
+    hookValue({ isClaimAuthority: false, claimable: 0n, payeeRoute: true, payee: PAYEE, owedToPayee: 2_500_000n, claimToPayee: vi.fn().mockResolvedValue("sig"), ...over });
+
+  it("is shown to ANY wallet (not the admin), with the amount owed to the payee and the payee address", () => {
+    vi.mocked(useCreatorClaim).mockReturnValue(payeeValue() as never);
+    render(<CreatorClaimPanel slabAddress="slab" />);
+    expect(screen.getByTestId("creator-payee-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("creator-payee-owed").textContent).toMatch(/2\.5/);
+    expect(screen.getByTestId("creator-payee-address").getAttribute("title")).toBe(PAYEE.toBase58());
+    expect(screen.queryByTestId("creator-claim-button")).toBeNull();
+  });
+
+  it("Send fees to payee calls the permissionless payout", async () => {
+    const claimToPayee = vi.fn().mockResolvedValue("sig");
+    vi.mocked(useCreatorClaim).mockReturnValue(payeeValue({ claimToPayee }) as never);
+    render(<CreatorClaimPanel slabAddress="slab" />);
+    fireEvent.click(screen.getByTestId("creator-payee-send-button"));
+    await waitFor(() => expect(claimToPayee).toHaveBeenCalledTimes(1));
+  });
+
+  it("nothing owed: the button is disabled", () => {
+    vi.mocked(useCreatorClaim).mockReturnValue(payeeValue({ owedToPayee: 0n }) as never);
+    render(<CreatorClaimPanel slabAddress="slab" />);
+    expect((screen.getByTestId("creator-payee-send-button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("NEGATIVE CONTROL: without the payee route a non-admin still sees nothing", () => {
+    vi.mocked(useCreatorClaim).mockReturnValue(payeeValue({ payeeRoute: false }) as never);
+    const { container } = render(<CreatorClaimPanel slabAddress="slab" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});

@@ -106,6 +106,7 @@ describe("asset-admin burn in the create bundle (L5 2026-10-22; code only, not w
   const INIT_POOL_IX = { tag: STAKE_IX.InitPool };
   const BIND_IX = { tag: STAKE_IX.BindInsuranceAuthority };
   const BURN_IX = { tag: 21 };
+  const PAYEE_IX = { tag: 125 };
   const PRE = { tag: -1 };
 
   it("with no burn ix the output is unchanged (default param is null)", () => {
@@ -113,10 +114,24 @@ describe("asset-admin burn in the create bundle (L5 2026-10-22; code only, not w
   });
 
   it("the burn is the LAST instruction: after InitPool and after the bind (L-4: the bind is part of creation, the burn ends it)", () => {
-    const out = orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, BURN_IX);
-    expect(out).toEqual([PRE, INIT_POOL_IX, BIND_IX, BURN_IX]);
+    const out = orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, BURN_IX, PAYEE_IX);
+    expect(out).toEqual([PRE, PAYEE_IX, INIT_POOL_IX, BIND_IX, BURN_IX]);
     expect(out.indexOf(BURN_IX)).toBe(out.length - 1);
     expect(out.indexOf(BIND_IX)).toBeGreaterThan(out.indexOf(INIT_POOL_IX));
+  });
+
+  it("prog #587: tag 125 (creator-fee payee) precedes the fee split, InitPool, the bind and the burn", () => {
+    const FEE = { tag: 86 };
+    const out = orderStakeTailInstructions([PRE], FEE, INIT_POOL_IX, BIND_IX, BURN_IX, PAYEE_IX);
+    expect(out).toEqual([PRE, PAYEE_IX, FEE, INIT_POOL_IX, BIND_IX, BURN_IX]);
+  });
+
+  it("prog #587: a burn without the payee instruction is refused (the fee would have no claimant after the burn)", () => {
+    expect(() => orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, BURN_IX)).toThrow(/creator-fee payee/);
+  });
+
+  it("prog #587: no burn = no payee instruction, even if one is passed", () => {
+    expect(orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, null, PAYEE_IX)).toEqual([PRE, INIT_POOL_IX, BIND_IX]);
   });
 
   it("only a first-loss pool WITH the creator's acknowledgement burns; fee-only / legacy never do", () => {
@@ -132,5 +147,11 @@ describe("asset-admin burn in the create bundle (L5 2026-10-22; code only, not w
     expect(t).toMatch(/creator fee/i);
     expect(t).toMatch(/Recovery/);
     expect(t).toMatch(/rotated/i);
+  });
+
+  it("prog #587: the consent copy no longer says the creator fee goes to the protocol", () => {
+    const t = FIRST_LOSS_BURN_CONSENT_COPY.join(" ");
+    expect(t).not.toMatch(/goes to the protocol/i);
+    expect(t).toMatch(/fee payee/);
   });
 });

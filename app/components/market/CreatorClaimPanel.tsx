@@ -25,6 +25,9 @@ import { useCreatorFeesClaimed } from "@/hooks/useCreatorFeesClaimed";
  * withdrawal dressed up as revenue. Tag 90 cannot reach that pot, and nothing
  * here should ever describe it as creator earnings again.
  *
+ * prog #587: when the creator's admin key was burned after a fee payee was recorded, the panel switches to a payee view shown
+ * to every wallet: what is owed to the payee and a "Send fees to payee" button (permissionless tag 90, paid only to the payee).
+ *
  * There is deliberately NO cooldown UI: tag 57's cooldown/ceiling gates
  * rate-limit backstop withdrawals, and `handle_withdraw_creator_fee` applies
  * neither.
@@ -35,11 +38,67 @@ export const CreatorClaimPanel: FC<{ slabAddress?: string }> = () => {
   const decimals = tokenMeta?.decimals ?? 6;
   const symbol = tokenMeta?.symbol ?? "";
 
-  const { isClaimAuthority, claimAuthority, claimable, loading, error, success, claim } = useCreatorClaim();
+  const { isClaimAuthority, claimAuthority, claimable, payeeRoute, payee, owedToPayee, loading, error, success, claim, claimToPayee } = useCreatorClaim();
   // All-time claimed, rebuilt from this market's claim history (the chain keeps only the balance).
   const claimed = useCreatorFeesClaimed(isClaimAuthority ? (claimAuthority?.toBase58() ?? null) : null, claimable);
 
   const [justClaimed, setJustClaimed] = useState(false);
+
+  // prog #587: the creator's admin key is burned and a fee payee was recorded first. Anyone can send the fees to that payee
+  // (the program pays only the payee's own token account), so this view is shown to every wallet.
+  if (payeeRoute) {
+    const owed = owedToPayee > 0n;
+    const onSend = async () => {
+      setJustClaimed(false);
+      try {
+        await claimToPayee();
+        setJustClaimed(true);
+      } catch {
+        // error surfaced via the hook's `error` state
+      }
+    };
+    const payeeShort = payee ? `${payee.toBase58().slice(0, 4)}…${payee.toBase58().slice(-4)}` : "the fee payee";
+    return (
+      <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80" data-testid="creator-payee-panel">
+        <div className="flex items-center justify-between border-b border-[var(--border)]/40 px-3 py-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Creator fees</span>
+          <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-dim)]" data-testid="creator-payee-address" title={payee?.toBase58()}>
+            to {payeeShort}
+          </span>
+        </div>
+        <div className="p-3">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-[9px] text-[var(--text-dim)]">Owed to payee</span>
+            <span className="text-[13px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }} data-testid="creator-payee-owed">
+              {formatTokenAmount(owedToPayee, decimals)} {symbol}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={loading || !owed}
+            data-testid="creator-payee-send-button"
+            className={`w-full rounded-none px-2 py-1 text-[11px] font-medium transition-colors ${
+              loading || !owed
+                ? "cursor-not-allowed bg-[var(--bg)] text-[var(--text-dim)]"
+                : "bg-[var(--accent)] text-[var(--accent-contrast,#fff)] hover:opacity-90"
+            }`}
+          >
+            {loading ? "Sending…" : owed ? "Send fees to payee" : "No fees owed"}
+          </button>
+          <div className="mt-1 text-[8px] leading-relaxed text-[var(--text-dim)]">
+            Anyone can send these fees. They can only go to the payee&apos;s wallet.
+          </div>
+          {error && (
+            <div className="mt-1 text-[8px] text-[var(--warning,#e0a000)]" data-testid="creator-claim-error">{error}</div>
+          )}
+          {success && justClaimed && !error && (
+            <div className="mt-1 text-[8px] text-[var(--long,#22c55e)]" data-testid="creator-claim-success">Sent. Balance updated.</div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // Non-creators never see this panel.
   if (!isClaimAuthority) return null;

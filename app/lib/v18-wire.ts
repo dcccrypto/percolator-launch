@@ -142,6 +142,18 @@ export function readAssetAdmin(slabData: Uint8Array, assetIndex = 0): PublicKey 
   return new PublicKey(slabData.slice(off, off + 32));
 }
 
+/**
+ * `p4_flags` for an asset = AssetOracleProfileV16 byte +20 (`_padding0[1]`, `LAYOUT_V22.wrapperSlot.profileP4Flags`). Bit 3
+ * (`P4_FLAG_CREATOR_FEE_PAYEE_V22`, prog #587) = a creator-fee payee is recorded. Zero on v2.1 markets.
+ */
+export function readAssetP4Flags(slabData: Uint8Array, assetIndex = 0): number {
+  const off = assetProfileOff(assetIndex, slabData) + 20;
+  if (slabData.length < off + 1) {
+    throw new Error(`slab too short for AssetOracleProfileV16.p4_flags @ ${off}`);
+  }
+  return slabData[off]!;
+}
+
 /** Live AssetControlSequencesV16 (oracle-observation nonce + authority-epoch CAS). */
 export function readAssetControlSeqs(slabData: Uint8Array, assetIndex = 0): AssetControlSequencesV17 {
   return parseAssetControlSequencesV17(slabData, assetProfileOff(assetIndex, slabData));

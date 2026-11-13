@@ -485,6 +485,8 @@ export const ACCOUNT_KIND = Object.freeze({
   BondPosition: 12,
   InsuranceUnits: 13,
   G9FeedAllowlist: 15,
+  /** prog#587 (#644): `CreatorFeePayeeV22` (`["creator_fee_payee", market, asset_index u16 LE]`, 16 + 72). Ported from percolator-sdk #438. */
+  CreatorFeePayee: 19,
 } as const);
 
 // ============================================================================
