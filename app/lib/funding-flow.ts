@@ -71,7 +71,12 @@ export function fundingNetOf(account: unknown): bigint | null {
 
 /**
  * Funding accrued on a leg but not yet settled, as atoms PAID (negative = received). Null when it cannot be known exactly: the leg is on an
- * older epoch than the asset's current one (the engine would use the epoch-start index), is stale, or an input is missing.
+ * older ADL epoch than the side's current one (the engine would use the epoch-start index), is stale, or an input is missing.
+ *
+ * The K/F stale-cohort epoch (`kf_epoch_snap` vs the side's `kf_epoch`) is NOT a condition. The engine moves the side's kf_epoch on every
+ * accrual (kernel_mark_kf_stale_cohorts) and settles a lagging leg against the same target, F_now (kf_target_for_leg_from_asset checks only
+ * the ADL epoch), so the pending figure is exact either way. Requiring it made this null after nearly every crank of the market, and the close
+ * estimate flipped to "excl. funding" at random (Council r10 recheck).
  */
 export function pendingFundingPaidAtoms(
   asset: AssetSettleState | null | undefined,
@@ -84,7 +89,6 @@ export function pendingFundingPaidAtoms(
   const long = leg.side === 0;
   if (!long && leg.side !== 1) return null;
   if (leg.epochSnap !== (long ? asset.epochLong : asset.epochShort)) return null;
-  if (leg.kfEpochSnap !== (long ? asset.kfEpochLong : asset.kfEpochShort)) return null;
   const fNow = long ? asset.fLong : asset.fShort;
   const d = fNow - leg.fSnap;
   if (d === 0n) return 0n;

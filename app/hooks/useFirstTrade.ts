@@ -226,7 +226,7 @@ export function useFirstTrade(slabAddress: string) {
 
         // v2.2 QA U-1 / R-1 / Q-7b (lib/v22/trade-refresh.ts): the multi-asset refresh shape when the LP or the taker
         // holds >= 3 legs, and the stale peers' refresh cranks in the SAME tx when the order is refused 121.
-        const sendRefreshed = async (body: TransactionInstruction[], takerPortfolio: PublicKey | null, o: { signers?: Keypair[]; cap: number; memo?: TransactionInstruction | null }): Promise<string> => {
+        const sendRefreshedBody = async (body: TransactionInstruction[], takerPortfolio: PublicKey | null, o: { signers?: Keypair[]; cap: number }): Promise<string> => {
           // `kind` (multi-asset markets): a refresh tx or an order carrying cranks may need up to the 1.4M maximum and
           // never gets the self-heal catch-up crank in front; the order alone keeps today's cap and self-heal. Only the
           // order carries the new portfolio's keypair signer (a refresh tx has no account to create).
@@ -250,8 +250,7 @@ export function useFirstTrade(slabAddress: string) {
               console.info(`[first-trade] multi-asset order: ${r.path}, ${r.cycles} refresh cycle(s)`);
               return r.signature;
             }
-            // Council r10 recheck D1: an open from flat carries the funding counter in a memo (lib/funding-memo.ts).
-            return await sendWithFundingMemo(body, o.memo ?? null, (ixs) => send(ixs), owner);
+            return await send(body);
           } catch (e) {
             if (!multiAsset && isLossStaleError(e, programId.toBase58())) {
               const first = await planTradeRefresh(connection, input, { withPeers: true });
@@ -268,6 +267,14 @@ export function useFirstTrade(slabAddress: string) {
             throw e;
           }
         };
+
+        // Council r10 recheck D1: an open from flat carries the funding counter in a memo (lib/funding-memo.ts). It goes INTO the order body, so
+        // the 121 peer refresh and the multi-asset shapes (which rebuild the order from the body) keep it. Only when it fits; a too-large
+        // transaction is sent once more without it.
+        const sendRefreshed = (body: TransactionInstruction[], takerPortfolio: PublicKey | null, o: { signers?: Keypair[]; cap: number; memo?: TransactionInstruction | null }): Promise<string> =>
+          isDevnetV22Enabled() && slabRaw
+            ? sendWithFundingMemo(body, o.memo ?? null, (b) => sendRefreshedBody(b, takerPortfolio, o), owner)
+            : sendRefreshedBody(body, takerPortfolio, o);
 
         // ── Returning user: the account exists — [Deposit, Trade] in ONE tx (1 prompt). ──
         const existing = await findV17Portfolio(connection, programId, market, owner);

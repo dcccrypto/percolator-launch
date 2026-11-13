@@ -32,9 +32,15 @@ describe("pendingFundingPaidAtoms (engine f_delta = floor(|basis| x dF / (a_basi
     expect(pendingFundingPaidAtoms(asset({ fShort: -A }), leg({ side: 1 }), -basis, A)).toBe(2n);
     expect(pendingFundingPaidAtoms(asset(), leg(), basis, A)).toBe(0n);
   });
-  it("NEGATIVE: a leg on an older epoch / stale / missing input is unknown, never zero", () => {
+  it("a leg in an older K/F stale cohort (the side accrued since its last settle) is still exact: the engine settles it against F_now", () => {
+    // devnet: the side's kf_epoch moves on every accrual (a slot number, e.g. 521927872), so a held leg lags it most of the time
+    expect(pendingFundingPaidAtoms(asset({ kfEpochLong: 521_927_872n, fLong: -A }), leg({ kfEpochSnap: 521_927_000n }), basis, A)).toBe(
+      pendingFundingPaidAtoms(asset({ fLong: -A }), leg(), basis, A),
+    );
+    expect(pendingFundingPaidAtoms(asset({ kfEpochLong: 4n, fLong: -A }), leg(), basis, A)).not.toBeNull();
+  });
+  it("NEGATIVE: a leg on an older ADL epoch / stale / missing input is unknown, never zero", () => {
     expect(pendingFundingPaidAtoms(asset({ epochLong: 2n }), leg(), basis, A)).toBeNull();
-    expect(pendingFundingPaidAtoms(asset({ kfEpochLong: 4n }), leg(), basis, A)).toBeNull();
     expect(pendingFundingPaidAtoms(asset(), leg({ stale: true }), basis, A)).toBeNull();
     expect(pendingFundingPaidAtoms(null, leg(), basis, A)).toBeNull();
     expect(pendingFundingPaidAtoms(asset(), leg(), basis, 0n)).toBeNull();

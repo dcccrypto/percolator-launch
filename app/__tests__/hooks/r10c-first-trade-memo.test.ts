@@ -68,6 +68,14 @@ vi.mock("@/components/providers/SlabProvider", () => ({
   }),
 }));
 // v2.2 on, a single-asset market: the order goes through the memo path.
+// The 121 peer refresh: the order is rebuilt from its body with a peer crank in front (lib/v22/trade-refresh-wire.ts).
+vi.mock("@/lib/v21/loss-stale-retry", async (orig) => ({ ...(await orig<typeof import("@/lib/v21/loss-stale-retry")>()), isLossStaleError: (e: unknown) => String(e).includes("LOSS_STALE_121"), lossStaleHandlingEnabled: () => false }));
+vi.mock("@/lib/v22/trade-refresh-wire", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/trade-refresh-wire")>()),
+  planTradeRefresh: async (_c: unknown, input: { body: import("@solana/web3.js").TransactionInstruction[] }) => ({ cranks: [{ role: "peer" }], instructions: [peerCrank, ...input.body] }),
+  sendWithRefreshRetry: async (plan: () => Promise<import("@solana/web3.js").TransactionInstruction[]>, send: (ixs: import("@solana/web3.js").TransactionInstruction[]) => Promise<string>) => send(await plan()),
+}));
+const peerCrank = new (require("@solana/web3.js").TransactionInstruction)({ programId: new (require("@solana/web3.js").PublicKey)(new Uint8Array(32).fill(99)), keys: [], data: Buffer.from([1]) });
 vi.mock("@/lib/v22/flag", async (orig) => ({ ...(await orig<typeof import("@/lib/v22/flag")>()), isDevnetV22Enabled: () => true }));
 vi.mock("@/lib/v22/trade-refresh", async (orig) => ({ ...(await orig<typeof import("@/lib/v22/trade-refresh")>()), marketAssetSlots: () => 1 }));
 vi.mock("@percolatorct/sdk", async (orig) => ({
@@ -179,5 +187,21 @@ describe("useFirstTrade: the funding memo on an open from flat", () => {
     before.value = null;
     await fundAndTrade(500n);
     expect(memoOf(sendTx.mock.calls[0])).toBeNull();
+  });
+});
+
+describe("useFirstTrade: the memo survives the 121 peer refresh", () => {
+  it("refused 121 first: the rebuilt order (peer crank + body) still carries the memo", async () => {
+    sendTx.mockReset();
+    findV17Portfolio.mockReset();
+    findV17Portfolio.mockResolvedValue(Keypair.generate().publicKey);
+    before.value = { q: 0n, funding: { netPaid: 442_997n, legs: 0 } };
+    chain.beforeQ = 0n;
+    chain.afterQ = 500n;
+    sendTx.mockRejectedValueOnce(new Error("LOSS_STALE_121")).mockResolvedValueOnce("sigRefreshed");
+    await fundAndTrade(500n);
+    expect(sendTx).toHaveBeenCalledTimes(2);
+    expect(memoOf(sendTx.mock.calls[1])).toEqual(["perc:fb1:442997"]);
+    expect(memoBaseFor("sigRefreshed")).toBe(442_997n);
   });
 });

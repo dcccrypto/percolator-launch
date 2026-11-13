@@ -118,9 +118,19 @@ export async function sendWithFundingMemo(ixs: TransactionInstruction[], memoIn:
     if (isTxTooLarge(e)) return send(ixs);
     throw e;
   }
-  const base = fundingBaseFromTx({ staticAccountKeys: [MEMO_PROGRAM_ID], compiledInstructions: [{ programIdIndex: 0, data: memo.data }] });
-  if (base !== null) noteMemoBase(sig, base);
+  noteMemoIx(sig, memo);
   return sig;
+}
+
+/** The base a memo instruction of ours states (null for anything else). */
+export function memoIxBase(memo: TransactionInstruction): bigint | null {
+  return fundingBaseFromTx({ staticAccountKeys: [MEMO_PROGRAM_ID], compiledInstructions: [{ programIdIndex: 0, data: memo.data }] });
+}
+
+/** Records the base of a memo that landed with `sig` (see memoBaseFor). */
+export function noteMemoIx(sig: string, memo: TransactionInstruction): void {
+  const base = memoIxBase(memo);
+  if (base !== null) noteMemoBase(sig, base);
 }
 
 // The base this device wrote into a landed open, by signature: the trading device's own trade book uses the same number as every other

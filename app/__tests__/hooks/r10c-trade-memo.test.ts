@@ -29,6 +29,14 @@ const mocks = vi.hoisted(() => ({
   before: { value: null as { q: bigint; funding: { netPaid: bigint; legs: number } | null } | null },
 }));
 // v2.2 on, single-asset market: the order takes the path that carries the funding memo.
+// The 121 peer refresh: the order is rebuilt from its body with a peer crank in front (lib/v22/trade-refresh-wire.ts).
+vi.mock("@/lib/v21/loss-stale-retry", async (orig) => ({ ...(await orig<typeof import("@/lib/v21/loss-stale-retry")>()), isLossStaleError: (e: unknown) => String(e).includes("LOSS_STALE_121"), lossStaleHandlingEnabled: () => false }));
+vi.mock("@/lib/v22/trade-refresh-wire", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/trade-refresh-wire")>()),
+  planTradeRefresh: async (_c: unknown, input: { body: import("@solana/web3.js").TransactionInstruction[] }) => ({ cranks: [{ role: "peer" }], instructions: [peerCrank, ...input.body] }),
+  sendWithRefreshRetry: async (plan: () => Promise<import("@solana/web3.js").TransactionInstruction[]>, send: (ixs: import("@solana/web3.js").TransactionInstruction[]) => Promise<string>) => send(await plan()),
+}));
+const peerCrank = new (require("@solana/web3.js").TransactionInstruction)({ programId: new (require("@solana/web3.js").PublicKey)(new Uint8Array(32).fill(99)), keys: [], data: Buffer.from([1]) });
 vi.mock("@/lib/v22/flag", async (orig) => ({ ...(await orig<typeof import("@/lib/v22/flag")>()), isDevnetV22Enabled: () => true }));
 vi.mock("@/lib/v22/trade-refresh", async (orig) => ({ ...(await orig<typeof import("@/lib/v22/trade-refresh")>()), marketAssetSlots: () => 1 }));
 vi.mock("@/lib/v22/lev-guard", async (orig) => ({ ...(await orig<typeof import("@/lib/v22/lev-guard")>()), levGuardExists: async () => false }));
@@ -174,5 +182,19 @@ describe("useTrade: funding memo", () => {
     expect(await sentMemos()).toEqual([]);
     mocks.before.value = null;
     expect(await sentMemos()).toEqual([]);
+  });
+  it("refused 121 first: the rebuilt order (peer crank + body) still carries the memo", async () => {
+    mocks.before.value = { q: 0n, funding: { netPaid: 442_997n, legs: 0 } };
+    connection.getProgramAccounts.mockResolvedValueOnce([{ pubkey: portfolio, account: { data: Buffer.from([1]) } }]);
+    mocks.sendTx.mockReset();
+    mocks.sendTx.mockRejectedValueOnce(new Error("LOSS_STALE_121")).mockResolvedValueOnce("sig-refreshed");
+    const { result, unmount } = renderHook(() => useTrade(slabAddress));
+    await act(async () => {
+      await result.current.trade({ lpIdx: 0, userIdx: 7, size: 1_000_000n });
+    });
+    unmount();
+    expect(mocks.sendTx).toHaveBeenCalledTimes(2);
+    const ixs = (mocks.sendTx.mock.calls[1][0] as { instructions: TransactionInstruction[] }).instructions;
+    expect(ixs.filter((ix) => ix.programId.equals(MEMO_PROGRAM_ID)).map((ix) => Buffer.from(ix.data).toString("utf8"))).toEqual(["perc:fb1:442997"]);
   });
 });
