@@ -70,34 +70,48 @@ export function fundingNetOf(account: unknown): bigint | null {
 }
 
 /**
- * Funding accrued on a leg but not yet settled, as atoms PAID (negative = received). Null when it cannot be known exactly: the leg is on an
- * older ADL epoch than the side's current one (the engine would use the epoch-start index), is stale, or an input is missing.
+ * Funding accrued on a leg but not yet settled, as atoms PAID (negative = received), and whether the two reads disagree for a moment.
+ * `value` is null when it cannot be known exactly: the leg is on an older ADL epoch than the side's current one (the engine would use the
+ * epoch-start index), is stale, an input is missing, or the views are out of order (`catchingUp`).
  *
- * The K/F stale-cohort epoch (`kf_epoch_snap` vs the side's `kf_epoch`) is NOT a condition. The engine moves the side's kf_epoch on every
- * accrual (kernel_mark_kf_stale_cohorts) and settles a lagging leg against the same target, F_now (kf_target_for_leg_from_asset checks only
- * the ADL epoch), so the pending figure is exact either way. Requiring it made this null after nearly every crank of the market, and the close
- * estimate flipped to "excl. funding" at random (Council r10 recheck).
+ * The K/F stale-cohort epoch. The engine moves the side's kf_epoch on every accrual (kernel_mark_kf_stale_cohorts) and settles a LAGGING leg
+ * (kf_epoch_snap < kf_epoch) against the same target, F_now (kf_target_for_leg_from_asset checks only the ADL epoch), so a lagging leg is exact.
+ * A leg AHEAD of the side (kf_epoch_snap > kf_epoch) cannot exist on chain (kernel_settle_kf_stale_cohort refuses it): it means the portfolio
+ * was read after a crank settled it and the market before that crank accrued. F is then behind the leg's snapshot, so no figure is right:
+ * `catchingUp`, which the close dialogs show as loading (the next market read fixes it), never as "excl. funding" and never as a number.
  */
+export function pendingFundingState(
+  asset: AssetSettleState | null | undefined,
+  leg: RiskLegSnap | null | undefined,
+  basisQ: bigint,
+  aBasis: bigint,
+): { value: bigint | null; catchingUp: boolean } {
+  const none = { value: null, catchingUp: false };
+  if (!asset || !leg || aBasis <= 0n || basisQ === 0n) return none;
+  if (leg.stale) return none;
+  const long = leg.side === 0;
+  if (!long && leg.side !== 1) return none;
+  if (leg.epochSnap !== (long ? asset.epochLong : asset.epochShort)) return none;
+  if (leg.kfEpochSnap > (long ? asset.kfEpochLong : asset.kfEpochShort)) return { value: null, catchingUp: true };
+  const fNow = long ? asset.fLong : asset.fShort;
+  const d = fNow - leg.fSnap;
+  if (d === 0n) return { value: 0n, catchingUp: false };
+  const basisAbs = basisQ < 0n ? -basisQ : basisQ;
+  const den = aBasis * POS_SCALE;
+  const num = basisAbs * d;
+  // floor division for a signed numerator (the engine floors the signed delta)
+  const delta = num >= 0n ? num / den : -((-num + den - 1n) / den);
+  return { value: -delta, catchingUp: false };
+}
+
+/** `pendingFundingState(...).value`. */
 export function pendingFundingPaidAtoms(
   asset: AssetSettleState | null | undefined,
   leg: RiskLegSnap | null | undefined,
   basisQ: bigint,
   aBasis: bigint,
 ): bigint | null {
-  if (!asset || !leg || aBasis <= 0n || basisQ === 0n) return null;
-  if (leg.stale) return null;
-  const long = leg.side === 0;
-  if (!long && leg.side !== 1) return null;
-  if (leg.epochSnap !== (long ? asset.epochLong : asset.epochShort)) return null;
-  const fNow = long ? asset.fLong : asset.fShort;
-  const d = fNow - leg.fSnap;
-  if (d === 0n) return 0n;
-  const basisAbs = basisQ < 0n ? -basisQ : basisQ;
-  const den = aBasis * POS_SCALE;
-  const num = basisAbs * d;
-  // floor division for a signed numerator (the engine floors the signed delta)
-  const delta = num >= 0n ? num / den : -((-num + den - 1n) / den);
-  return -delta;
+  return pendingFundingState(asset, leg, basisQ, aBasis).value;
 }
 
 /** Funding paid over a trade so far: what was settled since the trade opened plus what is pending. Null when either part is unknown. */

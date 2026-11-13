@@ -48,7 +48,7 @@ import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import type { AssetAdlFactors } from "@/lib/v17-adl";
 import { adlEffectiveQuantityCeil, effectiveLeg } from "@/lib/limits/effective-quantity";
 import { computeEngineLiqPrice } from "@/lib/liquidation-risk";
-import { fundingNetOf, fundingPaidSoFar, pendingFundingPaidAtoms } from "@/lib/funding-flow";
+import { fundingNetOf, fundingPaidSoFar, pendingFundingState } from "@/lib/funding-flow";
 import { loadBookByWallet } from "@/lib/trade-book";
 import { riskEntryFromSettled, riskLegOf, settledRiskAnchorE6, type RiskLegCarrier, type RiskLegSnap } from "@/lib/risk-entry";
 
@@ -154,6 +154,11 @@ export interface PositionPnl {
    * value that cannot be read, several legs): callers say "excl. funding" rather than treat it as zero.
    */
   fundingPaidAtoms?: bigint | null;
+  /**
+   * Council r10 recheck: `fundingPaidAtoms` is null only because the market and portfolio reads are a moment out of order around a keeper crank
+   * (lib/funding-flow.ts pendingFundingState `catchingUp`). The close dialogs then show the estimate as loading, not "excl. funding".
+   */
+  fundingLoading?: boolean;
   /** r10: the market may charge holding rent that no figure here includes: the close net is tagged "excl. holding fee" and is never green. */
   holdingFeeExcluded?: boolean;
   /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed (needs a RECORDED entry: server or cache). */
@@ -308,6 +313,16 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     resolved.source === "cache" && cacheCurrent && (input.cachedRiskEntryE6 ?? 0n) > 0n ? (input.cachedRiskEntryE6 as bigint) : resolved.entry;
   const riskEntry = settledEntry ?? bookedBasis;
 
+  // r10 + Council r10 recheck: funding paid so far, and whether the market and portfolio reads are a moment out of order (then it is loading).
+  const fundingOf = (): { fundingPaidAtoms: bigint | null; fundingLoading: boolean } => {
+    const book = input.cachedFundingBook;
+    if (effectiveSize === null || effectiveSize === 0n || resetObligation || input.activeLegCount !== 1 || book == null || book.q !== effectiveSize) {
+      return { fundingPaidAtoms: null, fundingLoading: false };
+    }
+    const pending = pendingFundingState(adlFactors?.settle, input.riskLeg, basisQ, aBasis);
+    const paid = fundingPaidSoFar(book.fundingBase, input.fundingNetPaidAtoms, pending.value);
+    return { fundingPaidAtoms: paid, fundingLoading: paid === null && pending.catchingUp && book.fundingBase != null && input.fundingNetPaidAtoms != null };
+  };
   const base = {
     effectiveSize,
     adlKnown,
@@ -318,10 +333,7 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     riskEntrySettled: settledEntry !== null,
     busyFeePaidAtoms: resolved.source === "cache" && cacheCurrent ? input.cachedBusyFeeAtoms ?? null : null,
     holdingFeeExcluded: input.holdingFeeMayApply === true,
-    fundingPaidAtoms:
-      effectiveSize !== null && effectiveSize !== 0n && !resetObligation && input.activeLegCount === 1 && input.cachedFundingBook != null && input.cachedFundingBook.q === effectiveSize
-        ? fundingPaidSoFar(input.cachedFundingBook.fundingBase, input.fundingNetPaidAtoms, pendingFundingPaidAtoms(adlFactors?.settle, input.riskLeg, basisQ, aBasis))
-        : null,
+    ...fundingOf(),
     riskKnown:
       flat || (effectiveSize !== null && !resetObligation && resolved.source !== "unknown" && resolved.entry > 0n && markE6 > 0n),
     liquidationPriceE6:

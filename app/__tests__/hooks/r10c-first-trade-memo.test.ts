@@ -160,7 +160,7 @@ describe("useFirstTrade: the funding memo on an open from flat", () => {
     await fundAndTrade(500n);
     expect(memoOf(sendTx.mock.calls[0])).toEqual(["perc:fb1:0"]);
     const ixs = (sendTx.mock.calls[0][0] as { instructions: TransactionInstruction[] }).instructions;
-    expect(ixs[ixs.length - 1].programId.equals(MEMO_PROGRAM_ID)).toBe(true); // after the trade
+    expect(ixs[0].programId.equals(MEMO_PROGRAM_ID)).toBe(true); // first: refresh planners read the trade as the last instruction
     expect(memoBaseFor("sigNew")).toBe(0n);
   });
 

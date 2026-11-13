@@ -796,7 +796,8 @@ export function useTrade(slabAddress: string) {
           // the funding paid since the open. It goes INTO the order body, so every path that rebuilds the order from the body (the 121 peer
           // refresh, the multi-asset shapes, the allocate retry, a raised fee cap) keeps it. Only when it fits; dropped on a too-large error.
           const fundingMemo = isV17Market && isDevnetV22Enabled() ? memoIfFits(instructions, openFundingMemoIx(await beforeFull), wallet.publicKey) : null;
-          if (fundingMemo) instructions.push(fundingMemo);
+          // FIRST in the body: the multi-asset refresh reads the trade as the body's last instruction (lib/v22/trade-refresh.ts).
+          if (fundingMemo) instructions.unshift(fundingMemo);
           let instructions0 = instructions;
           const withRaisedFee = async (): Promise<void> => {
             const raised = await fetchTradeFeeBps(connection, slabPk, matcherCtx, { fallback: signedFeeBps, withUtilMax: true });

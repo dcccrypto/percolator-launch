@@ -187,6 +187,7 @@ function PortfolioCloseFlow({
       riskEntryPrice={closePnl.pnlKnown ? closePnl.riskEntry : 0n}
       busyOpenFeeAtoms={closePnl.busyFeePaidAtoms ?? null}
       fundingPaidAtoms={closePnl.fundingPaidAtoms ?? null}
+            fundingLoading={closePnl.fundingLoading === true}
       holdingFeeExcluded={closePnl.holdingFeeExcluded}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}

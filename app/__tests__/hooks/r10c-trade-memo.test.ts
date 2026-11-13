@@ -174,6 +174,9 @@ describe("useTrade: funding memo", () => {
   it("an open from flat with no active leg carries perc:fb1:<counter>", async () => {
     mocks.before.value = { q: 0n, funding: { netPaid: 419_035n, legs: 0 } };
     expect(await sentMemos()).toEqual(["perc:fb1:419035"]);
+    // first in the body: the multi-asset refresh reads the trade as the last instruction
+    const ixs = (mocks.sendTx.mock.calls.at(-1)?.[0] as { instructions: TransactionInstruction[] }).instructions;
+    expect(ixs[0].programId.equals(MEMO_PROGRAM_ID)).toBe(true);
   });
   it("an add, a portfolio holding another leg, or an unread one: no memo", async () => {
     mocks.before.value = { q: 5n, funding: { netPaid: 1n, legs: 1 } };

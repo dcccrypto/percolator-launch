@@ -319,3 +319,30 @@ describe("D6: the trading device keeps Entry after a partial close", () => {
     expect(getSavedEntry(SLAB, 0, WALLET)?.sizeQ).toBe(501_685n);
   });
 });
+
+describe("D1: the market and portfolio reads a moment out of order around a keeper crank", () => {
+  const settle = { effectivePriceE6: 80_000_000n, kLong: 0n, kShort: 0n, fLong: 0n, fShort: 0n, kfEpochLong: 100n, kfEpochShort: 100n, bLong: 0n, bShort: 0n, epochLong: 1n, epochShort: 1n };
+  const legAt = (kfEpochSnap: bigint) => ({ side: 0, kSnap: 0n, fSnap: 0n, kfEpochSnap, epochSnap: 1n, bSnap: 0n, bEpochSnap: 1n, stale: false, bStale: false });
+  const pnlWith = (kfEpochSnap: bigint) =>
+    computePositionPnl({
+      basisQ: T, aBasis: 1_000_000n, epochSnap: 1n, adlApplicable: false, markE6: 80_000_000n, onChainPnl: 0n, initialMarginBps: 1000n, capital: 20n * T,
+      adlFactors: { aLong: 1_000_000n, aShort: 1_000_000n, epochLong: 1n, epochShort: 1n, modeLong: 0, modeShort: 0, settle } as never,
+      cachedEntryE6: 80_000_000n, activeLegCount: 1, fundingNetPaidAtoms: 419_035n, riskLeg: legAt(kfEpochSnap) as never, cachedFundingBook: { fundingBase: 415_917n, q: T },
+    });
+
+  it("a lagging cohort (the market accrued since the leg settled) still gives the figure; a leg ahead of the market read is loading", () => {
+    expect(pnlWith(90n)).toMatchObject({ fundingPaidAtoms: 3_118n, fundingLoading: false });
+    expect(pnlWith(100n)).toMatchObject({ fundingPaidAtoms: 3_118n, fundingLoading: false });
+    expect(pnlWith(101n)).toMatchObject({ fundingPaidAtoms: null, fundingLoading: true });
+  });
+
+  it("loading shows '--' with a reason, never 'excl. funding'; a truly unknown figure still says 'excl. funding'", () => {
+    const props = { positionSize: T, entryPrice: 80_000_000n, currentPrice: 80_100_000n, capital: 20n * T, symbol: "SOL", collateralSymbol: "USDC", decimals: 6, priceUsd: 1, isLong: true, loading: false, tradingFeeBps: 30n, onConfirm: () => {} };
+    const a = render(<ClosePositionForm {...props} fundingPaidAtoms={null} fundingLoading />);
+    expect(screen.queryByTestId("close-net-excl-funding")).toBeNull();
+    expect(screen.getByTestId("close-net-loading")).toHaveAttribute("title", "Waiting for the funding figure");
+    a.unmount();
+    render(<ClosePositionForm {...props} fundingPaidAtoms={null} />);
+    expect(screen.getByTestId("close-net-excl-funding")).toBeInTheDocument();
+  });
+});

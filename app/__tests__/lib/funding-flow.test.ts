@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** r10 owner decision 1: funding the chain moved on a position = counter change since open + the leg's pending funding (engine f_delta). */
 import { describe, expect, it } from "vitest";
-import { fundingPaidSoFar, fundingSampleOf, pendingFundingPaidAtoms } from "@/lib/funding-flow";
+import { fundingPaidSoFar, fundingSampleOf, pendingFundingPaidAtoms, pendingFundingState } from "@/lib/funding-flow";
 import type { AssetSettleState, RiskLegSnap } from "@/lib/risk-entry";
 
 const A = 1_000_000_000_000_000n; // a_basis
@@ -38,6 +38,12 @@ describe("pendingFundingPaidAtoms (engine f_delta = floor(|basis| x dF / (a_basi
       pendingFundingPaidAtoms(asset({ fLong: -A }), leg(), basis, A),
     );
     expect(pendingFundingPaidAtoms(asset({ kfEpochLong: 4n, fLong: -A }), leg(), basis, A)).not.toBeNull();
+  });
+  it("a leg AHEAD of the side's K/F epoch (portfolio read after a crank's settle, market read before it) is catching up: no figure, never a wrong one", () => {
+    const st = pendingFundingState(asset({ kfEpochLong: 3n, fLong: 0n }), leg({ kfEpochSnap: 4n, fSnap: -A }), basis, A);
+    expect(st).toEqual({ value: null, catchingUp: true });
+    expect(pendingFundingPaidAtoms(asset({ kfEpochLong: 3n }), leg({ kfEpochSnap: 4n }), basis, A)).toBeNull();
+    expect(pendingFundingState(asset({ kfEpochLong: 4n, fLong: -A }), leg(), basis, A).catchingUp).toBe(false);
   });
   it("NEGATIVE: a leg on an older ADL epoch / stale / missing input is unknown, never zero", () => {
     expect(pendingFundingPaidAtoms(asset({ epochLong: 2n }), leg(), basis, A)).toBeNull();

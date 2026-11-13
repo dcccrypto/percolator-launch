@@ -101,7 +101,7 @@ export function legacyTxSize(ixs: readonly TransactionInstruction[], feePayer: P
 /** The memo when the transaction still fits with it and the headroom; otherwise null (the trade goes without it). */
 export function memoIfFits(ixs: readonly TransactionInstruction[], memo: TransactionInstruction | null, feePayer: PublicKey | null | undefined): TransactionInstruction | null {
   if (!memo || !feePayer) return null;
-  return legacyTxSize([...ixs, memo], feePayer) + MEMO_SIZE_HEADROOM <= PACKET ? memo : null;
+  return legacyTxSize([memo, ...ixs], feePayer) + MEMO_SIZE_HEADROOM <= PACKET ? memo : null;
 }
 
 /**
@@ -113,7 +113,8 @@ export async function sendWithFundingMemo(ixs: TransactionInstruction[], memoIn:
   if (!memo) return send(ixs);
   let sig: string;
   try {
-    sig = await send([...ixs, memo]);
+    // First: refresh planners read the trade as the last instruction of the body (lib/v22/trade-refresh.ts executeV22MultiAssetOrder).
+    sig = await send([memo, ...ixs]);
   } catch (e) {
     if (isTxTooLarge(e)) return send(ixs);
     throw e;
