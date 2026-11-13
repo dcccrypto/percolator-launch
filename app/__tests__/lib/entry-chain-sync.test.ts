@@ -2,11 +2,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Keypair } from "@solana/web3.js";
 
-const h = vi.hoisted(() => ({ entryFromChain: vi.fn(), fee: 30n as bigint | null }));
+const h = vi.hoisted(() => ({ entryFromChain: vi.fn(), fee: 30n as bigint | null, growth: "present" as string, nowQ: null as bigint | null, sigs: [] as string[], sigCalls: 0 }));
+vi.mock("@/lib/v21/growth-market", () => ({ growthRecordPresence: () => h.growth }));
+vi.mock("@/lib/position-change", () => ({ readEffectivePositionQ: async () => h.nowQ }));
 vi.mock("@/lib/entry-chain", () => ({ entryFromChain: h.entryFromChain }));
 vi.mock("@/lib/limits/decode", () => ({ decodeMarketEngineView: () => (h.fee === null ? null : { tradeFeeBaseBps: h.fee }) }));
 
-import { COOLDOWN_MS, __resetEntryChainSyncForTests, holdChainSync, rebuildDue, shouldSyncPosition, syncChainEntry } from "@/lib/entry-chain-sync";
+import { COOLDOWN_MS, VERIFY_MS, __resetEntryChainSyncForTests, holdChainSync, rebuildDue, shouldSyncPosition, syncChainEntry } from "@/lib/entry-chain-sync";
 import { clearEntryPrice, getSavedEntry, markEntryUnknown, saveEntryPrice } from "@/lib/entry-price";
 
 const SLAB = Keypair.generate().publicKey.toBase58();
@@ -14,11 +16,18 @@ const WALLET = Keypair.generate().publicKey.toBase58();
 const portfolio = Keypair.generate().publicKey;
 const wrapper = Keypair.generate().publicKey;
 const T = 1_000_000n;
-const conn = { getAccountInfo: vi.fn(async () => ({ data: Buffer.alloc(8) })) } as never;
+const conn = {
+  getAccountInfo: vi.fn(async () => ({ data: Buffer.alloc(8) })),
+  getSignaturesForAddress: vi.fn(async () => {
+    h.sigCalls++;
+    return h.sigs.map((signature) => ({ signature }));
+  }),
+} as never;
 const target = (qNow = 2n * T) => ({ slab: SLAB, idx: 0, wallet: WALLET, portfolio, wrapper, qNow });
-const chain = (entry: bigint | null = 101_000_000n) => ({
+const chain = (entry: bigint | null = 101_000_000n, topSig = "sigA") => ({
   verdict: "chain" as const,
   txRead: 3,
+  topSig,
   entry: { entryPriceE6: entry, bookedPriceE6: 100_500_000n, busyFeeAtoms: 7n, sizeQ: 2n * T, fills: 2 },
 });
 
@@ -27,6 +36,10 @@ beforeEach(() => {
   __resetEntryChainSyncForTests();
   h.entryFromChain.mockReset();
   h.fee = 30n;
+  h.growth = "present";
+  h.nowQ = 2n * T; // the chain still holds the size the rebuild was for
+  h.sigs = [];
+  h.sigCalls = 0;
 });
 
 describe("syncChainEntry", () => {
@@ -69,7 +82,7 @@ describe("syncChainEntry", () => {
     const [a, b] = await Promise.all([syncChainEntry(conn, target()), syncChainEntry(conn, target())]);
     expect([a, b]).toEqual(["chain", "chain"]);
     expect(h.entryFromChain).toHaveBeenCalledTimes(1);
-    expect(await syncChainEntry(conn, target())).toBe("skipped");
+    expect(await syncChainEntry(conn, target())).toBe("skipped"); // within the verify window
     expect(h.entryFromChain).toHaveBeenCalledTimes(1);
     // a different size (a trade since) is due again
     h.entryFromChain.mockResolvedValue({ verdict: "unreadable", entry: null, txRead: 0 });
@@ -95,7 +108,8 @@ describe("rebuildDue", () => {
   it("due with no attempt or another size; a finished one never repeats; a failed one only after the cooldown", () => {
     expect(rebuildDue(null, T, 0)).toBe(true);
     expect(rebuildDue(at("chain", T, 0), 2n * T, 1)).toBe(true);
-    expect(rebuildDue(at("chain", T, 0), T, 10 * COOLDOWN_MS)).toBe(false);
+    expect(rebuildDue(at("chain", T, 0), T, VERIFY_MS - 1)).toBe(false); // a chain record is re-verified after VERIFY_MS, never trusted by size alone
+    expect(rebuildDue(at("chain", T, 0), T, VERIFY_MS)).toBe(true);
     expect(rebuildDue(at("incomplete", T, 0), T, COOLDOWN_MS - 1)).toBe(false);
     expect(rebuildDue(at("unreadable", T, 0), T, COOLDOWN_MS)).toBe(true);
   });
@@ -104,20 +118,20 @@ describe("rebuildDue", () => {
 describe("owner decision 2: the r9 'unknown' is never filled in", () => {
   it("a ticket-unknown position (marker) is skipped: no chain read, nothing written, even after the ticket's clearEntryPrice calls", async () => {
     h.entryFromChain.mockResolvedValue(chain());
-    markEntryUnknown(SLAB, 0, WALLET);
+    markEntryUnknown(SLAB, 0, WALLET, 2n * T);
     clearEntryPrice(SLAB, 0, WALLET); // a later add / reduce on the position clears the record, not the marker
     expect(await syncChainEntry(conn, target())).toBe("skipped");
     expect(h.entryFromChain).not.toHaveBeenCalled();
     expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
   });
   it("a real measured save replaces the marker (the next trade's own entry), so later rebuilds are possible again", () => {
-    markEntryUnknown(SLAB, 0, WALLET);
+    markEntryUnknown(SLAB, 0, WALLET, 2n * T);
     saveEntryPrice(SLAB, 0, 100_000_000n, 2, WALLET, T);
     expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).toBeNull();
   });
   it("a marker (or a record) written while the chain was being read wins: the chain never overwrites it", async () => {
     h.entryFromChain.mockImplementation(async () => {
-      markEntryUnknown(SLAB, 0, WALLET); // the ticket marks unknown mid-read
+      markEntryUnknown(SLAB, 0, WALLET, 2n * T); // the ticket marks unknown mid-read
       return chain();
     });
     await syncChainEntry(conn, target());
@@ -174,10 +188,103 @@ describe("usePortfolio trigger (shouldSyncPosition)", () => {
     expect(shouldSyncPosition(row(o), WALLET)).toBe(false);
   });
   it("not for the ticket's explicit unknown, nor with a trade in flight on the market", () => {
-    markEntryUnknown(SLAB, 0, WALLET);
+    markEntryUnknown(SLAB, 0, WALLET, 2n * T);
     expect(shouldSyncPosition(row(), WALLET)).toBe(false);
     localStorage.clear();
     holdChainSync(SLAB, 60_000);
     expect(shouldSyncPosition(row(), WALLET)).toBe(false);
+  });
+});
+
+describe("N2: the unknown marker is tied to the position", () => {
+  it("honoured only at the size it was written for; a different size retires it", () => {
+    markEntryUnknown(SLAB, 0, WALLET, 2n * T);
+    expect(shouldSyncPosition({ slabAddress: SLAB, idx: 0, adlKnown: true, effectiveSize: 2n * T, portfolioPk: portfolio, entryPriceSource: "unknown", account: { positionSize: 2n * T } }, WALLET)).toBe(false);
+    expect(shouldSyncPosition({ slabAddress: SLAB, idx: 0, adlKnown: true, effectiveSize: 3n * T, portfolioPk: portfolio, entryPriceSource: "unknown", account: { positionSize: 3n * T } }, WALLET)).toBe(true);
+    expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).toBeNull();
+  });
+  it("a close to flat clears it (a reopen elsewhere can then be rebuilt); a plain clear (reduce / add) does not", () => {
+    markEntryUnknown(SLAB, 0, WALLET, 2n * T);
+    clearEntryPrice(SLAB, 0, WALLET);
+    expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).not.toBeNull();
+    clearEntryPrice(SLAB, 0, WALLET, { flat: true });
+    expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).toBeNull();
+  });
+  it("end to end: unknown, close to flat, reopen at the same size elsewhere: the rebuild is allowed", async () => {
+    markEntryUnknown(SLAB, 0, WALLET, 2n * T);
+    clearEntryPrice(SLAB, 0, WALLET, { flat: true });
+    h.entryFromChain.mockResolvedValue(chain());
+    expect(await syncChainEntry(conn, target())).toBe("chain");
+  });
+});
+
+describe("N3: a chain record is vouched for by the portfolio's newest signature", () => {
+  it("a same-size close + reopen (a newer signature) rebuilds; the same newest signature only re-checks", async () => {
+    let t = 1_000_000;
+    h.entryFromChain.mockResolvedValue(chain(101_000_000n, "sigA"));
+    expect(await syncChainEntry(conn, target(), () => t)).toBe("chain");
+    expect(getSavedEntry(SLAB, 0, WALLET)?.chainSig).toBe("sigA");
+    // a minute later the newest signature is unchanged: one cheap read, no rebuild
+    t += VERIFY_MS;
+    h.sigs = ["sigA"];
+    await syncChainEntry(conn, target(), () => t);
+    expect(h.entryFromChain).toHaveBeenCalledTimes(1);
+    expect(h.sigCalls).toBe(1);
+    // the position was closed and reopened at the SAME size at another price: a newer signature
+    t += VERIFY_MS;
+    h.sigs = ["sigB"];
+    h.entryFromChain.mockResolvedValue(chain(95_000_000n, "sigB"));
+    await syncChainEntry(conn, target(), () => t);
+    expect(h.entryFromChain).toHaveBeenCalledTimes(2);
+    expect(getSavedEntry(SLAB, 0, WALLET)).toMatchObject({ entryPriceE6: 95_000_000n, chainSig: "sigB" });
+  });
+  it("a newer signature after which the chain cannot vouch (unexplained) removes the stale chain record; an unreadable chain keeps it", async () => {
+    let t = 1_000_000;
+    h.entryFromChain.mockResolvedValue(chain(101_000_000n, "sigA"));
+    await syncChainEntry(conn, target(), () => t);
+    t += VERIFY_MS;
+    h.sigs = ["sigB"];
+    h.entryFromChain.mockResolvedValue({ verdict: "unreadable", entry: null, txRead: 0 });
+    await syncChainEntry(conn, target(), () => t);
+    expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(101_000_000n);
+    t += COOLDOWN_MS;
+    h.entryFromChain.mockResolvedValue({ verdict: "unexplained", entry: null, txRead: 5 });
+    await syncChainEntry(conn, target(), () => t);
+    expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+  });
+  it("trigger: a chain-sourced record (chainSig) is a candidate to re-verify; a device-written one is not", async () => {
+    const row = { slabAddress: SLAB, idx: 0, adlKnown: true, effectiveSize: 2n * T, portfolioPk: portfolio, entryPriceSource: "cache", account: { positionSize: 2n * T } };
+    saveEntryPrice(SLAB, 0, 100_000_000n, 2, WALLET, 2n * T);
+    expect(shouldSyncPosition(row, WALLET)).toBe(false);
+    saveEntryPrice(SLAB, 0, 100_000_000n, 2, WALLET, 2n * T, { chainSig: "sigA" });
+    expect(shouldSyncPosition(row, WALLET)).toBe(true);
+  });
+});
+
+describe("N4: a rebuild for an old size never saves", () => {
+  it("the chain size moved while the walk ran: nothing is written", async () => {
+    h.entryFromChain.mockResolvedValue(chain());
+    h.nowQ = 3n * T; // a trade landed during the read
+    await syncChainEntry(conn, target());
+    expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+  });
+});
+
+describe("N5: the growth status comes from the market's growth record", () => {
+  it("a growth record -> mayChargeBusy true; none ('absent') -> false (not hard-coded)", async () => {
+    h.entryFromChain.mockResolvedValue({ verdict: "incomplete", entry: null, txRead: 1 });
+    h.growth = "present";
+    await syncChainEntry(conn, target());
+    expect(h.entryFromChain.mock.calls[0][2].mayChargeBusy).toBe(true);
+    __resetEntryChainSyncForTests();
+    localStorage.clear();
+    h.growth = "absent";
+    await syncChainEntry(conn, target());
+    expect(h.entryFromChain.mock.calls[1][2].mayChargeBusy).toBe(false);
+    __resetEntryChainSyncForTests();
+    localStorage.clear();
+    h.growth = "undecodable";
+    await syncChainEntry(conn, target());
+    expect(h.entryFromChain.mock.calls[2][2].mayChargeBusy).toBe(true); // fails toward the stricter rule
   });
 });

@@ -6,6 +6,10 @@ const holds = new Map<string, number>();
 export function holdChainSync(slab: string, ms: number, now: number = Date.now()): void {
   holds.set(slab, Math.max(holds.get(slab) ?? 0, now + ms));
 }
+/** Sets the hold to expire `ms` from now (shorter or longer): the end of a wait budget turns a long hold into a short post-landing one. */
+export function setChainSyncHold(slab: string, ms: number, now: number = Date.now()): void {
+  holds.set(slab, now + ms);
+}
 export function chainSyncHeld(slab: string, now: number = Date.now()): boolean {
   return (holds.get(slab) ?? 0) > now;
 }

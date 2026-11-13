@@ -60,7 +60,8 @@ import { modeFixtures } from "../../helpers/v22-fixtures";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { effectivePriceE6, execFillFromLogs } from "@/lib/v22/exec-fill";
 import { OrderTicket } from "@/components/trade/OrderTicket";
-import { getSavedEntry, isEntryMarkedUnknown } from "@/lib/entry-price";
+import { getSavedEntry, isEntryMarkedUnknown, tradeGrewPosition } from "@/lib/entry-price";
+import { chainSyncHeld, __resetChainSyncHoldsForTests } from "@/lib/entry-chain-hold";
 // Round 10: these pin the fee PARTS (what is added once, never twice); the display margin has its own tests (spread-size-aware).
 vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "0");
 
@@ -78,6 +79,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   localStorage.clear();
+  __resetChainSyncHoldsForTests();
   mocks.change = null;
   mocks.quoteBps = 23;
   mocks.utilBps = 0n;
@@ -191,6 +193,18 @@ describe("the saved Entry is the fill price, not the fill price plus the busy-si
     await act(async () => { fireEvent.click(screen.getByTestId("trade-confirm")); });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(getSavedEntry(SLAB, 0, W)).toBeNull();
-    expect(isEntryMarkedUnknown(SLAB, 0, W)).toBe(true);
+    expect(isEntryMarkedUnknown(SLAB, 0, W, FILLED)).toBe(true); // tied to the size the unpriced open left
+    expect(chainSyncHeld(SLAB)).toBe(true); // the 30 s post-landing hold (the wait budget's long hold is shortened, not dropped)
+  });
+});
+
+describe("N2: only an open or add that could not be priced leaves the Entry unknown", () => {
+  it("tradeGrewPosition: open, add and flip yes; reduce and close no", () => {
+    expect(tradeGrewPosition(0n, 5n)).toBe(true);
+    expect(tradeGrewPosition(5n, 8n)).toBe(true);
+    expect(tradeGrewPosition(5n, -2n)).toBe(true);
+    expect(tradeGrewPosition(5n, 3n)).toBe(false);
+    expect(tradeGrewPosition(-5n, -3n)).toBe(false);
+    expect(tradeGrewPosition(5n, 0n)).toBe(false);
   });
 });

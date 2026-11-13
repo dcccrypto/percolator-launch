@@ -32,6 +32,7 @@ import type { Connection, PublicKey } from "@solana/web3.js";
 import { decodeTxEventsV22 } from "@/lib/v22/sdk/v22-fill-events";
 import { execFillFromLogs, quotedSpreadBpsFloor, type ExecFill } from "@/lib/v22/exec-fill";
 import { busyFeeAfterTrade, entryAfterTrade } from "@/lib/entry-price";
+import { DEFAULT_FEE_CAP_MARGIN_BPS } from "@/lib/limits/fee-channel";
 
 /** REDUCE reasons whose `signed_reduced_q` is in ADL-effective position units (the same unit as the fills' executed_q). */
 const EFFECTIVE_UNIT_REDUCE = new Set([2, 3, 6, 7, 8]);
@@ -62,6 +63,8 @@ export interface ChainEntryResult {
   entry: ChainEntry | null;
   /** Transactions read (the RPC cost). */
   txRead: number;
+  /** The newest signature on the portfolio when the walk started (any transaction): the record is only vouched for while it is still the newest. */
+  topSig?: string;
 }
 
 /** One change of the position, from a landed transaction. */
@@ -71,6 +74,8 @@ export interface ChainDelta {
   deltaQ: bigint;
   /** Present for a fill; absent for a REDUCE (ADL, liquidation...), which changes size but never the average price. */
   fill?: ExecFill;
+  /** The `fee_bps` the taker signed (TradeCpi instruction data); null = the instruction could not be found / decoded. */
+  signedFeeBps?: bigint | null;
 }
 
 const abs = (n: bigint): bigint => (n < 0n ? -n : n);
@@ -85,6 +90,7 @@ export function deltasFromLogs(
   succeeded: boolean,
   wrapper: PublicKey,
   o: { market: PublicKey; portfolio: PublicKey; assetIndex: number },
+  signedFeeBps: bigint | null = null,
 ): ChainDelta[] | null | "irreconcilable" {
   if (!succeeded) return [];
   const ev = decodeTxEventsV22(true, logs, wrapper);
@@ -106,7 +112,7 @@ export function deltasFromLogs(
     const f = execFillFromLogs(logs, wrapper, { market: o.market, assetIndex: o.assetIndex, taker: o.portfolio, succeeded: true });
     // A fill of ours the decoder cannot reduce to one price (two assets in one line...) cannot be reconciled.
     if (!f) return "irreconcilable";
-    fillDelta = { sig, deltaQ: f.executedQ, fill: f };
+    fillDelta = { sig, deltaQ: f.executedQ, fill: f, signedFeeBps };
   }
   // Keep the log order: the summed fill sits where its first FILL event was (REDUCEs before it happen before it).
   for (const r of reduces.filter((r) => r.at < fillAt || fillAt < 0)) out.push(r.d);
@@ -116,16 +122,52 @@ export function deltasFromLogs(
 }
 
 /**
+ * The `fee_bps` a TradeCpi instruction signed, from the transaction's own instruction data (wrapper tag 10: 85 bytes, `fee_bps` u64 at 67).
+ * Null when the transaction holds no such instruction for this asset, or several (a batch, an evict-and-trade, a wrapper call by another
+ * program): the signed cap is then not provable.
+ */
+export function signedFeeBpsFromTx(
+  message: { staticAccountKeys?: readonly PublicKey[]; compiledInstructions?: readonly { programIdIndex: number; data: Uint8Array }[] } | null | undefined,
+  wrapper: PublicKey,
+  assetIndex: number,
+): bigint | null {
+  const keys = message?.staticAccountKeys;
+  const ixs = message?.compiledInstructions;
+  if (!keys || !ixs) return null;
+  let found: bigint | null = null;
+  let n = 0;
+  for (const ix of ixs) {
+    const pid = keys[ix.programIdIndex];
+    if (!pid || !pid.equals(wrapper) || ix.data[0] !== 10 || ix.data.length < 85) continue;
+    const dv = new DataView(ix.data.buffer, ix.data.byteOffset, ix.data.byteLength);
+    if (dv.getUint16(41, true) !== assetIndex) continue;
+    n++;
+    found = dv.getBigUint64(67, true);
+  }
+  return n === 1 ? found : null;
+}
+
+/**
  * The price a fill effectively paid, from the fill alone. Null = not explained (the Entry is then UNKNOWN, owner decision 2).
  *
  * `mayChargeBusy` false (no growth record): spread = fee - base, from trusted fields only, bit-identical to `effectivePriceE6(f, base, null)`;
- * the matcher's quote is not consulted. `mayChargeBusy` true: the ticket compares the charged fee with the busy rate it QUOTED from the side's
- * utilisation just before the trade, state standard RPC cannot read back. So from the chain a busy-side part cannot be PROVEN: a fee that
- * matches base + the matcher's own request within rounding is priced exactly as the ticket would with a quoted busy rate of 0
- * (spread = fee - base); any busy part above rounding (open or reduce) is not explained, and the Entry is unknown, never a number the
- * trading device would have shown as unknown.
+ * the matcher's quote is not consulted.
+ *
+ * `mayChargeBusy` true: the ticket compares the charged fee with the busy rate it QUOTED from the side's utilisation just before the trade,
+ * state standard RPC cannot read back, and shows the Entry as unknown when they differ (or when a raised-fee Custom order was sent). Device 2
+ * shows a number only when the chain PROVES no busy rate was quoted AND none was charged:
+ *   - charged: the fee is base + the matcher's own request within rounding (no busy part above tolerance, none below);
+ *   - quoted: the SIGNED `fee_bps` (instruction data) holds no room for a busy rate: signed <= base + request + the ticket's default margin.
+ *     Confirmed orders sign room for the confirmed busy rate, so signed above that means a rate was quoted (even if none was charged).
+ * No signed value (batch / unreadable instruction) = not provable = unknown. The request is the ceil of |quoted - booked| bps (percolator-match
+ * `requested_fee_bps`). A signed cap clamped to the market maximum cannot show room; that residual is accepted and noted in the PR.
  */
-export function chainFillPrice(f: ExecFill, baseFeeBps: bigint, mayChargeBusy: boolean): { priceE6: bigint; busyAtoms: bigint } | null {
+export function chainFillPrice(
+  f: ExecFill,
+  baseFeeBps: bigint,
+  mayChargeBusy: boolean,
+  signedFeeBps: bigint | null = null,
+): { priceE6: bigint; busyAtoms: bigint } | null {
   if (f.executedQ === 0n) return null;
   const base = (f.notionalAtoms * baseFeeBps) / 10_000n;
   const rest = f.feeAtoms > base ? f.feeAtoms - base : 0n;
@@ -134,6 +176,10 @@ export function chainFillPrice(f: ExecFill, baseFeeBps: bigint, mayChargeBusy: b
     const expected = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsFloor(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
     const off = rest > expected ? rest - expected : expected - rest;
     if (off > tol) return null;
+    if (signedFeeBps === null) return null;
+    const diff = f.quotedPriceE6 > f.bookedPriceE6 ? f.quotedPriceE6 - f.bookedPriceE6 : f.bookedPriceE6 - f.quotedPriceE6;
+    const reqCeil = f.quotedPriceE6 > 0n && f.bookedPriceE6 > 0n ? (diff * 10_000n + f.bookedPriceE6 - 1n) / f.bookedPriceE6 : 0n;
+    if (signedFeeBps > baseFeeBps + reqCeil + BigInt(DEFAULT_FEE_CAP_MARGIN_BPS)) return null;
   }
   const perUnit = (rest * 1_000_000n) / abs(f.executedQ);
   const p = f.executedQ > 0n ? f.bookedPriceE6 + perUnit : f.bookedPriceE6 - perUnit;
@@ -158,7 +204,7 @@ export function rebuildEntry(deltas: readonly ChainDelta[], qNow: bigint, baseFe
     const opens = q === 0n || (q > 0n) !== (after > 0n) || abs(after) > abs(q);
     if (d.fill) {
       fills++;
-      const px = chainFillPrice(d.fill, baseFeeBps, mayChargeBusy);
+      const px = chainFillPrice(d.fill, baseFeeBps, mayChargeBusy, d.signedFeeBps ?? null);
       if (px === null && opens) return { verdict: "unexplained", entry: null };
       if (after === 0n) {
         saved = null;
@@ -229,22 +275,24 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
   let txRead = 0;
   let before: string | undefined;
   let flip: { len: number; startQ: bigint } | null = null;
+  let topSig: string | undefined;
   try {
     for (;;) {
       const page = await connection.getSignaturesForAddress(o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
-      if (page.length === 0) return { verdict: "incomplete", entry: null, txRead };
+      if (page.length === 0) return { verdict: "incomplete", entry: null, txRead, topSig };
+      if (topSig === undefined) topSig = page[0].signature;
       const sigs = page.filter((s) => s.err === null).map((s) => s.signature);
       for (let i = 0; i < sigs.length; i += conc) {
-        if (txRead >= maxTx) return { verdict: "incomplete", entry: null, txRead };
+        if (txRead >= maxTx) return { verdict: "incomplete", entry: null, txRead, topSig };
         const group = sigs.slice(i, i + conc).slice(0, maxTx - txRead);
         const txs = await Promise.all(group.map((s) => connection.getTransaction(s, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })));
         txRead += group.length;
         for (let j = 0; j < group.length; j++) {
           const tx = txs[j];
-          if (!tx?.meta) return { verdict: "unreadable", entry: null, txRead };
-          const ds = deltasFromLogs(group[j], tx.meta.logMessages, tx.meta.err === null, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex });
-          if (ds === null) return { verdict: "unreadable", entry: null, txRead };
-          if (ds === "irreconcilable") return { verdict: "mismatch", entry: null, txRead };
+          if (!tx?.meta) return { verdict: "unreadable", entry: null, txRead, topSig };
+          const ds = deltasFromLogs(group[j], tx.meta.logMessages, tx.meta.err === null, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex }, signedFeeBpsFromTx(tx.transaction?.message as Parameters<typeof signedFeeBpsFromTx>[0], wrapper, assetIndex));
+          if (ds === null) return { verdict: "unreadable", entry: null, txRead, topSig };
+          if (ds === "irreconcilable") return { verdict: "mismatch", entry: null, txRead, topSig };
           // Inside one transaction the changes are applied in order; undo them last to first.
           for (let k = ds.length - 1; k >= 0; k--) {
             newestFirst.push(ds[k]);
@@ -255,16 +303,16 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
             if (q === 0n) {
               const used = flip ? newestFirst.slice(0, flip.len) : newestFirst;
               const r = rebuildEntry(used.slice().reverse(), o.qNow, o.baseFeeBps, flip ? flip.startQ : 0n, o.mayChargeBusy ?? true);
-              return { verdict: r.verdict, entry: r.entry, txRead };
+              return { verdict: r.verdict, entry: r.entry, txRead, topSig };
             }
           }
         }
       }
       before = page[page.length - 1].signature;
-      if (page.length < pageSize) return { verdict: "incomplete", entry: null, txRead };
+      if (page.length < pageSize) return { verdict: "incomplete", entry: null, txRead, topSig };
     }
   } catch {
-    return { verdict: "unreadable", entry: null, txRead };
+    return { verdict: "unreadable", entry: null, txRead, topSig };
   }
 }
 
