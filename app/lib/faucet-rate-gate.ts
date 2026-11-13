@@ -43,6 +43,17 @@ export class FaucetGateUnavailableError extends Error {
   }
 }
 
+/**
+ * Thrown by the read-only `peekFaucetGate` when the table EXISTS but the read failed (a Supabase blip, a permissions error). Unlike
+ * FaucetGateUnavailableError there is no durable store to ask: the status is unknown, and the caller must say so, not guess "available".
+ */
+export class FaucetGateReadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FaucetGateReadError";
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function tryFaucetGate(supabase: any, wallet: string, fundType: string, windowMs: number = RATE_LIMIT_MS): Promise<GateResult> {
   const windowStart = new Date(Date.now() - windowMs).toISOString();
@@ -147,7 +158,8 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
 
 /**
  * Read-only: is there an unexpired claim for (wallet, fundType)? Reserves nothing and deletes nothing, so a status
- * check can never spend the caller's claim. Throws when the table can't be read (the caller says "unknown").
+ * check can never spend the caller's claim. Throws FaucetGateUnavailableError when the table is missing (the caller uses its durable store) and
+ * FaucetGateReadError on any other read error (the caller says "unknown").
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function peekFaucetGate(supabase: any, wallet: string, fundType: string, windowMs: number = RATE_LIMIT_MS): Promise<{ limited: boolean; nextClaimAt: string | null }> {
@@ -159,7 +171,13 @@ export async function peekFaucetGate(supabase: any, wallet: string, fundType: st
     .eq("fund_type", fundType)
     .gte("claimed_at", windowStart)
     .maybeSingle();
-  if (error) throw new FaucetGateUnavailableError(`faucet_claims could not be read (${(error as { code?: string }).code ?? "error"})`);
+  if (error) {
+    // The same split tryFaucetGate makes: a SCHEMA error means the gate cannot function (the caller has a durable fallback for that); any other
+    // error is a failed read, and tryFaucetGate refuses the top-up on it. So the status is unknown here, never "available".
+    const code = (error as { code?: string }).code;
+    if (code === "PGRST205" || code === "42P01") throw new FaucetGateUnavailableError(`faucet_claims is unavailable (${code})`);
+    throw new FaucetGateReadError(`faucet_claims could not be read (${code ?? "error"})`);
+  }
   if (!data) return { limited: false, nextClaimAt: null };
   return { limited: true, nextClaimAt: new Date(new Date(data.claimed_at as string).getTime() + windowMs).toISOString() };
 }
