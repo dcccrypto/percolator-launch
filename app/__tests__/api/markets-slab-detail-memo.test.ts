@@ -54,7 +54,7 @@ describe("/api/markets/[slab] no-Supabase memo", () => {
     expect(h.reads).toBe(readsAfterFirst);
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
-    expect(b.headers.get("cache-control")).toBe(a.headers.get("cache-control"));
+    for (const h of ["cache-control", "content-type", "x-percolator-data-source"]) expect(b.headers.get(h)).toBe(a.headers.get(h));
     expect(b.headers.get("x-percolator-data-source")).toBe("on-chain-direct");
     const [ja, jb] = [await a.json(), await b.json()];
     expect(jb).toEqual(ja);

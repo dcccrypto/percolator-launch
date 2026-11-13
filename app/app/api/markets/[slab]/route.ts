@@ -1,6 +1,6 @@
 import { lotExpOf } from "@/lib/v22/lot";
 import { lotMarketNumbers } from "@/lib/v22/lot-view";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { validateSlabParam } from "@/lib/route-validators";
@@ -288,6 +288,7 @@ const detailMemo = createSwrMemo<string, DetailSnapshot>({
   max: 256,
   shouldStore: (s) => s.status === 200,
   ttlCapMs: marketMemoCapMs,
+  onBackground: (p) => after(p),
 });
 
 async function memoizedOnChainSlabFallback(slab: string): Promise<NextResponse> {

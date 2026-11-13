@@ -8,7 +8,10 @@
  * - `shouldStore(value)` false (e.g. an error / 404 response): returned to that caller, never stored.
  * - A failed load is not stored (the caller sees the rejection; a failed background refresh keeps the old value
  *   until it ages out). At most `max` keys are kept: the oldest-stored entry is evicted first.
- * - `ttlCapMs()` lets an env kill-switch lower the fresh window; 0 turns the memo off (every call loads).
+ * - `ttlCapMs()` lets an env kill-switch lower the fresh window (a cap below `freshMs` also drops the stale window, so
+ *   it bounds total staleness); 0 turns the memo off (every call loads).
+ * - `onBackground(p)` receives each background refresh (routes pass Next `after`, so a serverless instance is not
+ *   frozen mid-refresh).
  */
 export interface SwrMemo<K, V> {
   get(key: K, load: () => Promise<V>): Promise<V>;
@@ -21,19 +24,22 @@ export function createSwrMemo<K, V>(opts: {
   max: number;
   shouldStore: (value: V) => boolean;
   ttlCapMs?: () => number;
+  onBackground?: (p: Promise<unknown>) => void;
   now?: () => number;
 }): SwrMemo<K, V> {
   const now = opts.now ?? Date.now;
   const stored = new Map<K, { at: number; value: V }>();
-  const inflight = new Map<K, Promise<V>>();
+  const inflight = new Map<K, { startedAt: number; promise: Promise<V> }>();
   let generation = 0;
 
   function load(key: K, loader: () => Promise<V>): Promise<V> {
-    const running = inflight.get(key);
-    if (running) return running;
     const startedAt = now();
+    // Shared only while younger than the fresh window: a hung load costs at most one extra load per window.
+    const running = inflight.get(key);
+    if (running && startedAt - running.startedAt < opts.freshMs) return running.promise;
     const gen = generation;
-    const promise = loader()
+    const promise = Promise.resolve()
+      .then(loader)
       .then((value) => {
         const cur = stored.get(key);
         if (gen === generation && opts.shouldStore(value) && (!cur || cur.at <= startedAt)) {
@@ -44,21 +50,28 @@ export function createSwrMemo<K, V>(opts: {
         return value;
       })
       .finally(() => {
-        if (inflight.get(key) === promise) inflight.delete(key);
+        if (inflight.get(key)?.promise === promise) inflight.delete(key);
       });
-    inflight.set(key, promise);
+    inflight.set(key, { startedAt, promise });
     return promise;
   }
 
   return {
     get(key, loader) {
-      const fresh = Math.min(opts.freshMs, opts.ttlCapMs ? opts.ttlCapMs() : opts.freshMs);
-      if (!(fresh > 0)) return loader();
+      const cap = opts.ttlCapMs ? opts.ttlCapMs() : opts.freshMs;
+      const fresh = Math.min(opts.freshMs, cap);
+      if (!(fresh > 0)) return Promise.resolve().then(loader);
+      const stale = cap < opts.freshMs ? 0 : opts.staleMs;
       const hit = stored.get(key);
       const age = hit ? now() - hit.at : Infinity;
       if (hit && age < fresh) return Promise.resolve(hit.value);
-      if (hit && age < fresh + opts.staleMs) {
-        load(key, loader).catch(() => undefined);
+      if (hit && age < fresh + stale) {
+        const bg = load(key, loader).catch(() => undefined);
+        try {
+          opts.onBackground?.(bg);
+        } catch {
+          /* e.g. Next `after` outside a request scope */
+        }
         return Promise.resolve(hit.value);
       }
       return load(key, loader);
