@@ -19,7 +19,7 @@ import { encodeInitMarketData, type GrowthLaunch } from "@/lib/v21/growth-launch
 import type { InitMarketV17Args } from "@percolatorct/sdk";
 import { withBoundVaultLpTailP3 } from "./sdk/records/p3-vault-lp";
 import { buildInitBondTrancheIxV22, encodeInitMarketV22, IX_TAG_V22, type InitBondTrancheArgs } from "./sdk";
-import type { V22LaunchParams } from "./launch-plan";
+import { bandSafetyLawIssue, type V22LaunchParams } from "./launch-plan";
 import { isDevnetV22Enabled } from "./flag";
 import { resolveMarketGeometry } from "./sdk/layout";
 import { parseWrapperConfigV17 } from "./sdk/slab";
@@ -34,6 +34,9 @@ export function encodeInitMarketDataWithV22(args: InitMarketV17Args, growth: Gro
   if (growth.collateralDecimals !== undefined && !growthCollateralDecimalsOk(growth.collateralDecimals)) {
     throw new Error(`collateral with ${growth.collateralDecimals} decimals cannot carry a leveraged market (max ${GROWTH_MAX_COLLATERAL_DECIMALS})`);
   }
+  // R6: every InitMarket path encodes here, so a config the program refuses (Band Safety Law, 105 / 106) never leaves.
+  const bsl = bandSafetyLawIssue(args, v22, growth.collateralDecimals);
+  if (bsl) throw new Error(bsl.message);
   return encodeInitMarketV22(args, {
     rGapBps: growth.rGapBps,
     lLaunchX100: growth.lLaunchX100,

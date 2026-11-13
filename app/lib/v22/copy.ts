@@ -96,6 +96,7 @@ export const V22_COPY = {
     lotsNotReady: "Tokens priced under $10 can't be launched here yet. Pick a token worth $10 or more, or check back soon.",
     priceFloorNoLot: "A token priced under $10 needs a keeper-priced market to use dynamic leverage.",
     priceUnknown: "Enter the token's price to continue.",
+    protectionUnsafe: "This leverage leaves too little margin for price protection with this holding fee. Pick lower leverage or turn the holding fee off.",
     recovery: (minutes: number) => `If the price feed stops, the market recovers on its own after about ${minutes} minutes.`,
     minPosition: (min: string) => `Minimum position size ${min}.`,
   },
