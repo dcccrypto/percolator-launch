@@ -28,6 +28,9 @@ export function closeOrderInput(
     leverage: 1,
     limitPriceE6: 0n,
     markE6: markE6 > 0n ? markE6 : undefined,
+    // Round 10: the deployed matcher prices the close on the wrapper's capital-derived depth (growth view) as a REDUCE; without the view the
+    // close fee would be priced on the context's depth (~23 bps at every size).
+    growth: limits?.growth ?? null,
   };
 }
 

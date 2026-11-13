@@ -14,7 +14,8 @@ import { stepDownMaxLeverage } from "./vault-tranche";
 import { V21_COPY } from "@/lib/v21/copy";
 import { growthFillCapQ, growthGate, type GrowthGateResult } from "@/lib/v22/growth-gate";
 import { V22_COPY } from "@/lib/v22/copy";
-import { growthLeverageRefusal, growthTicketDecision, type GrowthMarketView, type GrowthTicketDecision } from "@/lib/v21/growth-market";
+import { matcherExtCapsFromGrowth } from "@/lib/v22/matcher-ext-caps";
+import { growthLeverageRefusal, growthTicketDecision, isReducingOrder, type GrowthMarketView, type GrowthTicketDecision } from "@/lib/v21/growth-market";
 import { levGuardMaxFillQV22, levGuardMaxPositionQV22, levGuardRefusalV22 } from "@/lib/v22/sdk";
 import { LEV_GUARD_REFUSED_TITLE, levGuardRefusedCopy, levGuardTicketClosed } from "@/lib/v22/lev-guard-copy";
 
@@ -264,9 +265,17 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
     // Post-upgrade the matcher prices / clips from the LP's real position, not its stored counter.
     const quoteCtx =
       L.matcherSyncLive === true && L.lpRealQ != null ? { ...L.matcher, inventoryBase: L.lpRealQ } : L.matcher;
-    out.quote = preTradeQuote(quoteCtx, mark, out.clampToQ ?? i.sizeQ, i.direction === "long", {
+    // The deployed matcher prices a growth leg on the wrapper's capital-derived depth and skew cap (ext v3), so the quote (and the fee signed from
+    // it) grows with the order's size. `ext` null = a leg with no caps (growth off); a closed / unreadable view is never priced on the context's depth.
+    // A growth asset whose view is not built yet (growthRoom loading / error) is UNKNOWN: no quote at all, never the context's depth.
+    const growthUnknown = !i.growth && (L.growthRoom === "loading" || L.growthRoom === "error");
+    const ext = i.growth ? matcherExtCapsFromGrowth(i.growth, mark) : null;
+    out.quote = growthUnknown ? null : preTradeQuote(quoteCtx, mark, out.clampToQ ?? i.sizeQ, i.direction === "long", {
       bandBps: L.bandBps ?? undefined,
       headroomQ: lim && lim.maxQ !== UNLIMITED_CAPACITY ? lim.maxQ : undefined,
+      ext,
+      takerReducing: ext !== null && isReducingOrder(i.takerPosQ, i.direction, i.sizeQ),
+      ...(i.growth?.quoteInput.v22 ? { nowSlot: i.growth.quoteInput.v22.nowSlot } : {}),
     });
     if (out.quote && quoteFailsLimit(out.quote.quotePriceE6, i.limitPriceE6, i.direction === "long")) {
       out.issues.push({ kind: "quote-slippage", severity: "warning", title: "Slippage limit too tight", message: COPY.quoteSlippage("your limit") });

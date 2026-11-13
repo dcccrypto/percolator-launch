@@ -81,7 +81,7 @@ export interface ClosePositionFormProps {
    * The close books at the mark; the spread is charged only through the fee channel (already inside the fee estimate where it is on,
    * nothing extra where it is off), so it is never subtracted from the balance preview. Omitted / null = "Not available before the trade".
    */
-  spreadEstimateFor?: ((closeAbs: bigint, takerBuys: boolean) => SpreadEstimate | null) & {
+  spreadEstimateFor?: ((closeAbs: bigint, takerBuys: boolean, takerReducing?: boolean) => SpreadEstimate | null) & {
     /** The quote will not arrive (failed read, no matcher, mock): the net then comes from the base-fee estimate, labelled as excluding the spread. */
     unavailable?: boolean;
   };
@@ -198,7 +198,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     const pnl = entryPrice > 0n ? computeMarkPnlLinear(closePositionSigned, entryPrice, currentPrice) : 0n;
 
     const closeNotional = currentPrice > 0n ? (closeAbs * currentPrice) / 1_000_000n : 0n;
-    const spread = spreadEstimateFor ? spreadEstimateFor(closeAbs, !isLong) : null;
+    const spread = spreadEstimateFor ? spreadEstimateFor(closeAbs, !isLong, true) : null;
     // #3726: the whole close fee (base + the requested fee where the fee channel charges it), never below the base.
     const estBps = closeFeeBpsFor ? closeFeeBpsFor(closeAbs) : tradingFeeBps;
     let feeBps = estBps > tradingFeeBps ? estBps : tradingFeeBps;

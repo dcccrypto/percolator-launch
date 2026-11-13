@@ -6,14 +6,28 @@
  * so the spread is part of the trading fee where the channel is on (`inFee`) and costs nothing extra anywhere else (channel off:
  * the wrapper refuses a requested fee and books at the mark). This module turns the matcher's own context into the honest pre-trade
  * figure, for information; it NEVER yields an extra cost to add to the fee row or a balance preview:
- *   - "quote": the adaptive matcher's quote for this exact size (same integer math as the program). Still an ESTIMATE: the
- *     volatility term, the LP inventory and the oracle move between the read and the fill.
+ *   - "quote": the adaptive matcher's quote for this exact size (same integer math as the program, on the leg the wrapper sends: the LP's real
+ *     position, the capital-derived depth and skew cap, the volatility step). The spread GROWS WITH SIZE (impact = k*n/(D-n) on that depth), so
+ *     it is asked per order size and per side. Still an ESTIMATE: the LP's capital and inventory, the volatility term and the oracle move
+ *     between the read and the fill.
  *   - "range": a legacy / unquoted matcher. We know the floor (base spread) and the ceiling (max_total); the fill lands in between.
  *   - null: the context could not be read. Callers say "not available before the trade", never "0%".
  * It never reports a zero as a fact: a quote of 0 bps is shown as 0 only when the matcher really quotes 0.
  */
 import type { MatcherCtxView } from "@/lib/limits/decode";
-import { preTradeQuote } from "@/lib/limits/matcher-quote";
+import { preTradeQuote, type MatcherExtCaps } from "@/lib/limits/matcher-quote";
+import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
+
+/**
+ * What the matcher prices on besides the context, for the order's own leg (see lib/limits/matcher-quote.ts `preTradeQuote`):
+ * the wrapper's ext-v3 caps, whether the order only reduces the taker's position, the slot (volatility step) and the exec band.
+ */
+export interface SpreadQuoteOpts {
+  ext?: MatcherExtCaps | null;
+  takerReducing?: boolean;
+  nowSlot?: bigint;
+  bandBps?: number;
+}
 
 /**
  * `inFee`: the market's fee channel is on, so the matcher's spread is CHARGED AS PART OF THE TRADING FEE (fee_bps = base + requested)
@@ -30,9 +44,10 @@ export function spreadEstimateFromCtx(
   sizeQ: bigint,
   takerBuys: boolean,
   inFee = false,
+  opts: SpreadQuoteOpts = {},
 ): SpreadEstimate | null {
   if (!ctx || oracleE6 <= 0n || sizeQ <= 0n) return null;
-  const q = preTradeQuote(ctx, oracleE6, sizeQ, takerBuys);
+  const q = preTradeQuote(ctx, oracleE6, sizeQ, takerBuys, opts);
   if (!q) return null;
   if (q.kind === "adaptive" && q.totalBps !== null && q.fillQ > 0n) {
     return { kind: "quote", bps: Number(q.totalBps), execPriceE6: q.quotePriceE6, ...(inFee ? { inFee } : {}) };
@@ -63,7 +78,24 @@ export const SPREAD_LABEL = "Spread / price impact";
  * Decide on the quote, never on "above base": a busy-side fee also lifts an estimate above base without containing the requested fee.
  * Display only: what is signed is unchanged.
  */
-export function feeBpsWithSpread(feeBps: bigint, e: SpreadEstimate | null, quoteCharged: boolean): bigint {
-  if (!e?.inFee || quoteCharged) return feeBps;
-  return feeBps + BigInt(e.kind === "quote" ? e.bps : e.minBps);
+export function feeBpsWithSpread(feeBps: bigint, e: SpreadEstimate | null, quoteCharged: boolean, marginBps: number = defaultFeeCapMarginBps()): bigint {
+  if (!e?.inFee) return feeBps;
+  // Round 10 (review of #3820, MED 3): a quote is exact for the state it was read in; the fee the fill pays can be a few bps higher (the volatility
+  // step). The shown fee carries the same margin the signed cap does, so the shown cost is never below what the cap lets through for that drift.
+  const margin = e.kind === "quote" ? BigInt(marginBps) : 0n;
+  if (quoteCharged) return feeBps + margin;
+  return feeBps + BigInt(e.kind === "quote" ? e.bps : e.minBps) + margin;
+}
+
+/**
+ * The price an order is expected to FILL at on a fee-channel market: the mark moved by the matcher's spread for THIS order's size, rounded toward
+ * the LP as the matcher does (up for a buy, down for a sell), plus the fee-cap margin the trader chose (default 2 bp; an honest upper bound, as the fee row). It is what the position's Entry becomes (booked mark + spread, never the busy-side
+ * fee). Null where there is no exact per-size quote or the spread is not charged: the caller keeps its own estimate.
+ */
+export function quotedFillPriceE6(oracleE6: bigint, e: SpreadEstimate | null, takerBuys: boolean, marginBps: number = defaultFeeCapMarginBps()): bigint | null {
+  if (!e || e.kind !== "quote" || !e.inFee || oracleE6 <= 0n) return null;
+  const bps = BigInt(e.bps) + BigInt(marginBps);
+  const num = takerBuys ? oracleE6 * (10_000n + bps) : oracleE6 * (10_000n - bps);
+  if (num <= 0n) return null;
+  return takerBuys ? (num + 9_999n) / 10_000n : num / 10_000n;
 }

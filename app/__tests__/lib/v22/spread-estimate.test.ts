@@ -1,9 +1,11 @@
 // @vitest-environment node
 /** M7: the pre-trade "Spread / price impact" figure comes from the matcher's own context and is never a silent zero. */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { MatcherCtxView, V2BlockView } from "@/lib/limits/decode";
 import { estimatedTotalFeeBps } from "@/lib/limits/estimated-fee";
 import { feeBpsWithSpread, spreadEstimateFromCtx, spreadValueText } from "@/lib/v22/spread-estimate";
+// Round 10: these pin the fee PARTS (what is added once, never twice); the display margin has its own tests (spread-size-aware).
+vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "0");
 
 const v2: V2BlockView = {
   flags: 1, feeLoBps: 10, feeHiBps: 80, feeColdBps: 10, volAMilli: 1000, volBDen: 100, volAlphaBps: 1000, volWarmupLeft: 0,

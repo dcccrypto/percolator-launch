@@ -3,11 +3,13 @@
  * opened (it is not in the Entry since #3810). Real example: devnet fill Akgx5xp4... busy fee 2,989,999 atoms on 7.839061 SOL.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
 import type { SpreadEstimate } from "@/lib/v22/spread-estimate";
 import { applyFill } from "@/lib/trade-book";
+// Round 10: these pin the fee PARTS (what is added once, never twice); the display margin has its own tests (spread-size-aware).
+vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "0");
 
 const SIZE = 7_839_061n; // 7.839061 units, 6 decimals
 const ENTRY = 83_166_841n; // the price paid (booked + the spread)

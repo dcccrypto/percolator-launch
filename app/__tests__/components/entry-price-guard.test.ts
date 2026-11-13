@@ -210,7 +210,6 @@ function enclosingConditions(src: string, at: number): string[] {
 // v2.2: lot-aware formatters take the lot exponent as a 2nd argument (formatLotPriceE6(entryE6, lotExp)); still a readout.
 const ENTRY_FORMAT = /format\w*\(\s*([\w?.]*[eE]ntry[\w?.]*)\s*(?:,[^()]*(?:\([^()]*\)[^()]*)*)?\)/g;
 const FORMAT_EXEMPT: Record<string, string> = {
-  "components/trade/OrderTicket.tsx|estEntry": "projected fill for the order being placed, not a held entry",
   "components/trade/AccountsCard.tsx|row.entryPrice": "pre-v17 accounts only; entry_price decoded from chain there",
   "components/share/PnlShareCard.tsx|v.avgEntryUsd":
     "Pure presentation: v.avgEntryUsd is derived from the already-resolved entryE6 its callers pass, " +
@@ -232,7 +231,6 @@ describe("#2673: every formatted entry sits under a resolved-entry gate (per cal
       "components/share/PnlShareCard.tsx|v.avgEntryUsd",
       "components/trade/AccountsCard.tsx|row.entryPrice",
       "components/trade/ClosePositionForm.tsx|entryPrice",
-      "components/trade/OrderTicket.tsx|estEntry",
       "components/trade/OtherMarketPositions.tsx|entryE6",
       "components/trade/PositionPanel.tsx|entryPriceE6",
       "components/trade/PositionsDock.tsx|entryPriceE6",
