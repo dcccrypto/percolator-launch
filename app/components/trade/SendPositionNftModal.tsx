@@ -129,6 +129,10 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
     return withGsap((gsap) => {
       gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.15 });
       gsap.fromTo(modal, { opacity: 0, scale: 0.98 }, { opacity: 1, scale: 1, duration: 0.18, ease: "power2.out" });
+    }, () => {
+      overlay.style.opacity = "1";
+      modal.style.opacity = "1";
+      modal.style.transform = "none";
     });
   }, [prefersReduced]);
 

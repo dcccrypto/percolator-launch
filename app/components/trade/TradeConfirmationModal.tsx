@@ -212,6 +212,10 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           { opacity: 0, scale: 0.95 },
           { opacity: 1, scale: 1, duration: 0.25, ease: "power2.out" }
         );
+      }, () => {
+        overlay.style.opacity = "1";
+        modal.style.opacity = "1";
+        modal.style.transform = "none";
       });
     }
 

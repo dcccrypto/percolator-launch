@@ -58,6 +58,9 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
             { opacity: 0, scale: 0.95, visibility: "visible" },
             { opacity: 1, scale: 1, duration: 0.15, ease: "power2.out" }
           );
+        }, () => {
+          el.style.visibility = "visible";
+          el.style.opacity = "1";
         });
       }
     } else {
@@ -73,6 +76,9 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
             ease: "power2.in",
             onComplete: () => { el.style.visibility = "hidden"; },
           });
+        }, () => {
+          el.style.visibility = "hidden";
+          el.style.opacity = "0";
         });
       }
     }

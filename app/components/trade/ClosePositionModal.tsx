@@ -149,6 +149,10 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
       withGsap((gsap) => {
         gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" });
         gsap.fromTo(modal, { opacity: 0, scale: 0.95 }, { opacity: 1, scale: 1, duration: 0.25, ease: "power2.out" });
+      }, () => {
+        overlay.style.opacity = "1";
+        modal.style.opacity = "1";
+        modal.style.transform = "none";
       });
     }
 

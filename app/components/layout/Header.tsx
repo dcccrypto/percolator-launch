@@ -128,6 +128,9 @@ export const Header: FC = () => {
           { height: 0, opacity: 0 },
           { height: "auto", opacity: 1, duration: 0.3, ease: "power2.out" }
         );
+      }, () => {
+        menu.style.height = "auto";
+        menu.style.opacity = "1";
       });
     }
     return withGsap((gsap) => {
@@ -138,6 +141,8 @@ export const Header: FC = () => {
         ease: "power2.in",
         onComplete: () => { menu.style.display = "none"; },
       });
+    }, () => {
+      menu.style.display = "none";
     });
   }, [mobileOpen, prefersReduced]);
 

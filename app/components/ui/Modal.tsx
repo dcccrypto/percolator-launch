@@ -106,6 +106,10 @@ export const Modal: FC<ModalProps> = ({
           { opacity: 0, scale: 0.97, y: -4 },
           { opacity: 1, scale: 1, y: 0, duration: 0.2, ease: "power2.out" }
         );
+      }, () => {
+        overlay.style.opacity = "1";
+        modal.style.opacity = "1";
+        modal.style.transform = "none";
       });
     }
 
