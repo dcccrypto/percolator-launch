@@ -208,6 +208,43 @@ export function inventoryClip(inv: bigint, maxInvAbs: bigint, fillAbs: bigint, t
   return fillAbs < room ? fillAbs : room;
 }
 
+/** The wrapper's ext-v3 caps for one leg (growth markets): `inventory_cap_q` (0 = CLOSED to LP growth) and the depth `liquidity_notional_e6` (0 = keep the context's). */
+export interface MatcherExtCaps {
+  inventoryCapQ: bigint;
+  liquidityNotionalE6: bigint;
+}
+
+/** `SKEW_REF_MAX_INVENTORY_Q` (vamm.rs): an ext cap at or above it is the wrapper's neutral value, not a real cap. */
+export const SKEW_REF_MAX_INVENTORY_Q = 100_000_000_000_000n;
+
+/**
+ * `vol_update` (v2.rs): the matcher folds the CURRENT oracle price into its volatility estimate BEFORE it prices a fill, so the adaptive fee
+ * a fill pays is the one after this step, not the stored one. The stored ctx lags: it only moves on fills. Same integer math as Rust.
+ */
+export function volUpdate(v: V2BlockView, priceE6: bigint, nowSlot: bigint): V2BlockView {
+  if (priceE6 === 0n) return v;
+  if (v.volLastPriceE6 === 0n) return { ...v, volLastPriceE6: priceE6, volLastSlot: nowSlot };
+  if (nowSlot < v.volLastSlot) return v;
+  const dt = nowSlot - v.volLastSlot;
+  const refSlots = BigInt(Math.max(v.volRefSlots, 1));
+  if (dt < refSlots) return v;
+  const last = v.volLastPriceE6;
+  const diff = priceE6 > last ? priceE6 - last : last - priceE6;
+  const cap = BigInt(Math.max(v.volMoveCap10bps, 1)) * 10n;
+  const moveBps = (() => { const m = (diff * BPS) / last; return m > cap ? cap : m; })();
+  let r2 = (moveBps * moveBps * 10_000n * refSlots) / dt;
+  const r2Max = cap * cap * 10_000n;
+  if (r2 > r2Max) r2 = r2Max;
+  const variance = v.volVarE4;
+  const alpha = BigInt(Math.min(Math.max(v.volAlphaBps, 1), 10_000));
+  // Rust i128 `/` truncates toward zero, as BigInt does.
+  const delta = ((r2 - variance) * alpha) / 10_000n;
+  let nv = variance + delta;
+  if (nv < 0n) nv = 0n;
+  if (nv > 0xffff_ffff_ffff_ffffn) nv = 0xffff_ffff_ffff_ffffn;
+  return { ...v, volVarE4: nv, volWarmupLeft: Math.max(v.volWarmupLeft - 1, 0), volLastPriceE6: priceE6, volLastSlot: nowSlot };
+}
+
 export interface PreTradeQuote {
   kind: "adaptive" | "legacy";
   requestedQ: bigint;
@@ -235,7 +272,20 @@ export function preTradeQuote(
   oracleE6: bigint,
   sizeQ: bigint,
   takerBuys: boolean,
-  opts: { bandBps?: number; headroomQ?: bigint } = {},
+  opts: {
+    bandBps?: number;
+    headroomQ?: bigint;
+    /**
+     * The deployed matcher (release/v22-matcher 7d5aa26) prices a growth leg with the wrapper's ext-v3 caps: the depth is `min(ctx, ext)` and the
+     * skew reference is capped at the inventory cap. The context's own depth is huge on a growth market, so without this the impact term
+     * reads ~0 at every size while the chain charges `k*n/(D-n)` on the real (capital-derived) depth. Null / absent = a leg with no caps (v2 ext).
+     */
+    ext?: MatcherExtCaps | null;
+    /** The wrapper marks the leg TAKER_REDUCING (the order only reduces the taker's position). With `ext`, the close exemption applies. */
+    takerReducing?: boolean;
+    /** The cluster slot the quote is for: folds the current price into the volatility estimate first (`volUpdate`), as the matcher does. */
+    nowSlot?: bigint;
+  } = {},
 ): PreTradeQuote | null {
   let maxTotal = ctx.maxTotalBps;
   if (opts.bandBps !== undefined && opts.bandBps < maxTotal) maxTotal = opts.bandBps;
@@ -261,11 +311,38 @@ export function preTradeQuote(
       clippedByTotal: false,
     };
   }
-  const fee = adaptiveFeeBps(ctx.v2);
+  const v2 = opts.nowSlot !== undefined ? volUpdate(ctx.v2, oracleE6, opts.nowSlot) : ctx.v2;
+  const fee = adaptiveFeeBps(v2);
+  const ext = opts.ext ?? null;
+  // vamm.rs `v3_effective_ctx` (caps present): cap_active, close exemption, effective inventory cap / closed room, effective depth.
+  const capActive = ext !== null && ext.inventoryCapQ < SKEW_REF_MAX_INVENTORY_Q;
+  const closeExempt = ext !== null && opts.takerReducing === true;
+  let maxInv = ctx.maxInventoryAbs;
+  let skewRefCap: bigint | null = null;
+  if (ext !== null && capActive) {
+    if (ext.inventoryCapQ === 0n) {
+      // CLOSED: only a fill that reduces the LP's |inventory| (up to flat); the close exemption lifts it.
+      const inv = ctx.inventoryBase;
+      const lpReducesNow = (takerBuys && inv > 0n) || (!takerBuys && inv < 0n);
+      const room = lpReducesNow ? (inv < 0n ? -inv : inv) : 0n;
+      if (!closeExempt && maxFill > room) maxFill = room;
+    } else {
+      const eff = maxInv === 0n || ext.inventoryCapQ < maxInv ? ext.inventoryCapQ : maxInv;
+      if (!closeExempt) maxInv = eff;
+      skewRefCap = eff;
+    }
+  }
+  const depth =
+    ext !== null && ext.liquidityNotionalE6 !== 0n && ext.liquidityNotionalE6 < ctx.liquidityNotionalE6 ? ext.liquidityNotionalE6 : ctx.liquidityNotionalE6;
+  let refInv = v2.skewRefInventory;
+  if (skewRefCap !== null) {
+    const m64 = skewRefCap > 0xffff_ffff_ffff_ffffn ? 0xffff_ffff_ffff_ffffn : skewRefCap;
+    if (m64 < refInv) refInv = m64;
+  }
   // compute_adaptive_execution: `max_fill_abs == 0` => zero fill (kind 2 has no "unlimited").
   let fillAbs = maxFill === 0n ? 0n : sizeQ < maxFill ? sizeQ : maxFill;
-  fillAbs = inventoryClip(ctx.inventoryBase, ctx.maxInventoryAbs, fillAbs, takerBuys);
-  const q = quoteAdaptive({
+  fillAbs = inventoryClip(ctx.inventoryBase, maxInv, fillAbs, takerBuys);
+  let q = quoteAdaptive({
     oracleE6,
     fill: fillAbs,
     takerBuys,
@@ -274,13 +351,19 @@ export function preTradeQuote(
     maxTotalBps: maxTotal,
     feeBps: fee,
     impactKBps: ctx.impactKBps,
-    depthE6: ctx.liquidityNotionalE6,
+    depthE6: depth,
     sMultBps: ctx.skewSpreadMultBps,
-    rMultBps: ctx.v2.thinRebateMultBps,
-    skewCapBps: ctx.v2.skewCapBps,
-    rebateCapBps: ctx.v2.rebateCapBps,
-    refInv: ctx.v2.skewRefInventory,
+    rMultBps: v2.thinRebateMultBps,
+    skewCapBps: v2.skewCapBps,
+    rebateCapBps: v2.rebateCapBps,
+    refInv,
   });
+  // `v3_close_exempt_fill`: a wrapper-verified reduction is filled in FULL, priced at the max-total clamp when the size budget would have clipped it.
+  if (q && closeExempt && q.fill < fillAbs) {
+    const clamp = BigInt(Math.min(maxTotal, 9_000));
+    const price = priceWithTotalBps(oracleE6, clamp, takerBuys);
+    q = price === null ? null : { ...q, fill: fillAbs, priceE6: price, totalBps: clamp, clippedByTotal: true };
+  }
   if (!q) return null;
   return {
     ...base,
@@ -289,7 +372,7 @@ export function preTradeQuote(
     quotePriceE6: q.fill === 0n ? null : q.priceE6,
     totalBps: q.totalBps,
     adaptiveFeeBps: fee,
-    feeCold: ctx.v2.volWarmupLeft > 0,
+    feeCold: v2.volWarmupLeft > 0,
     impactBps: q.impactBps,
     skewBps: q.skewBps,
     clippedByTotal: q.clippedByTotal,

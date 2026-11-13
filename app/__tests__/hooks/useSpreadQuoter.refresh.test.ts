@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 const MARKET = "11111111111111111111111111111111";
 const PROG = new PublicKey("5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe");
 const CTX = new PublicKey("5dsrhZiXunvXcFbCzdJ9Qg5Lv3eX4SGyaBA6NZ3SaoKh");
-const connection = { getMultipleAccountsInfo: mocks.getMultipleAccountsInfo };
+const connection = { getMultipleAccountsInfo: mocks.getMultipleAccountsInfo, getSlot: async () => 100 };
 
 vi.mock("@/hooks/useWalletCompat", () => ({ useConnectionCompat: () => ({ connection }) }));
 vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: () => ({ slabAddress: MARKET, programId: PROG }) }));
@@ -18,17 +18,25 @@ vi.mock("@/hooks/useTrade", () => ({ resolveLpTradeAccounts: mocks.resolveLp }))
 vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false }));
 vi.mock("@/lib/limits/decode", () => ({
-  decodeMarketEngineView: () => ({ effectivePriceE6: 100_000_000n }),
+  decodeMarketEngineView: () => ({ effectivePriceE6: 100_000_000n, marketId: 1n }),
+  decodeAssetVaultLp: () => null,
+  decodePortfolioRisk: () => null,
+  signedPositionForAsset: () => 0n,
   decodeAssetRiskLimits: () => ({ matcherExtMode: 1, maxRequestedFeeBps: 100 }),
   decodeMatcherCtx: () => ({ kind: 1, baseSpreadBps: 20, maxTotalBps: 80, v2: null }),
 }));
+
+// This market has no growth record: no ext-v3 caps, the quote reads the context alone (as before).
+vi.mock("@/lib/v21/growth-market", () => ({ growthRecordPresence: () => "absent" }));
+vi.mock("@/hooks/useMarketLimits", () => ({ growthFor: () => null }));
+vi.mock("@/lib/limits/lp-inventory-room", () => ({ lpEffectiveSignedQ: () => null }));
 
 import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 
 describe("useSpreadQuoter refresh (L-4)", () => {
   it("reads once at mount, does NOT re-read on a re-render, and reads again when refreshKey changes (the confirm opens)", async () => {
-    mocks.resolveLp.mockResolvedValue({ matcherCtx: CTX });
-    mocks.getMultipleAccountsInfo.mockResolvedValue([{ data: new Uint8Array(8) }, { data: new Uint8Array(8) }]);
+    mocks.resolveLp.mockResolvedValue({ matcherCtx: CTX, accountB: CTX });
+    mocks.getMultipleAccountsInfo.mockResolvedValue([{ data: new Uint8Array(8) }, { data: new Uint8Array(8) }, { data: new Uint8Array(8) }]);
     const { result, rerender } = renderHook(({ k }) => useSpreadQuoter(true, 0, k), { initialProps: { k: 0 } });
     await waitFor(() => expect(mocks.getMultipleAccountsInfo).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(result.current(1_000_000n, true)).toMatchObject({ kind: "range", inFee: true }));
