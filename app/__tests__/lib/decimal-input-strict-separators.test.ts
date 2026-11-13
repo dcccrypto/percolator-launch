@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Council 2026-11-07 council-leftovers run 2, findings 4, 5 and 13 (Skeptic, Attacker, First-timer, Trader, LP):
  *  - the strict Earn parser still REWROTE malformed separators with Deposit enabled:

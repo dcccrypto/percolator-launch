@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1445: Markets UI shows 168 markets but /api/markets returns 122.
  *

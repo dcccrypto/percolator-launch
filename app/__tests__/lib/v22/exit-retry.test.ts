@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import {
   EXIT_MAX_COMPUTE_UNITS,

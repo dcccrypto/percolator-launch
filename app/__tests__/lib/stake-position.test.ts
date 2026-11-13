@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Live report 2026-10-01 (wallet 9sM73A..., pool 8WC8vALs...): after a 400 USDC stake the
  * "Your Deposits" hero stayed "$—" and the pool row's "Your Stake" read "$0.00". The position was

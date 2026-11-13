@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * My Markets showed truncated mint addresses instead of tickers and logos for
  * about a second after load.

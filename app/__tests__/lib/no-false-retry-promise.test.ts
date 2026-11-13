@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The resolver promised "we'll retry automatically" (and, for an Earn deposit, "Your trade goes
  * through automatically") on surfaces that never resend: nothing reads `autoRetry`, and only the

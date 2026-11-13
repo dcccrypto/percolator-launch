@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Guards for the tag-90 claim builder.
  *

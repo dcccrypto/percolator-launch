@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2882 (SI): a market that is close-only after an ADL, or whose counterparty has no funds, does
  * not reopen by itself: a solvent holder may keep the other side open indefinitely, and nothing in

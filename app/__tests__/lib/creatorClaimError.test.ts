@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { PERCOLATOR_ERRORS } from "@percolatorct/sdk";
 import { mapCreatorClaimError } from "@/lib/creatorClaimError";

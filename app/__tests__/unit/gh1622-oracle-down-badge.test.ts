@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1622: Oracle Down badge — markets with null mark_price + null index_price
  * should show "No Oracle" health level (oracle-down) instead of liquidity-based

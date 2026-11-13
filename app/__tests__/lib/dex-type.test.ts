@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { normalizeDexType, KEEPER_DEX_TYPES } from "@/lib/dex-type";
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** Product review 2026-10-28 (S-5 / S-6 / S-12): stake 3 / 8 / 9 read as plain lines on v2.2, not "Something went wrong". */
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveUserMessage } from "@/lib/limits/user-message";

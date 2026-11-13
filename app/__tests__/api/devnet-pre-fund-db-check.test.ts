@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for #873 fix: devnet-pre-fund DB check bypass when DEVNET_ALLOWED_MINTS is empty.
  *

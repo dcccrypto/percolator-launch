@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * E2E B21: /api/oracle/resolve must hand the quick-launch path a pool the keeper can price,
  * chosen by mainnet OWNER. DexScreener ranked WIF's Meteora DAMM v1 pool first.

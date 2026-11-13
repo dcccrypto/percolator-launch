@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1692 / LAUNCH-16: Timing-safe HMAC auth in oracle-keeper/register.
  *

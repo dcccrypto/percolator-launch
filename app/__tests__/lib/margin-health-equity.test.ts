@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * S7: margin health was capital / notional while the liquidation price is solved on
  * equity (capital + unrealized PnL). A covered winner read under the 100% line it is

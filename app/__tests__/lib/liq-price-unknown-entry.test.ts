@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { computeLiqPrice, resolveEntryPrice } from "@/lib/trading";
 import { describeLiqPrice } from "@/lib/liq-price-display";

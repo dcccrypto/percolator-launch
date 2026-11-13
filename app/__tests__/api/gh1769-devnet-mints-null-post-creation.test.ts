@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for GH#1769: devnet_mints null after market creation blocks Get Test Tokens.
  *

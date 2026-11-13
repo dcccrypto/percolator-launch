@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * QA 12:38 (Low): 0.196 USDC stuck in QA's swordcat account. Fed with the LIVE portfolio bytes (FnY2i6UF…, slot 510974481) and the program's
  * measured answers (simulateTransaction, sigVerify:false, 2026-10-14T11:39:54Z, slot 510974696):

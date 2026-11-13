@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * G/H/I: getMultipleAccountsInfoChunked — Solana's getMultipleAccounts RPC
  * caps at 100 pubkeys per call and @solana/web3.js does NOT chunk internally.

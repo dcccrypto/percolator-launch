@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SUCCESSORS, loadSuccessors, parseSuccessors, successorFor } from "@/lib/v21/move/successors";
 import { pk } from "./fixtures";

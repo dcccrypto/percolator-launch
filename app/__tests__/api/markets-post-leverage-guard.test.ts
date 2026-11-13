@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1398 — POST /api/markets max_leverage guard
  *

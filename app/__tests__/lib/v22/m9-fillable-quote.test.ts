@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Council r3 M9: the ticket quoted deposit / margin / fee for an order it would not fill (room ~ $950 per side, a $5,000 order
  * showed "Deposit 5,517.33 USDC" while the growth line said it fills 10.6165 SOL; Max $39,872.97 against ~$951 room).

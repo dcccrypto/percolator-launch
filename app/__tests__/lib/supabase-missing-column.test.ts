@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2408: the network-column fallback must fire only when the column is
  * really missing, never on a transient error whose text says "network".

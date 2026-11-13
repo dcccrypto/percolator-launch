@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1544: MarketLogo fallback label regression tests.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue, sanitizeAccountCount, sanitizeFundingRateBps } from "../../lib/health";
 import type { HealthLevel } from "../../lib/health";

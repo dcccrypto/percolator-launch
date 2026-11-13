@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #2690 / #2691 (0x-SquidSol): the leverage read is isolated. If the risk-params parse throws, the
  * market must stay listed (isComplete, price intact) with maxLeverage null (registry keeps its DB

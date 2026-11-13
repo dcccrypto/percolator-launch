@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The keeper was the last place a retired market survived.
  *

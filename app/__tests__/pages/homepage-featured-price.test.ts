@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1405: Homepage featured markets must sanitize last_price before display.
  *

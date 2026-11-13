@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import type { Time, UTCTimestamp } from "lightweight-charts";
 import {

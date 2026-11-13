@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3469: POST /api/devnet-mint-token converted $500 into a token amount with DexScreener's
  * priceUsd and minted it from the shared devnet mint authority with no ceiling — a

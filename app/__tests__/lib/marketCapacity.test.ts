@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Side-capacity math + live-inventory parsing — the second half of the
  * "user just keeps trying and doesn't know what's wrong" fix.

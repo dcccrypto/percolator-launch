@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Devnet v2.1: the Custom(121) EngineLossStale retry state machine (lib/v21/loss-stale-retry.ts).
  * An order refused 121 is sent again after ~1-2 s, a bounded number of times, never bundled with

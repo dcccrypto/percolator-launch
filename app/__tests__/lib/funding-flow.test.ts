@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** r10 owner decision 1: funding the chain moved on a position = counter change since open + the leg's pending funding (engine f_delta). */
 import { describe, expect, it } from "vitest";
 import { fundingPaidSoFar, fundingSampleOf, pendingFundingPaidAtoms } from "@/lib/funding-flow";

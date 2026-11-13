@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The insurance seed must not be skipped because of backing-bucket collateral.
  *

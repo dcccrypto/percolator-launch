@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1444: Symbol lookup bypasses blocklist in /api/markets/[slab]
  *

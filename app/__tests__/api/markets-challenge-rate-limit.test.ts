@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * SEC: the market-registration challenge endpoint must be per-IP rate limited.
  * It was unauthenticated and unlimited, and each call does a Blob

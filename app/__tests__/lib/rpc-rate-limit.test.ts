@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { isRateLimitedBeforeSend, isRateLimitedRpcError, RATE_LIMITED_COPY, RATE_LIMITED_NEUTRAL_COPY, RPC_RETRY_BACKOFF_MS, withRateLimitRetry } from "@/lib/rpc-rate-limit";
 import { parseMarketCreationError } from "@/lib/parseMarketError";

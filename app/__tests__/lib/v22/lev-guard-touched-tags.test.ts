@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * prog#611 (rc23 77b4060c): the W1 touched set stores 16-byte key prefixes with a cap of 256 (still 4096 B, account lengths
  * 4456 / 4472 unchanged). The vendored decoder read 8-byte tags with a cap of 512: it would have read tag 0 as the lower half of tag 0

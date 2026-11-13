@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * rc23 (src/fill_events_v22.rs, 77b4060c) emits three REDUCE reasons the vendored parser skipped as "unknown-reduce-reason":
  * 6 FORCE_CLOSE_ABANDONED, 7 RESOLVED_CLOSE, 8 LP_STOP (the W1 cut, tag 124 op 5). A trader cut by any of them got no record.

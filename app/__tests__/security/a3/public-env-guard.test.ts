@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * S3-C10 (fix-all 2026-10-18): a NEXT_PUBLIC_* RPC key must never be inlined into the browser
  * bundle. next.config.ts strips any such variable before the build compiles.

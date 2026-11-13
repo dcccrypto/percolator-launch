@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Review E5: /api/markets/SOL-PERP (slug lookup) narrows in SQL instead of reading every row on
  * the network; a slug that is not plain [A-Z0-9-] never reaches the PostgREST filter string.

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression — GH#2486: the IP blocklist must work for IPv6, not just IPv4.
  *

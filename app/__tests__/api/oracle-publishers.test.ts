@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Oracle Publishers API Route Tests
  * Tests: ORACLE-007, ORACLE-008, ORACLE-009

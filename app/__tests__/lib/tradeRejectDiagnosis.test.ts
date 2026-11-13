@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #2643 — Custom(9) on a trade is ambiguous (limit-price slippage vs an unusable
  * market). The UI must distinguish them from PRE-TRADE STATE, not guess.

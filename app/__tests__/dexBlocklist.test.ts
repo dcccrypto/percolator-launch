@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Raydium is withheld from new market creation (2026-07-29).
  *

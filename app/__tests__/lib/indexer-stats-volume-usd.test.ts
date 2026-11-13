@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * B: lib/indexer-db.ts's queryStatsAggregate previously computed
  * `SUM(ABS(size))` (a raw base-coin "Q" quantity, scale 1e6) and labelled it

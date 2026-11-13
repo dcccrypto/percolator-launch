@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * E: the `isSentinelValue` guard on `account.pnl` was applied for DISPLAY
  * (PositionsDock.tsx:202, PositionPanel.tsx:297, AccountsCard.tsx:72) but NOT

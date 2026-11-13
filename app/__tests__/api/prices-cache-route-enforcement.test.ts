@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression: the /api/prices/[slab] fallback cache must be written through the
  * BOUNDED helper by the route.

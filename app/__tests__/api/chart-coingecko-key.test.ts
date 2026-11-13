@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #2578 — optional server-side CoinGecko/GeckoTerminal API key for /api/chart/[mint].
  * Key set -> authenticated on-chain host + header; unset -> free keyless path.

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * REDUCED SCHEMA (2026-07) — an UNKNOWN account count must not suppress OI.
  *

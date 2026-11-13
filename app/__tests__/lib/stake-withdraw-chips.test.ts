@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Stake > Withdraw: the 25/50/75/100% chips filled (lpBalance * pct / 100).toFixed(4), rounded to
  * nearest, so 100% of 10.123456 read 10.1235 (above the balance) and handleWithdraw refused it

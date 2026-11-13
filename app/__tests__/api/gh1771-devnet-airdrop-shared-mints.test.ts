@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for GH#1771 fix: /api/devnet-airdrop shared-mint multi-row error
  *

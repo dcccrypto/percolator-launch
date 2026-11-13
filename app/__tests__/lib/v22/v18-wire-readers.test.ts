@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Review F4: the asset readers in lib/v18-wire.ts take the market BYTES and pick the slot offset by VERSION. The old
  * byte-less assetProfileOff threw with the flag on, which made admin / claim / close-market / update-authority readers fail.

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2616 — the single definition of position notional.
  *

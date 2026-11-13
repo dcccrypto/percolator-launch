@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Q-1 / SOL-1 (v2.2 QA 2026-10-11): every app trade failed Custom(9) because the app signed only the base
  * fee (30) while the wrapper requires base + the matcher's requested fee (~23) <= the signed cap <= max.

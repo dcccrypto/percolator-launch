@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3609: the wrapper's favourable-side close refusal (Custom 104, `band_favourable_close_refused_view` on
  * feat/v22-rc23-2026-10-22) binds ANY fill whose REDUCING part lands on the favoured side: a partial close, a full

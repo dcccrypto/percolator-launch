@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PoC + regression — warmup must clamp the on-chain numUsedAccounts before using
  * it as the account-index bound.

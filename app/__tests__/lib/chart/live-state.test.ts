@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Council 2026-11-06-go1106-ux: the chart badge said "Offline" while the page's price ticked, because it counted only
  * the indexer's `tick` pushes. `chartLiveState` takes the newest of the tick feed and the display-price feed.

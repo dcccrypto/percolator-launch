@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * M-9 (code review 2026-10-01): a BOUND (P3) vault's backing NAV is the wrapper's
  * `vault_lp_v18::bound_vault_nav` (deployed 553d76f0, via `lp_vault_combined_nav_parts_p3`):

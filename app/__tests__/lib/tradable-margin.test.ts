@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { tradableMarginAtoms, firstTradeDepositAtoms, fundDepositAtoms, engineOpenNeedAtoms, engineGateBps, type EngineGate } from "@/lib/first-trade";
 import { computeTradingFee } from "@/lib/trading";

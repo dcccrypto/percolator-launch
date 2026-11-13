@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * v2.2 browser E2E 2026-10-16: with no Supabase (the v2.2 preview), the portfolio's "Active Markets" read 27 while
  * /markets listed 9. /api/stats counted every wrapper account discovery found (abandoned launches, test slabs);

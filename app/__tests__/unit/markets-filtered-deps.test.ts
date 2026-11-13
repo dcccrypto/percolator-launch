@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * S26: /markets' list memo (`filtered`) reads `activeMarkets` but listed `effectiveMarkets` as its
  * dependency. `activeMarkets` also depends on the connected wallet (a creator sees their own market

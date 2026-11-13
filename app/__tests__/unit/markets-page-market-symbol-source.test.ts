@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression guard: /markets must display the perp market/base symbol, not the
  * collateral mint symbol. Hyperp markets are commonly collateralized in USDC;

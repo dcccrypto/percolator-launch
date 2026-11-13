@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * S27: the desktop results count on /markets printed "0 MARKETS" for the whole cold load (the list
  * of active markets is empty until stats load). The mobile count already showed "… MARKETS".

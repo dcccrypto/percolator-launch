@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { devPreviewAllowed } from "@/lib/v22/dev-preview-gate";
 

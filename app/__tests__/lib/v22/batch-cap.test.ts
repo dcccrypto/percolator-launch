@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * v2.2 leg cap (percolator-prog#546, FINAL): a transaction carries at most 4 trade legs (BatchTradeCpi accepts 1..=4; the portfolio holds 4).
  * The app packs a multi-leg order (e.g. Close 100% over the matcher's per-fill cap) with lib/trade-leg-groups.ts; with the v2.2 flag on the

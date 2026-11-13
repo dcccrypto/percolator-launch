@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * rc23 prog#614/#620 (95e4345d): every permissionless TIGHTEN sets guard flag bit 2 (`GUARD_FLAG_PERM_PROVEN`) and
  * `GUARD_FLAGS_KNOWN` includes it. The vendored decoder refused any flags outside bits 0-1, so a guard that had been TIGHTENed once

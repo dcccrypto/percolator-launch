@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1375: auto-fund 403 on production — NEXT_PUBLIC_SOLANA_NETWORK not 'devnet'
  *

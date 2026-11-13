@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Leg math for over-cap closes (lib/closeChunks.ts).
  *

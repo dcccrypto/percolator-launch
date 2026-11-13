@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { PUMPSWAP_PROGRAM_ID, WSOL_MINT } from "@percolatorct/sdk";

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Binds the #2629 keep-on-unknown fix to the source.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1612: sort=health must not interleave vault=0 and vault>0 markets
  * within the same health rank. vault>0 markets should always appear

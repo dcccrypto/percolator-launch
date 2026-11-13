@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PERC-372: Verify auto-fund faucet amount is 1,000 USDC
  *

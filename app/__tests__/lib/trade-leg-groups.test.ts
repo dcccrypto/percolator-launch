@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * M-2: "Close 100%" over ~3× the per-fill cap put every leg in ONE transaction (4 legs ≈ 1.47M
  * CU > the 1.4M ceiling). Legs are now packed by the CU budget into several transactions, every

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Product review 2026-10-28 (S-7 / S-8 / D-2 / D-3 / D-10): on v2.2 the stake copy must match the P3 loss order (creator stake and
  * Earn ahead of insurance), stake v5 (no admin flush) and decision FC-B1 (fee-only stakers earn nothing while the market runs).

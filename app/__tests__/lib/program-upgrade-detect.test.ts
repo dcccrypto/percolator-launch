@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Upgrade detection for the matcher-inventory-sync + NAV-floor deploy (lib/program-upgrade-detect.ts).
  * Fixtures are the first 4096 bytes of the REAL ELFs (~/percolator-ops/artifacts/matcher-sync-2026-10-03):

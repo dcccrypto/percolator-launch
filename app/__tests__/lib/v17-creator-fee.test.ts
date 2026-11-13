@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Creator fee claim — read-path tests (lib/v17-creator-fee.ts).
  *

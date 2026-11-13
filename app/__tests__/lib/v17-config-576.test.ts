@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Config-576 read verify — the offset/length cutover, pinned against a REAL
  * market on the fresh fee-split wrapper (DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj).

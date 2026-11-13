@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PoC + regression — live-market-state must sanitize on-chain OI/insurance before
  * converting to Number.

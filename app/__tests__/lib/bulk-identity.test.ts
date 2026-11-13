@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * /my-markets resolved each row's ticker from `/api/markets/[slab]`, which
  * awaits an on-chain LP scan before answering (517-1022ms measured), so every

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #2750 (reported by v1ktorrr0x): the repo root pinned @percolatorct/sdk ^4.4.0 (v17 era)
  * while the app uses 8.0.0, and the root operator scripts encoded the stale v17 ABI.

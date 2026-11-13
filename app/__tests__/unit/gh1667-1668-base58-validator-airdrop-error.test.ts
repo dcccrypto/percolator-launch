@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for GH#1667 and GH#1668
  *

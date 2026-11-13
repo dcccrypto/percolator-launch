@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * /api/markets and /api/markets/[slab] wrote insurance_fund 0 when they couldn't read the market's
  * engine stats (a failed batched read, a parse error, the static devnet rows), so Earn and my-markets

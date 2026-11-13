@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression: market metadata validation on the LIVE registration path.
  *

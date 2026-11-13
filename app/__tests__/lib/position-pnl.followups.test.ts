@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3077 follow-ups (reviewer notes on #3084): liquidation price and ROE on
  * EFFECTIVE size, invalid / reset legs are unknown, and the v17 on-chain mark is

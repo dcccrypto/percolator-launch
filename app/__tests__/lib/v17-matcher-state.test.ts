@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { PublicKey } from '@solana/web3.js';
 import {
   CTX_VAMM_OFFSET,

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { computeMarketHealth, sanitizeBps } from "../lib/health";
 import type { EngineState } from "@percolatorct/sdk";

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** M7: PnL % (ROE) divides by the position's capital (its margin), not by notional / max leverage. */
 import { describe, expect, it } from "vitest";
 import { computePositionPnl, valueAtMark, type PositionPnlInput } from "@/lib/position-pnl";

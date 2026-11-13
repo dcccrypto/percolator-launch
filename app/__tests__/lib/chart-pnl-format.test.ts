@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { formatPnl } from "../../lib/chart-pnl-format";
 

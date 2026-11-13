@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * ConvertReleasedPnl (tag 28) — math mirror + instruction + quote.
  *

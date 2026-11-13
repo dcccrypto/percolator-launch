@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1524: /api/markets sort parameter non-functional.
  *

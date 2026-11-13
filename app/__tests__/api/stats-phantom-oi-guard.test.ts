@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1314 / GH#1318 / GH#1321 / GH#1425: /api/stats phantom OI vault boundary + price fallback tests.
  *

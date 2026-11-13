@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { describeLiqDistance, describeLiqPrice, type LiqPriceDisplayInput } from "@/lib/liq-price-display";
 import { LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";

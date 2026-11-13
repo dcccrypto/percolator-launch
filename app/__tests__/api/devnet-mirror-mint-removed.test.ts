@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3473: POST /api/devnet-mirror-mint created a new SPL mint per accepted request, paid by the
  * shared devnet mint authority, for any caller and any listed mainnet token — with no dedup at

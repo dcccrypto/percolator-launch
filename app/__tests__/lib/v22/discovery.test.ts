@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Version-aware discovery (lib/v22/discovery.ts over the vendored SDK sdk#406 @ adf8fd0 discovery.ts).
  * The installed 8.0.0 discoverMarkets / getMarketsByAddress accept wrapper VERSION 18 only, so a v2.2 (VERSION 19)

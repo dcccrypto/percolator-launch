@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * isMarketauthComplete — the completeness signal the on-chain-discovery markets
  * path uses to hide markets that never finished the create-market wizard.

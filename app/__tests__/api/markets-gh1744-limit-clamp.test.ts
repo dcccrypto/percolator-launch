@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1744: /api/markets returns null total/activeTotal when limit=0 or limit=NaN.
  * GH#1753: Non-numeric limit (limit=abc, limit=NaN) now soft-defaults to MAX_LIMIT (500)

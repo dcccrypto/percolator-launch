@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { change24h, formatCompactUsd, formatPct, marketRowStats, parseFunding } from "@/lib/chart/header-stats";
 

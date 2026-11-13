@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3130: on phones /developers was 444px wide at 390px. The Risk Engine formula cards are grid items,
  * whose min-width defaults to their content, so the longest formula line widened the card and the

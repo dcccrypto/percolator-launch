@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PERC-8450: GET /api/markets should degrade to the static mainnet directory
  * when Supabase is unreachable, not return a hard 500 that pushes browsers into

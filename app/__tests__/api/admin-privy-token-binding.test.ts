@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression coverage for #2206.
  *

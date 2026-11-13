@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Council 2026-11-07 council-leftovers run 2, finding 2 (MED-HIGH; Operator, Trader, First-timer, Clerk, Skeptic):
  * "/api/runtime-config serves ws://localhost:8797, and the CSP connect-src omits it, so the console shows a CSP

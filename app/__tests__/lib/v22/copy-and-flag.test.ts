@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { STAKE_CONSENT_TEXT_V2, V22_COPY, consentDisplay } from "@/lib/v22/copy";
 import { __setDevnetV22ForTest, isDevnetV22Enabled } from "@/lib/v22/flag";

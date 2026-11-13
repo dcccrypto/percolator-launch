@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Regression: warmup must clamp numUsedAccounts against the slab's real maxAccounts
  * IN THE ROUTE.

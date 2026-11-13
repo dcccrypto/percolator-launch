@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readU64LE } from "@/lib/u64le";

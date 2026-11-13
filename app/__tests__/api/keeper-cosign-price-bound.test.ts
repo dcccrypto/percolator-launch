@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PoC + regression — keeper-cosign must bound the caller-supplied initial mark.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The result line is worded from the MEASURED position change (ADL-effective before/after), never
  * from the request or the raw pre-trade position. Table of measured pairs -> exact strings, and

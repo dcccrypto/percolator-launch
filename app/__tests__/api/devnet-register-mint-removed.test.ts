@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Audit 2026-10-17 S3-C8: POST /api/devnet-register-mint let any caller, unauthenticated, write
  * a `devnet_mints` row for any existing SPL mint with a caller-chosen name, symbol and decimals

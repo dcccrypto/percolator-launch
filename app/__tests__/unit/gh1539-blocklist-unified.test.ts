@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1539: Verify that BLOCKED_SLAB_ADDRESSES includes both hardcoded entries
  * and env var overrides, so UI and API use the same blocklist.

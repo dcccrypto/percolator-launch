@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1420: Zombie markets (vault_balance=0) should be excluded from /api/markets by default.
  * GH#1419: Stale volume_24h (stats_updated_at > 48h ago) should be excluded from /api/stats totals.

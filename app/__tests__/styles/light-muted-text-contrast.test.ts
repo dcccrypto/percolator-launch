@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #59: in light mode --text-muted (#8A8BA8, 3.1:1 on --bg) and --text-dim (#B8B9CC, 1.8:1) made a lot
  * of secondary text hard to read, including the bottom tab labels. --text-muted now passes 4.5:1 on

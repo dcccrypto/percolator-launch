@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Flag ON: a market account with a wrapper VERSION this build does not decode is answered with HTTP 422 and the
  * calm `unsupported_layout` body (never a 500, never partial numbers). Flag OFF: unchanged (404 "Market not found").

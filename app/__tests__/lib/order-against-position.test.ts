@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * orderAgainstPosition: an Open-tab order on the other side of the open position releases
  * margin instead of reserving it. The program checks initial margin only when |next| >= |current|.

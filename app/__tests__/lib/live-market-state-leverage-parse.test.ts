@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Behavioural guard for #2678/#2679: readLiveMarketStates must derive
  * maxLeverage from the slab's REAL engine-config initial_margin_bps (the bytes

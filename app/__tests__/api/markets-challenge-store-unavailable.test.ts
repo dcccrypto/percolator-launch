@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GET /api/markets/challenge must never be a bare 500 when the nonce store
  * (Vercel Blob) can't run. R9 found it 500ing on the preview, where the Blob

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { syncOverlayPriceLine } from '@/lib/chart-overlay-price-line';
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Council 2026-11-06-go1106-ux, LP (low): "The Earn amount input silently rewrites what you type. '-5' becomes '5'
  * and '1e3' becomes '13', and Deposit stays enabled in both cases. '0.0000001' disables Deposit with no message."

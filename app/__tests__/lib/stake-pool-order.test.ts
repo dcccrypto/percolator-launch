@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { orderStakePools, stakedOrderValue, type StakeOrderable } from "../../lib/stake-pool-order";
 

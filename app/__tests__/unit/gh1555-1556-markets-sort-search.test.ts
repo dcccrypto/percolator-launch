@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#1555: sort=recent returns ascending order after first item (API regression)
  * GH#1556: ?q= param is completely ignored — returns all markets

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PERC-376 / PERC-1233 (GH#1382): Tests for /api/faucet route
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { BLOCKED_SLAB_ADDRESSES, isBlockedSlab } from "@/lib/blocklist";
 
 describe("blocklist", () => {

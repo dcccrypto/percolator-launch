@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GH#2510 / review on #2512 — the SQL aggregate must match the JS reducer it
  * replaced, PER ROW.

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * E2E failure scenario tests for market creation flow.
  * Tests the full error handling pipeline: from raw Solana errors to user-facing messages.

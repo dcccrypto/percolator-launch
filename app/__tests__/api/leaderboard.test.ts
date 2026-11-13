@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * PERC-414: Tests for /api/leaderboard route
  * Covers: trade aggregation, volume sorting, period filtering, rank assignment.

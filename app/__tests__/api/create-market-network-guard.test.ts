@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for network guard in /api/mobile/create-market (GH#1950).
  *

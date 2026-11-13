@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { classifyPoolAccount, classifyPoolsByOwner, isOfferable } from "@/lib/dex-pool-owner";
