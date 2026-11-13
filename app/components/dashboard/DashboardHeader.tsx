@@ -5,6 +5,8 @@ import { useLivePortfolioMetrics } from "@/hooks/useLivePortfolioMetrics";
 import { unknownPnlCaveat } from "@/lib/position-pnl";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { formatUsdAmount } from "@/lib/format";
+import { useLpPositions } from "@/hooks/useLpPositions";
+import { combinePortfolioValue, portfolioValueBreakdownText } from "@/lib/portfolio-value";
 import { useState } from "react";
 
 function CopyableAddress({ address }: { address: string }) {
@@ -43,6 +45,9 @@ export function DashboardHeader() {
     portfolio.totalDeposited ?? 0n,
   );
 
+  // Earn deposits and stake positions count in Portfolio Value, as on the Positions tab.
+  const lp = useLpPositions();
+
   const address = publicKey?.toBase58() ?? "";
   const totalValue = liveMetrics.totalValue;
   const totalPnl = liveMetrics.totalUnrealizedPnl;
@@ -54,11 +59,17 @@ export function DashboardHeader() {
   const loading = portfolio.loading;
   // One USD format for every value (it was a bare token amount above zero and "$0.00" at zero), with
   // separators like StatsBar and the /portfolio hero; formatUsdAmount for $0.00 and sub-cent amounts.
-  const usd = Math.abs(Number(totalValue) / 1e6);
-  const sign = totalValue < 0n ? "-" : "";
+  const breakdown = combinePortfolioValue(Number(totalValue) / 1e6, {
+    totalRedeemable: lp.totalRedeemable,
+    loading: lp.loading,
+    error: lp.error,
+    positionCount: lp.positions.length,
+  });
+  const usd = Math.abs(breakdown.totalUsd);
+  const sign = breakdown.totalUsd < 0 ? "-" : "";
   const displayValue = loadError
     ? "—"
-    : loading
+    : loading || breakdown.lpLoading
       ? "..."
       : usd >= 0.01
         ? `${sign}$${usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -92,6 +103,11 @@ export function DashboardHeader() {
               </span>
             )}
           </p>
+          {!loadError && !loading && !breakdown.lpLoading && (
+            <p className="text-[8px] text-[var(--text-secondary)]" data-testid="header-value-breakdown">
+              {portfolioValueBreakdownText(breakdown)}
+            </p>
+          )}
           {unknownPnlCaveat(liveMetrics.unknownPnlCount) && (
             <p className="text-[8px] text-[var(--text-secondary)]" data-testid="header-pnl-caveat">
               {unknownPnlCaveat(liveMetrics.unknownPnlCount)}

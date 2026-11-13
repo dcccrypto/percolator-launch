@@ -33,6 +33,7 @@ import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
 import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
 import { useLpPositions } from "@/hooks/useLpPositions";
+import { combinePortfolioValue, portfolioValueBreakdownText } from "@/lib/portfolio-value";
 import { AtRiskBanner } from "@/components/portfolio/AtRiskBanner";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { pendingProfit } from "@/lib/convert-released-pnl";
@@ -780,6 +781,14 @@ export function PortfolioPositionsView() {
       })()
     : { unrealizedPnlUsd: 0, unknownPnlCount: 0, valueUsd: 0 };
 
+  // Portfolio Value = trading value + Earn/stake value (the Overview header uses the same rule).
+  const valueBreakdown = combinePortfolioValue(liveUsdTotals.valueUsd, {
+    totalRedeemable: lpPositions.totalRedeemable,
+    loading: lpPositions.loading,
+    error: lpPositions.error,
+    positionCount: lpPositions.positions.length,
+  });
+
   // Idle (parked, non-position) collateral value — its own Tier-2 tile now
   // that "Positions" no longer conflates open positions with idle deposits.
   const idleDepositsUsd = !tokenMetasLoading
@@ -861,12 +870,17 @@ export function PortfolioPositionsView() {
             >
               {!walletConnected
                 ? "\u2014"
-                : (loading || tokenMetasLoading)
+                : (loading || tokenMetasLoading || valueBreakdown.lpLoading)
                   ? "\u2026"
                   : loadError
                     ? "\u2014"
-                    : `$${liveUsdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    : `$${valueBreakdown.totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </p>
+            {walletConnected && !loadError && !loading && !tokenMetasLoading && !valueBreakdown.lpLoading && (
+              <p className="mt-1 text-xs text-[var(--text-secondary)]" data-testid="value-breakdown">
+                {portfolioValueBreakdownText(valueBreakdown)}
+              </p>
+            )}
             {walletConnected && !loadError && !loading && !tokenMetasLoading && (
               liveUsdTotals.unknownPnlCount > 0 && liveUsdTotals.unknownPnlCount >= openPositions.length ? (
                 <div className="mt-3 flex items-baseline gap-2" data-testid="hero-pnl-unknown">
