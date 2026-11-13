@@ -12,7 +12,8 @@
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { entryFromChain, type ChainEntryVerdict } from "@/lib/entry-chain";
-import { getEntryLeverage, saveEntryPrice } from "@/lib/entry-price";
+import { entryRecordCurrent, getEntryLeverage, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice } from "@/lib/entry-price";
+import { growthRecordPresence } from "@/lib/v21/growth-market";
 
 export const COOLDOWN_MS = 10 * 60 * 1000;
 const KEY = (portfolio: string) => `perc:entrychain:v1:${portfolio}`;
@@ -66,16 +67,36 @@ export interface SyncTarget {
   assetIndex?: number;
 }
 
-const feeCache = new Map<string, bigint>();
-async function baseFeeBps(connection: Pick<Connection, "getAccountInfo">, slab: string): Promise<bigint | null> {
-  const c = feeCache.get(slab);
-  if (c !== undefined) return c;
+/**
+ * r10: a trade on this device is in flight (or just landed) on `slab`: the ticket / close hook is about to write the position's entry itself,
+ * so no chain rebuild may start or save meanwhile. Time-boxed so a stuck wallet prompt cannot block a rebuild forever.
+ */
+const holds = new Map<string, number>();
+export function holdChainSync(slab: string, ms: number, now: number = Date.now()): void {
+  holds.set(slab, Math.max(holds.get(slab) ?? 0, now + ms));
+}
+export function chainSyncHeld(slab: string, now: number = Date.now()): boolean {
+  return (holds.get(slab) ?? 0) > now;
+}
+
+interface MarketFacts {
+  baseFeeBps: bigint;
+  /** A growth record may exist for the asset: a busy-side fee is possible. Fails toward true (undecodable counts as possible). */
+  mayChargeBusy: boolean;
+}
+const factsCache = new Map<string, MarketFacts>();
+async function marketFacts(connection: Pick<Connection, "getAccountInfo">, slab: string, assetIndex: number): Promise<MarketFacts | null> {
+  const c = factsCache.get(slab);
+  if (c) return c;
   try {
     const info = await connection.getAccountInfo(new PublicKey(slab), "confirmed");
-    const v = info ? decodeMarketEngineView(new Uint8Array(info.data)) : null;
+    if (!info) return null;
+    const data = new Uint8Array(info.data);
+    const v = decodeMarketEngineView(data);
     if (!v) return null;
-    feeCache.set(slab, v.tradeFeeBaseBps);
-    return v.tradeFeeBaseBps;
+    const f = { baseFeeBps: v.tradeFeeBaseBps, mayChargeBusy: growthRecordPresence(data, assetIndex) !== "absent" };
+    factsCache.set(slab, f);
+    return f;
   } catch {
     return null;
   }
@@ -84,7 +105,8 @@ async function baseFeeBps(connection: Pick<Connection, "getAccountInfo">, slab: 
 /** Runs one rebuild (queued, deduplicated, cooled down). Resolves to the verdict, or "skipped" when none was due. Never throws. */
 export function syncChainEntry(connection: Connection, t: SyncTarget, now: () => number = Date.now): Promise<ChainEntryVerdict | "skipped"> {
   const pk = t.portfolio.toBase58();
-  if (t.qNow === 0n || !readDue(pk, t.qNow, now())) return Promise.resolve("skipped");
+  // Never for a flat position, an explicit "unknown" (owner decision 2), a trade in flight on this market, or when not due.
+  if (t.qNow === 0n || isEntryMarkedUnknown(t.slab, t.idx, t.wallet) || chainSyncHeld(t.slab, now()) || !readDue(pk, t.qNow, now())) return Promise.resolve("skipped");
   const flightKey = `${pk}:${t.qNow}`;
   const running = inflight.get(flightKey);
   if (running) return running;
@@ -106,14 +128,20 @@ function readDue(pk: string, q: bigint, now: number): boolean {
 async function run(connection: Connection, t: SyncTarget, now: () => number): Promise<void> {
   const pk = t.portfolio.toBase58();
   if (!readDue(pk, t.qNow, now())) return; // another instance finished it while this one waited in the queue
-  const fee = await baseFeeBps(connection, t.slab);
-  if (fee === null) {
+  if (isEntryMarkedUnknown(t.slab, t.idx, t.wallet) || chainSyncHeld(t.slab, now())) return;
+  const facts = await marketFacts(connection, t.slab, t.assetIndex ?? 0);
+  if (facts === null) {
     writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now() });
     return;
   }
-  const r = await entryFromChain(connection, t.wrapper, { market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, qNow: t.qNow, baseFeeBps: fee });
+  const r = await entryFromChain(connection, t.wrapper, { market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, qNow: t.qNow, baseFeeBps: facts.baseFeeBps, mayChargeBusy: facts.mayChargeBusy });
   let verdict = r.verdict;
   if (r.verdict === "chain" && r.entry) {
+    // The ticket may have written (or marked unknown) while the chain was read: whatever it wrote stands, the chain never overwrites it.
+    const meanwhile = getSavedEntry(t.slab, t.idx, t.wallet);
+    if (isEntryMarkedUnknown(t.slab, t.idx, t.wallet) || chainSyncHeld(t.slab, now()) || (meanwhile && entryRecordCurrent(meanwhile, t.qNow))) {
+      return; // no attempt recorded: nothing was learned that matters, and nothing was written
+    }
     if (r.entry.entryPriceE6 !== null) {
       // The chain wins over this device's record: same key every surface reads (lib/entry-price.ts).
       saveEntryPrice(t.slab, t.idx, r.entry.entryPriceE6, getEntryLeverage(t.slab, t.idx, t.wallet) ?? undefined, t.wallet, r.entry.sizeQ, {
@@ -130,6 +158,30 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
 export function __resetEntryChainSyncForTests(): void {
   memory.clear();
   inflight.clear();
-  feeCache.clear();
+  factsCache.clear();
+  holds.clear();
   queue = Promise.resolve();
+}
+
+/** The slice of a portfolio row the trigger reads. */
+export interface SyncCandidate {
+  slabAddress: string;
+  idx: number;
+  adlKnown: boolean;
+  effectiveSize: bigint;
+  nftWrapped?: boolean;
+  portfolioPk: PublicKey | null;
+  entryPriceSource: string;
+  account?: { positionSize: bigint } | null;
+}
+
+/**
+ * Whether `usePortfolio` should start a rebuild for a row: an open, ADL-readable, self-owned position this device has no current entry for.
+ * Never for a position carrying the explicit "unknown" marker (owner decision 2) or with a trade in flight on its market.
+ */
+export function shouldSyncPosition(p: SyncCandidate, wallet: string, now: number = Date.now()): boolean {
+  if ((p.account?.positionSize ?? 0n) === 0n || !p.adlKnown || p.effectiveSize === 0n || p.nftWrapped || !p.portfolioPk) return false;
+  if (p.entryPriceSource === "cache" || p.entryPriceSource === "server") return false;
+  if (isEntryMarkedUnknown(p.slabAddress, p.idx, wallet) || chainSyncHeld(p.slabAddress, now)) return false;
+  return true;
 }

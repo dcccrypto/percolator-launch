@@ -11,15 +11,16 @@
  *
  * Which source wins. A chain-derived entry beats the device cache, but only when the history was read COMPLETELY and the fills add up to the
  * position the chain holds now. Anything else (the RPC could not be read, the page limit was reached before the open, a REDUCE the units of which
- * cannot be reconciled, the size does not add up because of silent ADL scaling, a fee that base + spread + a busy-side fee cannot explain) returns
- * a verdict other than "chain" and the caller leaves the device cache exactly as it was: never a guess.
+ * cannot be reconciled, the size does not add up because of silent ADL scaling, a fee that base + the matcher's own request cannot explain) returns
+ * a verdict other than "chain" and the caller leaves the device cache exactly as it was: never a guess. (A silent ADL scaling that exactly cancels
+ * the last add would still read as a flat start; that coincidence is not detectable from the logs alone and is listed as a residual risk.)
  *
  * Price of a fill. The booked price is the FILL's `price_e6`. The price the trader EFFECTIVELY paid adds the matcher's spread, which the wrapper
- * charges through `fee_atoms`: fee = base fee + spread (+ the growth busy-side fee on an OPEN). From the chain alone the split is
- *     spread = notional x floor(|quoted - booked| x 1e4 / booked) / 1e4        (the matcher's own request, GH#36; exact to a few atoms)
- *     busy   = fee - base fee - spread                                          (an open only; the Entry never includes it, owner decision r9)
- * so the busy-side fee is DERIVED from the fill instead of taken from the quote the ticket showed. A fee BELOW base + spread (beyond rounding)
- * or a busy-side part on a fill that cannot carry one (a reduce) is not explained: that fill's price is unknown and so is the Entry.
+ * charges through `fee_atoms`: fee = base fee + spread (+ the growth busy-side fee on an OPEN). The Entry is booked +/- (fee - base) / |q|, the
+ * same arithmetic as the ticket (`effectivePriceE6`), so the two devices agree to the last digit. Owner decision 2 (the r9 "unknown" rule) is
+ * kept: on a market that can charge a busy-side fee, the chain cannot prove the busy rate (it is the side's utilisation just before the trade),
+ * so a fill whose fee is not base + the matcher's own request within rounding is NOT priced: the Entry is unknown, as on the trading device.
+ * A device that placed such a trade also leaves an explicit "unknown" marker (lib/entry-price.ts) the rebuild never overwrites.
  *
  * Bounds. At most `maxTx` transactions are read per rebuild (default 60), in pages of `pageSize` signatures, sequentially in small groups; a
  * rebuild runs only for a position this device has no current entry for, at most once per cooldown per portfolio and size (memory + storage).
@@ -88,38 +89,55 @@ export function deltasFromLogs(
   if (!succeeded) return [];
   const ev = decodeTxEventsV22(true, logs, wrapper);
   if (ev.status !== "known") return null;
+  // An event the decoder skipped (unknown kind / version / REDUCE reason, bad length) may be a change to this position: never read as "no change".
+  if (ev.skipped.length > 0) return null;
   const out: ChainDelta[] = [];
-  let sawFill = false;
-  for (const e of ev.events) {
+  let fillAt = -1;
+  const reduces: { at: number; d: ChainDelta }[] = [];
+  ev.events.forEach((e, at) => {
     if (e.kind === "reduce" && e.market.equals(o.market) && e.portfolio.equals(o.portfolio) && e.assetIndex === o.assetIndex) {
-      if (!EFFECTIVE_UNIT_REDUCE.has(e.reason)) return "irreconcilable";
-      out.push({ sig, deltaQ: e.signedReducedQ });
+      reduces.push({ at, d: { sig, deltaQ: e.signedReducedQ, ...(EFFECTIVE_UNIT_REDUCE.has(e.reason) ? {} : { unit: true }) } as ChainDelta });
     }
-    if (e.kind === "fill" && e.market.equals(o.market) && e.taker.equals(o.portfolio)) sawFill = true;
-  }
-  if (sawFill) {
+    if (e.kind === "fill" && e.market.equals(o.market) && e.taker.equals(o.portfolio) && fillAt < 0) fillAt = at;
+  });
+  if (reduces.some((r) => (r.d as ChainDelta & { unit?: boolean }).unit)) return "irreconcilable";
+  let fillDelta: ChainDelta | null = null;
+  if (fillAt >= 0) {
     const f = execFillFromLogs(logs, wrapper, { market: o.market, assetIndex: o.assetIndex, taker: o.portfolio, succeeded: true });
     // A fill of ours the decoder cannot reduce to one price (two assets in one line...) cannot be reconciled.
     if (!f) return "irreconcilable";
-    out.push({ sig, deltaQ: f.executedQ, fill: f });
+    fillDelta = { sig, deltaQ: f.executedQ, fill: f };
   }
+  // Keep the log order: the summed fill sits where its first FILL event was (REDUCEs before it happen before it).
+  for (const r of reduces.filter((r) => r.at < fillAt || fillAt < 0)) out.push(r.d);
+  if (fillDelta) out.push(fillDelta);
+  for (const r of reduces.filter((r) => fillAt >= 0 && r.at > fillAt)) out.push(r.d);
   return out;
 }
 
-/** The price a fill effectively paid, plus its busy-side fee, from the fill alone (see the header). Null = not explained. */
-export function chainFillPrice(f: ExecFill, baseFeeBps: bigint, opens: boolean): { priceE6: bigint; busyAtoms: bigint } | null {
+/**
+ * The price a fill effectively paid, from the fill alone. Null = not explained (the Entry is then UNKNOWN, owner decision 2).
+ *
+ * `mayChargeBusy` false (no growth record): spread = fee - base, from trusted fields only, bit-identical to `effectivePriceE6(f, base, null)`;
+ * the matcher's quote is not consulted. `mayChargeBusy` true: the ticket compares the charged fee with the busy rate it QUOTED from the side's
+ * utilisation just before the trade, state standard RPC cannot read back. So from the chain a busy-side part cannot be PROVEN: a fee that
+ * matches base + the matcher's own request within rounding is priced exactly as the ticket would with a quoted busy rate of 0
+ * (spread = fee - base); any busy part above rounding (open or reduce) is not explained, and the Entry is unknown, never a number the
+ * trading device would have shown as unknown.
+ */
+export function chainFillPrice(f: ExecFill, baseFeeBps: bigint, mayChargeBusy: boolean): { priceE6: bigint; busyAtoms: bigint } | null {
   if (f.executedQ === 0n) return null;
   const base = (f.notionalAtoms * baseFeeBps) / 10_000n;
-  const spread = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsFloor(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
-  const tol = f.notionalAtoms / 1_000_000n + 5n;
-  const rest = f.feeAtoms - base;
-  if (rest + tol < spread) return null; // less than base + the matcher's own request: not explained
-  const busyRaw = rest - spread;
-  const busy = busyRaw > tol ? busyRaw : 0n;
-  if (!opens && busy > 0n) return null; // a reduce never carries a busy-side fee: the fee is not explained
-  const perUnit = (spread * 1_000_000n) / abs(f.executedQ);
+  const rest = f.feeAtoms > base ? f.feeAtoms - base : 0n;
+  if (mayChargeBusy) {
+    const tol = f.notionalAtoms / 1_000_000n + 5n;
+    const expected = f.quotedPriceE6 > 0n ? (f.notionalAtoms * quotedSpreadBpsFloor(f.bookedPriceE6, f.quotedPriceE6)) / 10_000n : 0n;
+    const off = rest > expected ? rest - expected : expected - rest;
+    if (off > tol) return null;
+  }
+  const perUnit = (rest * 1_000_000n) / abs(f.executedQ);
   const p = f.executedQ > 0n ? f.bookedPriceE6 + perUnit : f.bookedPriceE6 - perUnit;
-  return p > 0n ? { priceE6: p, busyAtoms: busy } : null;
+  return p > 0n ? { priceE6: p, busyAtoms: 0n } : null;
 }
 
 /**
@@ -127,7 +145,7 @@ export function chainFillPrice(f: ExecFill, baseFeeBps: bigint, opens: boolean):
  * flipped through flat, from `startQ` on the other side: only its opening half belongs to the position). Pure.
  * Returns null when the changes do not end at `qNow`.
  */
-export function rebuildEntry(deltas: readonly ChainDelta[], qNow: bigint, baseFeeBps: bigint, startQ = 0n): { verdict: "chain" | "mismatch" | "unexplained"; entry: ChainEntry | null } {
+export function rebuildEntry(deltas: readonly ChainDelta[], qNow: bigint, baseFeeBps: bigint, startQ = 0n, mayChargeBusy = true): { verdict: "chain" | "mismatch" | "unexplained"; entry: ChainEntry | null } {
   let q = startQ;
   type Saved = { entryPriceE6: bigint; sizeQ: bigint | null; busyFeeAtoms: bigint | null };
   type Booked = { entryPriceE6: bigint; sizeQ: bigint | null };
@@ -140,7 +158,7 @@ export function rebuildEntry(deltas: readonly ChainDelta[], qNow: bigint, baseFe
     const opens = q === 0n || (q > 0n) !== (after > 0n) || abs(after) > abs(q);
     if (d.fill) {
       fills++;
-      const px = chainFillPrice(d.fill, baseFeeBps, opens);
+      const px = chainFillPrice(d.fill, baseFeeBps, mayChargeBusy);
       if (px === null && opens) return { verdict: "unexplained", entry: null };
       if (after === 0n) {
         saved = null;
@@ -185,6 +203,8 @@ export interface ChainEntryOptions {
   /** The signed ADL-effective size the chain holds now. */
   qNow: bigint;
   baseFeeBps: bigint;
+  /** The market may charge a busy-side fee (a growth record exists). Default true (the stricter rule). */
+  mayChargeBusy?: boolean;
   /** Signatures per page (default 50). */
   pageSize?: number;
   /** Transactions read at most (default 60). */
@@ -234,7 +254,7 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
             if (flip === null && flipsThrough(q, ds[k].deltaQ)) flip = { len: newestFirst.length, startQ: q };
             if (q === 0n) {
               const used = flip ? newestFirst.slice(0, flip.len) : newestFirst;
-              const r = rebuildEntry(used.slice().reverse(), o.qNow, o.baseFeeBps, flip ? flip.startQ : 0n);
+              const r = rebuildEntry(used.slice().reverse(), o.qNow, o.baseFeeBps, flip ? flip.startQ : 0n, o.mayChargeBusy ?? true);
               return { verdict: r.verdict, entry: r.entry, txRead };
             }
           }

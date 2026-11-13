@@ -49,6 +49,7 @@ import { clearEntryPrice } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
+import { holdChainSync } from "@/lib/entry-chain-sync";
 import { recordFill } from "@/lib/trade-book";
 import { readFundingSample } from "@/lib/funding-flow";
 import { formatLotPriceE6 } from "@/lib/v22/lot";
@@ -280,6 +281,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
       const userIdx = userAccount?.idx ?? 0;
 
       inflightRef.current = true;
+      holdChainSync(slabAddress, 60_000); // r10: a close in flight rewrites the entry; no chain rebuild meanwhile
       setLoading(true);
       setError(null);
       setPhase("submitting");

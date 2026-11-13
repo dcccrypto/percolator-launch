@@ -85,7 +85,8 @@ import { formatTokenAmount, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
-import { saveEntryPrice, clearEntryPrice, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
+import { holdChainSync } from "@/lib/entry-chain-sync";
+import { saveEntryPrice, clearEntryPrice, markEntryUnknown, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
 import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
@@ -1505,7 +1506,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
 
     if (mockMode) {
-      setTradePhase("submitting");
+      holdChainSync(slabAddress, 60_000); // r10: no chain Entry rebuild while this device is writing the entry itself
+    setTradePhase("submitting");
       setTimeout(() => { setTradePhase("confirming"); maxPinned.current = null; setMarginInput(""); setSizeInput(""); resetSizeText(); setFundInput(""); }, 800);
       setTimeout(() => setTradePhase("idle"), 2000);
       return;
@@ -1546,6 +1548,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const waitAbort = new AbortController();
     waitAbortRef.current = waitAbort;
     const submitPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+    holdChainSync(slabAddress, 60_000); // r10: no chain Entry rebuild while this device is writing the entry itself
     setTradePhase("submitting");
     // Round i: the wait budget follows the estimate (max(2 min, 1.5 x estimate), at most 10 min); one silent retry covers a lag
     // that clears in about a keeper sweep (a 21 right after the approval).
@@ -1725,6 +1728,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // (applied below once read); the mark is never the entry of a v2.2 fill.
       const markFillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
       // `fillPriceE6` is the entry the surfaces show (the price paid); `bookedPriceE6` the engine's basis for the same fill (risk math only).
+      holdChainSync(slabAddress, 30_000); // the landed fill's entry is written within seconds (measured read, up to 8 s)
       const applyEntryFill = (fillPriceE6: bigint, bookedPriceE6: bigint = fillPriceE6, fillBusyFeeAtoms: bigint | null = 0n) => {
       if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
@@ -1781,7 +1785,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           if (ef && paid !== null) applyEntryFill(paid, ef.bookedPriceE6, busyFeeAtoms(ef, entryBusyQuoted));
           // The fill could not be read (or its price cannot be split from the fee): keep no entry at all (the position panel then shows an
           // unknown one) rather than the mark or the booked price, which is gross of the spread.
-          else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
+          else if (entryIdx !== null) {
+            clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
+            // r10 decision 2: a fill that WAS read but cannot be priced honestly (busy rate differs from the quote, raised-fee Custom order) is
+            // an explicit "unknown" no other source (the chain rebuild) may fill in. An unreadable fill is not marked: the chain may know it.
+            if (ef) markEntryUnknown(slabAddress, entryIdx, publicKey?.toBase58());
+          }
           // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
           if (ef && publicKey) {
             // The size the chain had BEFORE this fill: the measured change (ADL-effective, read around the trade) is fresher than the

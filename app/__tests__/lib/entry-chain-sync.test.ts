@@ -6,8 +6,8 @@ const h = vi.hoisted(() => ({ entryFromChain: vi.fn(), fee: 30n as bigint | null
 vi.mock("@/lib/entry-chain", () => ({ entryFromChain: h.entryFromChain }));
 vi.mock("@/lib/limits/decode", () => ({ decodeMarketEngineView: () => (h.fee === null ? null : { tradeFeeBaseBps: h.fee }) }));
 
-import { COOLDOWN_MS, __resetEntryChainSyncForTests, rebuildDue, syncChainEntry } from "@/lib/entry-chain-sync";
-import { getSavedEntry, saveEntryPrice } from "@/lib/entry-price";
+import { COOLDOWN_MS, __resetEntryChainSyncForTests, holdChainSync, rebuildDue, shouldSyncPosition, syncChainEntry } from "@/lib/entry-chain-sync";
+import { clearEntryPrice, getSavedEntry, markEntryUnknown, saveEntryPrice } from "@/lib/entry-price";
 
 const SLAB = Keypair.generate().publicKey.toBase58();
 const WALLET = Keypair.generate().publicKey.toBase58();
@@ -98,5 +98,86 @@ describe("rebuildDue", () => {
     expect(rebuildDue(at("chain", T, 0), T, 10 * COOLDOWN_MS)).toBe(false);
     expect(rebuildDue(at("incomplete", T, 0), T, COOLDOWN_MS - 1)).toBe(false);
     expect(rebuildDue(at("unreadable", T, 0), T, COOLDOWN_MS)).toBe(true);
+  });
+});
+
+describe("owner decision 2: the r9 'unknown' is never filled in", () => {
+  it("a ticket-unknown position (marker) is skipped: no chain read, nothing written, even after the ticket's clearEntryPrice calls", async () => {
+    h.entryFromChain.mockResolvedValue(chain());
+    markEntryUnknown(SLAB, 0, WALLET);
+    clearEntryPrice(SLAB, 0, WALLET); // a later add / reduce on the position clears the record, not the marker
+    expect(await syncChainEntry(conn, target())).toBe("skipped");
+    expect(h.entryFromChain).not.toHaveBeenCalled();
+    expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+  });
+  it("a real measured save replaces the marker (the next trade's own entry), so later rebuilds are possible again", () => {
+    markEntryUnknown(SLAB, 0, WALLET);
+    saveEntryPrice(SLAB, 0, 100_000_000n, 2, WALLET, T);
+    expect(localStorage.getItem(`perc:entry-unknown:${SLAB}:0:${WALLET}`)).toBeNull();
+  });
+  it("a marker (or a record) written while the chain was being read wins: the chain never overwrites it", async () => {
+    h.entryFromChain.mockImplementation(async () => {
+      markEntryUnknown(SLAB, 0, WALLET); // the ticket marks unknown mid-read
+      return chain();
+    });
+    await syncChainEntry(conn, target());
+    expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+    __resetEntryChainSyncForTests();
+    localStorage.clear();
+    h.entryFromChain.mockImplementation(async () => {
+      saveEntryPrice(SLAB, 0, 95_000_000n, 2, WALLET, 2n * T); // the ticket's own measured save lands mid-read
+      return chain();
+    });
+    await syncChainEntry(conn, target());
+    expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(95_000_000n);
+  });
+});
+
+describe("a trade in flight on the market holds the rebuild", () => {
+  it("held: skipped without any read; after the hold it runs", async () => {
+    h.entryFromChain.mockResolvedValue(chain());
+    holdChainSync(SLAB, 60_000);
+    expect(await syncChainEntry(conn, target())).toBe("skipped");
+    expect(h.entryFromChain).not.toHaveBeenCalled();
+    holdChainSync(SLAB, -1_000_000, 0); // (no effect: holds only extend)
+    __resetEntryChainSyncForTests();
+    expect(await syncChainEntry(conn, target())).toBe("chain");
+  });
+  it("a hold taken while the rebuild was reading stops it from saving", async () => {
+    h.entryFromChain.mockImplementation(async () => {
+      holdChainSync(SLAB, 60_000);
+      return chain();
+    });
+    await syncChainEntry(conn, target());
+    expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+  });
+});
+
+describe("usePortfolio trigger (shouldSyncPosition)", () => {
+  const row = (o: Record<string, unknown> = {}) => ({
+    slabAddress: SLAB, idx: 0, adlKnown: true, effectiveSize: 2n * T, nftWrapped: false, portfolioPk: portfolio,
+    entryPriceSource: "unknown", account: { positionSize: 2n * T }, ...o,
+  });
+  it("an open, readable, self-owned position with no current entry qualifies (unknown or estimated source)", () => {
+    expect(shouldSyncPosition(row(), WALLET)).toBe(true);
+    expect(shouldSyncPosition(row({ entryPriceSource: "derived" }), WALLET)).toBe(true);
+  });
+  it.each([
+    ["a current device entry (cache)", { entryPriceSource: "cache" }],
+    ["a server entry", { entryPriceSource: "server" }],
+    ["an NFT-wrapped position", { nftWrapped: true }],
+    ["an unreadable ADL state", { adlKnown: false }],
+    ["a flat position", { account: { positionSize: 0n } }],
+    ["a zero effective size", { effectiveSize: 0n }],
+    ["no portfolio account", { portfolioPk: null }],
+  ])("not for %s", (_n, o) => {
+    expect(shouldSyncPosition(row(o), WALLET)).toBe(false);
+  });
+  it("not for the ticket's explicit unknown, nor with a trade in flight on the market", () => {
+    markEntryUnknown(SLAB, 0, WALLET);
+    expect(shouldSyncPosition(row(), WALLET)).toBe(false);
+    localStorage.clear();
+    holdChainSync(SLAB, 60_000);
+    expect(shouldSyncPosition(row(), WALLET)).toBe(false);
   });
 });

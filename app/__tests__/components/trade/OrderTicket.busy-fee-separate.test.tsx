@@ -60,7 +60,7 @@ import { modeFixtures } from "../../helpers/v22-fixtures";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { effectivePriceE6, execFillFromLogs } from "@/lib/v22/exec-fill";
 import { OrderTicket } from "@/components/trade/OrderTicket";
-import { getSavedEntry } from "@/lib/entry-price";
+import { getSavedEntry, isEntryMarkedUnknown } from "@/lib/entry-price";
 // Round 10: these pin the fee PARTS (what is added once, never twice); the display margin has its own tests (spread-size-aware).
 vi.stubEnv("NEXT_PUBLIC_FEE_CAP_MARGIN_BPS", "0");
 
@@ -172,5 +172,25 @@ describe("the saved Entry is the fill price, not the fill price plus the busy-si
     // ~23 bps above the booked price (not ~223)
     expect(Number(entry - BOOKED) / Number(BOOKED)).toBeLessThan(0.0025);
     expect(Number(entry - BOOKED) / Number(BOOKED)).toBeGreaterThan(0.0020);
+  });
+
+  it("DECISION 2 (r10): the busy rate CHARGED (205 bps) differs from the quoted one (200): no Entry, and an explicit 'unknown' marker the chain rebuild respects", async () => {
+    mocks.utilBps = 200n;
+    const FILLED = 4_166_666n;
+    const BOOKED = 100_000_000n;
+    const base = decodeMarketEngineView(new Uint8Array(modeFixtures().market))!.tradeFeeBaseBps;
+    const notional = (FILLED * BOOKED) / 1_000_000n;
+    const fee = (notional * (base + 23n + 205n)) / 10_000n;
+    const logs = fillEventLogs(WALLET, new PublicKey(SLAB), [{ flags: 8, requestedQ: FILLED, executedQ: FILLED, priceE6: BOOKED, quotedPriceE6: BOOKED + 230_000n, feeAtoms: fee }]);
+    mocks.change = { beforeQ: 0n, afterQ: FILLED };
+    mocks.getTransaction.mockResolvedValue({ meta: { err: null, logMessages: logs } });
+    withPosition(0n);
+    render(<OrderTicket slabAddress={SLAB} />);
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-confirm")); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(getSavedEntry(SLAB, 0, W)).toBeNull();
+    expect(isEntryMarkedUnknown(SLAB, 0, W)).toBe(true);
   });
 });

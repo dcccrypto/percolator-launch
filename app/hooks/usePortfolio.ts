@@ -53,7 +53,7 @@ import {
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { riskLegFields } from "@/lib/risk-entry";
 import { fundingFields } from "@/lib/funding-flow";
-import { syncChainEntry } from "@/lib/entry-chain-sync";
+import { shouldSyncPosition, syncChainEntry } from "@/lib/entry-chain-sync";
 
 const MAINNET_STATIC_MARKETS = [
   {
@@ -1613,8 +1613,7 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
     let cancelled = false;
     const wallet = publicKey.toBase58();
     for (const p of positions) {
-      if (!isOpenPosition(p) || !p.adlKnown || p.effectiveSize === 0n || p.nftWrapped || !p.portfolioPk) continue;
-      if (p.entryPriceSource === "cache" || p.entryPriceSource === "server") continue;
+      if (!shouldSyncPosition(p, wallet) || !p.portfolioPk) continue;
       void syncChainEntry(connection, { slab: p.slabAddress, idx: p.idx, wallet, portfolio: p.portfolioPk, wrapper: p.market.programId, qNow: p.effectiveSize }).then((v) => {
         if (v === "chain" && !cancelled) {
           forceNextLoad.current = true;

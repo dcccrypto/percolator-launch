@@ -88,8 +88,40 @@ export function saveEntryPrice(
       timestamp: Date.now(),
     };
     localStorage.setItem(key(slab, accountIdx, wallet), JSON.stringify(record));
+    // A real save (this device's own measured fill, a fresh open, a chain rebuild) replaces an "unknown" marker.
+    localStorage.removeItem(unknownKey(slab, accountIdx, wallet));
   } catch {
     // localStorage may be unavailable (SSR, private browsing)
+  }
+}
+
+/**
+ * r10 owner decision 2 (r9 "unknown"): the explicit "this position's Entry is UNKNOWN" marker. The ticket writes it when the fill could not be
+ * priced honestly (the busy rate charged differs from the quoted one, or a raised-fee Custom order), so no later source may fill a number in:
+ * the chain rebuild (lib/entry-chain-sync.ts) never runs for a marked position and never overwrites it. It outlives the `clearEntryPrice` calls
+ * of later trades on the position; a real measured save, or a fresh open from flat on this device, replaces it.
+ */
+const UNKNOWN_PREFIX = "perc:entry-unknown:";
+const unknownKey = (slab: string, accountIdx: number, wallet?: string): string => `${UNKNOWN_PREFIX}${slab}:${accountIdx}${wallet ? `:${wallet}` : ""}`;
+export function markEntryUnknown(slab: string, accountIdx: number, wallet?: string): void {
+  try {
+    localStorage.setItem(unknownKey(slab, accountIdx, wallet), String(Date.now()));
+  } catch {
+    // ignore
+  }
+}
+export function isEntryMarkedUnknown(slab: string, accountIdx: number, wallet?: string): boolean {
+  try {
+    return localStorage.getItem(unknownKey(slab, accountIdx, wallet)) !== null;
+  } catch {
+    return false;
+  }
+}
+export function clearEntryUnknownMark(slab: string, accountIdx: number, wallet?: string): void {
+  try {
+    localStorage.removeItem(unknownKey(slab, accountIdx, wallet));
+  } catch {
+    // ignore
   }
 }
 
