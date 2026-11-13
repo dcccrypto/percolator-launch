@@ -19,5 +19,8 @@ export interface EarnV22Context {
   oiShortQ: bigint;
   /** |LP_eff| in engine Q (0 when unknown). */
   lpEffAbsQ: bigint;
+  /** Vault-LP state `senior_drawn_atoms` (cumulative) / `senior_draw_outstanding_atoms`; null when unread. GH#571 bond quotes. */
+  seniorDrawnAtoms: bigint | null;
+  seniorDrawOutstandingAtoms: bigint;
   onDone?: () => void;
 }

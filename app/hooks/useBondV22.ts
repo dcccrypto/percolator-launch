@@ -55,7 +55,16 @@ export function useBondV22(ctx: EarnV22Context | null) {
   }, [enabled, key]);
 
   const readings: BondReadings | null = ctx?.view
-    ? { vaultValue: ctx.view.vaultValue, seniorClaimEff: ctx.view.seniorClaimEff, oiLongQ: ctx.oiLongQ, oiShortQ: ctx.oiShortQ, lpEffAbsQ: ctx.lpEffAbsQ }
+    ? {
+        vaultValue: ctx.view.vaultValue,
+        seniorClaimEff: ctx.view.seniorClaimEff,
+        nowSlot: slot ?? null,
+        seniorDrawnAtoms: ctx.seniorDrawnAtoms,
+        seniorDrawOutstandingAtoms: ctx.seniorDrawOutstandingAtoms,
+        oiLongQ: ctx.oiLongQ,
+        oiShortQ: ctx.oiShortQ,
+        lpEffAbsQ: ctx.lpEffAbsQ,
+      }
     : null;
   const state = bond ? bondCardState({ tranche: bond.tranche, position: bond.position, nowSlot: slot ?? 0n, readings }) : null;
 
