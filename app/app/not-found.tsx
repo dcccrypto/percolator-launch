@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef } from "react";
-import gsap from "gsap";
+import { withGsap } from "@/lib/gsap-lazy";
 
 export default function NotFound() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -13,10 +13,14 @@ export default function NotFound() {
       containerRef.current.style.opacity = "1";
       return;
     }
-    gsap.fromTo(
-      containerRef.current,
-      { opacity: 0, y: 20 },
-      { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }
+    const el = containerRef.current;
+    return withGsap(
+      (gsap) => {
+        gsap.fromTo(el, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" });
+      },
+      () => {
+        el.style.opacity = "1";
+      },
     );
   }, []);
 
