@@ -25,6 +25,7 @@ import { getConfig } from "@/lib/config";
 import { invalidateWalletBalance } from "@/lib/wallet-balance-invalidation";
 import { keepAppMessage, plainMessage } from "@/lib/limits/user-message";
 import { shortRateLimitMessage } from "@/lib/faucet-429";
+import { usePortfolio, isOpenPosition } from "@/hooks/usePortfolio";
 
 export type FaucetStep = "idle" | "sol" | "usdc" | "deposit" | "done" | "error";
 
@@ -275,7 +276,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
   // Council GO1106-UX nit (Trader): "The Fund Your Account modal pops on every trade page and on /portfolio for a
   // wallet that already holds ~495 USDC and has market accounts." It reopened below 1,000 USDC, so any wallet that had
   // deposited part of its 10,000 faucet grant was nagged. It now opens only when the wallet can't fund a trade.
-  const shouldShow =
+  const wantsFunding =
     isDevnet &&
     connected &&
     !!publicKey &&
@@ -283,6 +284,21 @@ export function useDevnetFaucet(): DevnetFaucetState {
     checked &&
     solBalance !== null &&
     (fundedHere || solBalance < 0.05 || (usdcBalance !== null && usdcBalance < FUND_MODAL_NAG_USDC));
+
+  // R10: the modal must never open over a wallet's open position: it covered the dock Close button and
+  // swallowed its clicks (it reopened on every page load while wallet USDC stayed low). The scan is the
+  // shared portfolio scan (every market, every program), and only runs once the modal would otherwise show.
+  // Not yet read, or failed: unknown, so it stays closed. A new wallet has no position, so it still opens.
+  const portfolio = usePortfolio(wantsFunding);
+  const [portfolioArmed, setPortfolioArmed] = useState(false);
+  useEffect(() => {
+    // Runs after usePortfolio's own effect, in the same batch: the first render after `wantsFunding`
+    // flips has not started the scan yet and must not read as "no positions".
+    setPortfolioArmed(wantsFunding);
+  }, [wantsFunding]);
+  const positionsKnown = wantsFunding && portfolioArmed && !portfolio.loading && portfolio.error === null;
+  const hasOpenPosition = portfolio.positions.some(isOpenPosition);
+  const shouldShow = wantsFunding && positionsKnown && !hasOpenPosition;
 
   const dismiss = useCallback(() => {
     setDismissed(true);

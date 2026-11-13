@@ -29,7 +29,7 @@ import type { StakeWithdrawCapView } from "@/lib/v22/stake-pool-value";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
-import { checkDepositAmount, depositAmountMessage } from "@/lib/deposit-guard";
+import { checkDepositAmount, depositAmountMessage, depositInputMessage } from "@/lib/deposit-guard";
 import { orderStakePools, stakedOrderValue } from "@/lib/stake-pool-order";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
@@ -799,6 +799,8 @@ function DepositWidget({
   }
   const depositStatus = depositRaw === null ? "empty" : checkDepositAmount(depositRaw, walletBalanceRaw);
   const depositAmountError = depositAmountMessage(depositStatus, walletBalanceRaw, balanceDecimals, "USDC");
+  // A box value the deposit can't use ("1e3", "1,5", too many decimals) used to leave the button dead with no reason.
+  const depositInputError = depositInputMessage(amount, balanceDecimals);
   const withdrawAmountNum = parseFloat(withdrawAmount) || 0;
   // handleWithdraw refuses more than the staked balance; say so here instead of a button that does nothing.
   // Never throws (extra decimals would make parseHumanAmount throw mid-render).
@@ -1075,13 +1077,13 @@ function DepositWidget({
               <div className="flex gap-2">
                 <input
                   id={`${fieldId}-deposit`}
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
                   data-testid="stake-deposit-input"
                   value={amount}
                   onChange={(e) => { setAmount(e.target.value); setTxStatus(null); }}
                   placeholder="0.00"
-                  min="0"
-                  step="any"
                   className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums"
                   style={{ fontFamily: "var(--font-mono)" }}
                 />
@@ -1117,6 +1119,11 @@ function DepositWidget({
               )}
             </div>
 
+            {depositInputError && (
+              <p role="alert" data-testid="stake-deposit-input-error" className="text-[11px] text-[var(--short)]">
+                {depositInputError}
+              </p>
+            )}
             {depositStatus === "exceeds" && (
               <p role="alert" data-testid="stake-deposit-amount-error" className="text-[11px] text-[var(--short)]">
                 {depositAmountError}
@@ -1171,10 +1178,10 @@ function DepositWidget({
             ) : (
               <button
                 data-testid="stake-deposit-submit"
-                disabled={amountNum <= 0 || depositLoading || depositStatus === "exceeds"}
+                disabled={amountNum <= 0 || depositLoading || depositStatus === "exceeds" || depositInputError !== null || depositStatus === "empty"}
                 onClick={handleDeposit}
                 className={`w-full rounded-sm py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
-                  amountNum > 0 && !depositLoading && depositStatus !== "exceeds"
+                  amountNum > 0 && !depositLoading && depositStatus !== "exceeds" && depositInputError === null && depositStatus !== "empty"
                     ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent-text)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
                     : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
                 }`}
@@ -1384,6 +1391,9 @@ function PoolRow({
       {/* Pool / market — symbol links to the market's chart; the rest of the row selects the pool to stake */}
       <div className="flex min-w-0 items-center gap-2">
         <MarketLogo mainnetCa={pool.mainnetCa} logoUrl={pool.logoUrl} symbol={pool.symbol} pixelOverride={22} decorative />
+        {/* Below md the name and its notes stack, so a note ("Deployed to insurance: $0.00") can't push the name out and
+            run over the TVL cell; from md up they sit on one line as before. */}
+        <div data-testid="pool-name-cell" className="flex min-w-0 flex-1 flex-col md:flex-row md:items-center md:gap-2">
         <Link
           href={`/trade/${pool.slabAddress}`}
           onClick={(e) => e.stopPropagation()}
@@ -1393,13 +1403,14 @@ function PoolRow({
           {pool.symbol}
         </Link>
         {pool.stakeKind === "first-loss" && (
-          <span className="shrink-0 text-[10px] text-[var(--text-dim)]" data-testid="pool-deployed" title={V22_COPY.stake.insuranceStaking}>
+          <span className="min-w-0 break-words text-[10px] leading-tight text-[var(--text-dim)] md:shrink-0" data-testid="pool-deployed" title={V22_COPY.stake.insuranceStaking}>
             {pool.deployedValue === null || pool.deployedValue === undefined ? V22_COPY.stake.deployedUnknown : V22_COPY.stake.deployed(formatUsd(pool.deployedValue))}
           </span>
         )}
         {(pool.unclaimedValue ?? 0) > 0 && (
-          <span className="shrink-0 text-[10px] text-[var(--text-dim)]" data-testid="pool-unclaimed">{V22_COPY.stake.unclaimed(formatUsd(pool.unclaimedValue as number))}</span>
+          <span className="min-w-0 break-words text-[10px] leading-tight text-[var(--text-dim)] md:shrink-0" data-testid="pool-unclaimed">{V22_COPY.stake.unclaimed(formatUsd(pool.unclaimedValue as number))}</span>
         )}
+        </div>
       </div>
 
       {/* Clicks bubble to the row's onClick. */}

@@ -14,6 +14,9 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 }));
 vi.mock("@/hooks/usePortfolio", async (orig) => ({ ...(await orig<object>()), usePortfolio: () => state.portfolio }));
 
+const lpState = vi.hoisted(() => ({ lp: { positions: [], totalRedeemable: 0, loading: false, error: null } as Record<string, unknown> }));
+vi.mock("@/hooks/useLpPositions", () => ({ useLpPositions: () => lpState.lp }));
+
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
 
 const portfolio = (over: Record<string, unknown>) => {

@@ -39,6 +39,9 @@ const NONCE_BLOB_PATHNAME = "playground/nonces.json";
  *  first if ever exceeded; well above realistic concurrent playground usage. */
 const MAX_TOTAL_PENDING = 500;
 
+const REGISTRATION_UNAVAILABLE =
+  "Market registration is not available right now. Try again later.";
+
 interface NonceEntry {
   nonce: string;
   deployer: string;
@@ -104,6 +107,15 @@ async function writeStore(entries: NonceEntry[]): Promise<void> {
 export async function createPlaygroundChallenge(
   deployer: string,
 ): Promise<{ nonce: string; expiresAt: Date } | { error: string; status: number }> {
+  // The store is a Vercel Blob. With no credential of either kind (a read-write token, or OIDC + a store id) every
+  // write throws, which used to surface as a bare 500. Say so plainly instead (no env names, no stack). With a
+  // credential present, only a write that actually fails answers 503 (below).
+  const hasBlobCredentials =
+    !!process.env.BLOB_READ_WRITE_TOKEN || (!!process.env.VERCEL_OIDC_TOKEN && !!process.env.BLOB_STORE_ID);
+  if (!hasBlobCredentials) {
+    return { error: REGISTRATION_UNAVAILABLE, status: 503 };
+  }
+
   const existing = pruneExpired(await readStore());
 
   // Per-deployer pending cap
@@ -122,7 +134,15 @@ export async function createPlaygroundChallenge(
     const overflow = next.length - MAX_TOTAL_PENDING;
     next = next.sort((a, b) => a.expiresAt - b.expiresAt).slice(overflow);
   }
-  await writeStore(next);
+  try {
+    await writeStore(next);
+  } catch (err) {
+    console.warn(
+      "[playground-nonce-store] write failed:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return { error: REGISTRATION_UNAVAILABLE, status: 503 };
+  }
   return { nonce, expiresAt };
 }
 

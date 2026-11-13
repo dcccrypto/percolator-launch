@@ -60,6 +60,8 @@ globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
   return json({ error: "not mocked" }, 404);
 }) as typeof fetch;
 
+// The wizard reads the wallet's collateral balance for the seed check (lib/create-seed-check.ts); a funded wallet here.
+vi.mock("@/hooks/useCollateralBalance", () => ({ useCollateralBalance: () => ({ balance: 10n ** 15n, readFailed: false, retry: () => {} }) }));
 vi.mock("@/lib/tokenMeta", async (orig) => ({
   ...(await orig<object>()),
   fetchTokenMeta: vi.fn(async () => {

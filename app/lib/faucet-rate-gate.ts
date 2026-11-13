@@ -146,6 +146,25 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
 }
 
 /**
+ * Read-only: is there an unexpired claim for (wallet, fundType)? Reserves nothing and deletes nothing, so a status
+ * check can never spend the caller's claim. Throws when the table can't be read (the caller says "unknown").
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function peekFaucetGate(supabase: any, wallet: string, fundType: string, windowMs: number = RATE_LIMIT_MS): Promise<{ limited: boolean; nextClaimAt: string | null }> {
+  const windowStart = new Date(Date.now() - windowMs).toISOString();
+  const { data, error } = await supabase
+    .from("faucet_claims")
+    .select("claimed_at")
+    .eq("wallet", wallet)
+    .eq("fund_type", fundType)
+    .gte("claimed_at", windowStart)
+    .maybeSingle();
+  if (error) throw new FaucetGateUnavailableError(`faucet_claims could not be read (${(error as { code?: string }).code ?? "error"})`);
+  if (!data) return { limited: false, nextClaimAt: null };
+  return { limited: true, nextClaimAt: new Date(new Date(data.claimed_at as string).getTime() + windowMs).toISOString() };
+}
+
+/**
  * Release a faucet claim slot (on mint failure so user isn't locked out).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

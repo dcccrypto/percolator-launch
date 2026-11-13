@@ -62,6 +62,7 @@ vi.mock("@/lib/priceStore/priceStore", () => ({
 
 import { StatsBar } from "@/components/dashboard/StatsBar";
 import { PnlChart } from "@/components/dashboard/PnlChart";
+vi.mock("@/hooks/useLpPositions", () => ({ useLpPositions: () => ({ positions: [], totalRedeemable: 0, loading: false, error: null }) }));
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
 import { computeLivePositionPnl } from "@/lib/trading";
 

@@ -171,6 +171,60 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+/**
+ * GET /api/devnet-pre-fund?walletAddress=<pk>&mintAddress=<pk>
+ *
+ * Read-only status for the create wizard: would a launch's top-up (POST) be allowed for this wallet right now, and
+ * would the /faucet claim? Reserves nothing. `known: false` = could not tell (the wizard then says it can't confirm).
+ * Answer: { known, preFund: { available, nextClaimAt }, faucet: { available, nextClaimAt } | null }.
+ */
+export async function GET(req: NextRequest) {
+  if (deploymentNetwork() !== "devnet") {
+    return NextResponse.json({ error: "Only available on devnet" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
+  const wallet = req.nextUrl.searchParams.get("walletAddress") ?? "";
+  const mint = req.nextUrl.searchParams.get("mintAddress") ?? "";
+  try {
+    new PublicKey(wallet);
+    new PublicKey(mint);
+  } catch {
+    return NextResponse.json({ error: "Invalid walletAddress or mintAddress" }, { status: 400 });
+  }
+  const headers = { "Cache-Control": "no-store" };
+  // No mint key configured: the top-up can never run.
+  if (!process.env.DEVNET_MINT_AUTHORITY_KEYPAIR) {
+    return NextResponse.json({ known: true, preFund: { available: false, nextClaimAt: null, reason: "disabled" }, faucet: null }, { headers });
+  }
+  const preFundType = `devnet-pre-fund:${mint}`;
+  try {
+    let preFund: { limited: boolean; nextClaimAt: string | null };
+    let faucet: { limited: boolean; nextClaimAt: string | null } | null = null;
+    try {
+      const sbMod = await import("@/lib/supabase");
+      const gateMod = await import("@/lib/faucet-rate-gate");
+      const sb = sbMod.getServiceClient();
+      preFund = await gateMod.peekFaucetGate(sb, wallet, preFundType, PREFUND_WINDOW_MS);
+      try {
+        faucet = await gateMod.peekFaucetGate(sb, wallet, "usdc");
+      } catch {
+        faucet = null; // the /faucet claim's state is unknown: the wizard does not hide its link for that
+      }
+    } catch {
+      preFund = await peekClaim(`${wallet}:${preFundType}`);
+    }
+    return NextResponse.json(
+      {
+        known: true,
+        preFund: { available: !preFund.limited, nextClaimAt: preFund.nextClaimAt },
+        faucet: faucet ? { available: !faucet.limited, nextClaimAt: faucet.nextClaimAt } : null,
+      },
+      { headers },
+    );
+  } catch {
+    return NextResponse.json({ known: false }, { status: 200, headers });
+  }
+}
+
 export async function POST(req: NextRequest) {
   let releaseFallbackClaimOnError: (() => Promise<void>) | null = null;
   /**
