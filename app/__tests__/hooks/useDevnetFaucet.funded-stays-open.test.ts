@@ -47,6 +47,7 @@ vi.mock("@solana/spl-token", async (orig) => ({
   ...(await orig<typeof import("@solana/spl-token")>()),
   getAssociatedTokenAddressSync: (_mint: unknown, owner: unknown) => owner,
 }));
+vi.mock("@/hooks/usePortfolio", async () => await import("./helpers/portfolio-mock"));
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({ testUsdcMint: "DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs" }),
 }));

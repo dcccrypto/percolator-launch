@@ -29,6 +29,7 @@ vi.mock("@/hooks/useWalletCompat", () => ({
     },
   }),
 }));
+vi.mock("@/hooks/usePortfolio", async () => await import("./helpers/portfolio-mock"));
 vi.mock("@/lib/config", () => ({ getConfig: () => ({ testUsdcMint: "DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs" }) }));
 
 import { useDevnetFaucet } from "@/hooks/useDevnetFaucet";
