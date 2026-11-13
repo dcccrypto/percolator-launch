@@ -4,6 +4,7 @@
  * lib/funding-flow.ts). The same figure is the close toast, the Portfolio's realised sum and the close dialogs' estimate once closed.
  */
 import { formatTokenAmount } from "@/lib/format";
+import { holdingFeeMayApply } from "@/lib/v22/lot-registry";
 
 /** "+0.12 USDC" / "−0.41 USDC" (real minus sign, so a loss can never read as a gain). */
 export function formatSignedAtoms(delta: bigint, decimals: number, symbol: string): string {
@@ -33,7 +34,8 @@ export function closeResultText(o: {
 // The chain keeps no "net realized" figure (only a crystallized-loss counter that omits the spread), so each close records its
 // measured delta here, per wallet + market. It is a device-local sum of the closes made in this browser: the Portfolio words it so.
 
-const KEY = (wallet: string, slab: string) => `perc:realized:v1:${wallet}:${slab}`;
+// r10: v2 = sums that include funding. v1 sums (before #3817) excluded it and are never read again, so no figure is mislabelled.
+const KEY = (wallet: string, slab: string) => `perc:realized:v2:${wallet}:${slab}`;
 
 function store(): Storage | null {
   try {
@@ -43,10 +45,12 @@ function store(): Storage | null {
   }
 }
 
-const LAST = (wallet: string, slab: string) => `perc:realized-last:v1:${wallet}:${slab}`;
+const LAST = (wallet: string, slab: string) => `perc:realized-last:v2:${wallet}:${slab}`;
 
 export function recordRealized(wallet: string | null | undefined, slab: string, delta: bigint): void {
   if (!wallet) return;
+  // r10 (#3817 MED-1): rent has no counter, so on a market that may charge it the result is unknown: nothing is recorded.
+  if (holdingFeeMayApply(slab)) return;
   try {
     const st = store();
     if (!st) return;

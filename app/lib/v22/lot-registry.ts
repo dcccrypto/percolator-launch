@@ -14,8 +14,11 @@ import { isDevnetV22Enabled } from "./flag";
 // Direct module, not the ./sdk barrel: this registry is on every page (price store, positions bar),
 // and the barrel drags the whole v2.2 SDK port + spl-token into the shared first-load bundle.
 import { lotExpOfMarketV22 } from "./sdk/v22-lot";
+import { decodeBandConfigV22 } from "./sdk/v22-band";
 
 const known = new Map<string, number>();
+/** r10: slab -> the market charges a holding fee (`rent_max_e9_per_slot != 0`). Read from the same market bytes as the exponent. */
+const holdingFee = new Map<string, boolean>();
 const listeners = new Set<(slab: string, lotExp: number) => void>();
 const inflight = new Map<string, number>(); // slab -> last attempt ms
 let loader: ((slab: string) => Promise<number | null>) | null = null;
@@ -32,6 +35,7 @@ export function __setUnknownLotExpForTest(k: number | null): void {
 /** Test seam. */
 export function __resetLotRegistryForTest(c?: () => number): void {
   known.clear();
+  holdingFee.clear();
   inflight.clear();
   loader = null;
   clock = c ?? (() => Date.now());
@@ -59,6 +63,11 @@ export function observeLotExp(slab: string | null | undefined, raw: Uint8Array |
   if (!slab || !isDevnetV22Enabled()) return;
   const k = lotExpOfStrict(raw);
   if (k === null) return;
+  try {
+    holdingFee.set(slab, decodeBandConfigV22(raw as Uint8Array).rentMaxE9PerSlot !== 0n);
+  } catch {
+    holdingFee.delete(slab); // unreadable config: unknown, never "no holding fee"
+  }
   setKnown(slab, k);
 }
 
@@ -95,4 +104,15 @@ export function ensureLotExp(slab: string): void {
     .catch(() => {
       /* unknown stays unknown; a later subscribe retries after the cooldown */
     });
+}
+
+/**
+ * r10 (#3817 review MED-1): may holding rent have been taken from this trader on `slab`? Rent moves capital to insurance on every settle of a
+ * market with `rent_max != 0` and has no lifetime counter, so a trade result there cannot include it exactly. True = the market charges it;
+ * unknown (flag on, market bytes not seen yet) also answers true (never a guess toward "none"). Flag off (no v2.2 markets): false.
+ */
+export function holdingFeeMayApply(slab: string | null | undefined): boolean {
+  if (!isDevnetV22Enabled()) return false;
+  if (!slab) return true;
+  return holdingFee.get(slab) !== false;
 }

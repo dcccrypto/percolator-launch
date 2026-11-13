@@ -53,6 +53,7 @@ import { recordFill } from "@/lib/trade-book";
 import { readFundingSample } from "@/lib/funding-flow";
 import { formatLotPriceE6 } from "@/lib/v22/lot";
 import { closeResultText, recordRealized } from "@/lib/realized-pnl";
+import { holdingFeeMayApply } from "@/lib/v22/lot-registry";
 import { PortfolioTargetError, TARGET_COPY, isPortfolioTargetError, verifyPortfolioTarget } from "@/lib/portfolio-target";
 
 /** M-3: the leg is a prior-reset obligation (owns 0 effective quantity). */
@@ -203,7 +204,8 @@ async function measureCloseResult(o: {
     const funding = fill.slot !== undefined ? await readFundingSample(o.connection, fill.taker, fill.slot) : null;
     const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms, funding }, o.onChainQBefore);
     if (result !== null) recordRealized(o.wallet, o.slabAddress, result);
-    return { effectiveE6: effectivePriceE6(fill, o.baseFeeBps), result };
+    // r10 (#3817 MED-1): holding rent has no counter, so on a market that may charge it the result is unknown (recordRealized skips it too).
+    return { effectiveE6: effectivePriceE6(fill, o.baseFeeBps), result: holdingFeeMayApply(o.slabAddress) ? null : result };
   })().catch(() => ({ effectiveE6: null, result: null }));
   let timer: ReturnType<typeof setTimeout> | undefined;
   const budget = new Promise<{ effectiveE6: null; result: null }>((resolve) => {

@@ -34,6 +34,7 @@
  *
  * Pure: no React, no storage, no network. Callers fetch the inputs.
  */
+import { holdingFeeMayApply } from "@/lib/v22/lot-registry";
 import { computeMarkPnl, computePnlPercent } from "@percolatorct/sdk";
 import {
   computeMarkPnlLinear,
@@ -118,6 +119,8 @@ export interface PositionPnlInput {
    */
   fundingNetPaidAtoms?: bigint | null;
   cachedFundingBook?: { fundingBase: bigint | null; q: bigint } | null;
+  /** r10: the market may charge holding rent (lib/v22/lot-registry.ts `holdingFeeMayApply`). Rent has no counter, so the net then excludes it. */
+  holdingFeeMayApply?: boolean;
 }
 
 export interface PositionPnl {
@@ -150,6 +153,8 @@ export interface PositionPnl {
    * be read, several legs): callers say "excl. funding" rather than treat it as zero.
    */
   fundingPaidAtoms?: bigint | null;
+  /** r10: the market may charge holding rent that no figure here includes: the close net is tagged "excl. holding fee" and is never green. */
+  holdingFeeExcluded?: boolean;
   /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed (needs a RECORDED entry: server or cache). */
   pnlKnown: boolean;
   /**
@@ -311,6 +316,7 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     riskEntry,
     riskEntrySettled: settledEntry !== null,
     busyFeePaidAtoms: resolved.source === "cache" && cacheCurrent ? input.cachedBusyFeeAtoms ?? null : null,
+    holdingFeeExcluded: input.holdingFeeMayApply === true,
     fundingPaidAtoms:
       effectiveSize !== null && effectiveSize !== 0n && !resetObligation && input.activeLegCount === 1 && input.cachedFundingBook != null && input.cachedFundingBook.q === effectiveSize
         ? fundingPaidSoFar(input.cachedFundingBook.fundingBase, input.fundingNetPaidAtoms, pendingFundingPaidAtoms(adlFactors?.settle, input.riskLeg, basisQ, aBasis))
@@ -452,6 +458,7 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
     cachedRiskEntryE6: cachedLive.riskEntryE6,
     cachedBusyFeeAtoms: cachedLive.busyFeeAtoms,
     cachedEntryCheck: cachedLive.check,
+    holdingFeeMayApply: holdingFeeMayApply(pos.slabAddress),
     fundingNetPaidAtoms: fundingNetOf(pos.account),
     cachedFundingBook: (() => {
       const b = pos.entryCacheWallet && pos.slabAddress !== undefined ? loadBookByWallet(pos.entryCacheWallet, pos.slabAddress) : null;
@@ -511,6 +518,7 @@ export function terminalPositionPnl(args: {
     serverEntryE6: known.serverEntryE6,
     cachedEntryE6: onChainEntry > 0n ? onChainEntry : known.cachedEntryE6,
     ...(onChainEntry > 0n ? {} : { cachedRiskEntryE6: known.cachedRiskEntryE6, cachedBusyFeeAtoms: known.cachedBusyFeeAtoms, cachedEntryCheck: known.cachedEntryCheck }),
+    holdingFeeMayApply: holdingFeeMayApply(args.slabAddress),
     fundingNetPaidAtoms: fundingNetOf(account),
     cachedFundingBook: known.cachedFundingBook,
     onChainPnl: account.pnl,

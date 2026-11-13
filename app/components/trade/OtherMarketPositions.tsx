@@ -114,6 +114,7 @@ export const CloseFlow: FC<{
       riskEntryPrice={closePnl.pnlKnown ? closePnl.riskEntry : 0n}
       busyOpenFeeAtoms={closePnl.busyFeePaidAtoms ?? null}
       fundingPaidAtoms={closePnl.fundingPaidAtoms ?? null}
+      holdingFeeExcluded={closePnl.holdingFeeExcluded}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}
       symbol={symbol}
