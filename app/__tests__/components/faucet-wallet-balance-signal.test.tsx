@@ -10,6 +10,8 @@ import { PublicKey } from "@solana/web3.js";
 const h = vi.hoisted(() => ({ invalidate: vi.fn() }));
 const WALLET = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 
+// The faucet hook reads the portfolio for its open-position gate; this test builds a new connection every render, which the real scan would reload forever.
+vi.mock("@/hooks/usePortfolio", async () => await import("../hooks/helpers/portfolio-mock"));
 vi.mock("@/lib/wallet-balance-invalidation", () => ({ invalidateWalletBalance: h.invalidate }));
 vi.mock("@/lib/config", () => ({
   getNetwork: () => "devnet",

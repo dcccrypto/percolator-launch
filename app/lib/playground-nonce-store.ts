@@ -107,9 +107,12 @@ async function writeStore(entries: NonceEntry[]): Promise<void> {
 export async function createPlaygroundChallenge(
   deployer: string,
 ): Promise<{ nonce: string; expiresAt: Date } | { error: string; status: number }> {
-  // The store is a Vercel Blob. Without its token every write throws, which used
-  // to surface as a bare 500. Say so plainly instead (no env names, no stack).
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  // The store is a Vercel Blob. With no credential of either kind (a read-write token, or OIDC + a store id) every
+  // write throws, which used to surface as a bare 500. Say so plainly instead (no env names, no stack). With a
+  // credential present, only a write that actually fails answers 503 (below).
+  const hasBlobCredentials =
+    !!process.env.BLOB_READ_WRITE_TOKEN || (!!process.env.VERCEL_OIDC_TOKEN && !!process.env.BLOB_STORE_ID);
+  if (!hasBlobCredentials) {
     return { error: REGISTRATION_UNAVAILABLE, status: 503 };
   }
 

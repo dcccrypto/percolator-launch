@@ -16,7 +16,8 @@ vi.mock("@vercel/blob", () => ({
 }));
 
 const DEPLOYER = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
-const saved = process.env.BLOB_READ_WRITE_TOKEN;
+const KEYS = ["BLOB_READ_WRITE_TOKEN", "VERCEL_OIDC_TOKEN", "BLOB_STORE_ID"] as const;
+const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
 
 async function call(ip: string) {
   vi.resetModules();
@@ -36,12 +37,14 @@ describe("GET /api/markets/challenge when the store is unavailable", () => {
     putMock.mockResolvedValue({});
   });
   afterEach(() => {
-    if (saved === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
-    else process.env.BLOB_READ_WRITE_TOKEN = saved;
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
   });
 
   it("returns a 503 JSON reason (no stack, no env names) when the Blob token is missing", async () => {
-    delete process.env.BLOB_READ_WRITE_TOKEN;
+    for (const k of KEYS) delete process.env[k];
     const res = await call("1.1.1.1, 30.0.0.1");
     expect(res.status).toBe(503);
     const body = await res.json();
@@ -57,6 +60,15 @@ describe("GET /api/markets/challenge when the store is unavailable", () => {
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(JSON.stringify(body)).not.toMatch(/secret internal detail/);
+  });
+
+  it("OIDC credentials (no read-write token) are a credential: the write runs and a nonce comes back", async () => {
+    for (const k of KEYS) delete process.env[k];
+    process.env.VERCEL_OIDC_TOKEN = "oidc";
+    process.env.BLOB_STORE_ID = "store_1";
+    const res = await call("1.1.1.1, 30.0.0.4");
+    expect(res.status).toBe(200);
+    expect(putMock).toHaveBeenCalled();
   });
 
   it("returns a nonce when the store works", async () => {
