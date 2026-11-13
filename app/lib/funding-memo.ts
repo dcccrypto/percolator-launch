@@ -133,3 +133,16 @@ export function noteMemoBase(sig: string, base: bigint): void {
 export function memoBaseFor(sig: string | null | undefined): bigint | null {
   return sig ? memoBases.get(sig) ?? null : null;
 }
+
+/**
+ * The trading device's book entry for a landed fill (OrderTicket): the measured funding after it, and, for an open from flat, the funding base
+ * this device wrote into the open's memo, so its own book holds the same number every other device rebuilds from chain.
+ */
+export function ticketFillIn(
+  f: { executedQ: bigint; bookedPriceE6: bigint; feeAtoms: bigint },
+  fundingAfter: FundingSample | null | undefined,
+  beforeQ: bigint,
+  sig: string | null | undefined,
+): { q: bigint; bookedPriceE6: bigint; feeAtoms: bigint; funding: FundingSample | null; fundingBefore: bigint | null } {
+  return { q: f.executedQ, bookedPriceE6: f.bookedPriceE6, feeAtoms: f.feeAtoms, funding: fundingAfter ?? null, fundingBefore: beforeQ === 0n ? memoBaseFor(sig) : null };
+}

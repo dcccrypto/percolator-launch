@@ -15,7 +15,7 @@ import "@testing-library/jest-dom";
 import { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { fillEventLogs } from "../helpers/fill-event-fixture";
 import { bookFromDeltas, entryFromChain, loadDeltas, storeDeltas, txNamesProgram, type ChainDelta } from "@/lib/entry-chain";
-import { MEMO_PROGRAM_ID, fundingBaseFromTx, fundingMemoIx, legacyTxSize, memoBaseFor, memoIfFits, newPortfolioFundingMemoIx, openFundingMemoIx, sendWithFundingMemo } from "@/lib/funding-memo";
+import { MEMO_PROGRAM_ID, fundingBaseFromTx, fundingMemoIx, legacyTxSize, memoBaseFor, memoIfFits, noteMemoBase, ticketFillIn, newPortfolioFundingMemoIx, openFundingMemoIx, sendWithFundingMemo } from "@/lib/funding-memo";
 import { applyFill, loadBook, loadBookByWallet, recordFill, saveBook } from "@/lib/trade-book";
 import { computePositionPnl } from "@/lib/position-pnl";
 import { keepEntryAfterReduce, getSavedEntry, markEntryUnknown, saveEntryPrice } from "@/lib/entry-price";
@@ -117,6 +117,18 @@ describe("D1: the funding memo on the opening fill", () => {
     await sendWithFundingMemo(small, memo, async (ixs) => { sent.push(ixs.length); if (ixs.length === 2) throw new Error("Transaction too large: 1300 > 1232"); return "sig2"; });
     expect(sent).toEqual([2, 1]);
     await expect(sendWithFundingMemo(small, memo, async () => { throw new Error("custom program error: 0x9"); })).rejects.toThrow("0x9");
+  });
+});
+
+describe("D1: the trading device's own book entry", () => {
+  it("an open from flat takes the base this device wrote into the memo; any other fill does not", () => {
+    noteMemoBase("sigTicket", 415_917n);
+    const f = { executedQ: 2n * T, bookedPriceE6: 80_000_000n, feeAtoms: 9n };
+    expect(ticketFillIn(f, null, 0n, "sigTicket")).toEqual({ q: 2n * T, bookedPriceE6: 80_000_000n, feeAtoms: 9n, funding: null, fundingBefore: 415_917n });
+    expect(ticketFillIn(f, null, T, "sigTicket").fundingBefore).toBeNull(); // an add
+    expect(ticketFillIn(f, null, 0n, "otherSig").fundingBefore).toBeNull(); // no memo was written
+    // the book then carries that base even when the post-fill read failed
+    expect(applyFill(null, ticketFillIn(f, null, 0n, "sigTicket")).book?.fundingBase).toBe(415_917n);
   });
 });
 
@@ -271,6 +283,10 @@ describe("D6: Entry on a second device for ordinary holds", () => {
     txs.spam = { logs: [...CRANK.logs, "Log truncated"] };
     expect((await walk(conn(txs, () => ["spam", "open"]).c, OPEN)).verdict).toBe("unreadable");
     expect(txNamesProgram({ transaction: { message: { staticAccountKeys: [] } }, meta: { loadedAddresses: { writable: [], readonly: [W] } } }, WRAPPER)).toBe(true);
+    // a wrapper-free transaction with NO logs at all (unreadable if parsed) is skipped too
+    txs.spam = { logs: [], wrapperFree: true };
+    expect((await walk(conn(txs, () => ["spam", "open"]).c, OPEN)).verdict).toBe("chain");
+    expect(txNamesProgram({ transaction: { message: { staticAccountKeys: [] } }, meta: { loadedAddresses: { writable: [], readonly: [] } } }, WRAPPER)).toBe(false);
   });
 
   it("past the read budget it is still honest: incomplete, nothing guessed", async () => {
