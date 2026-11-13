@@ -386,3 +386,45 @@ describe("delta review MED-A: the fund-and-trade path (no account yet) is flagge
     expect(mocks.fund.mock.calls[0][0]).toMatchObject({ confirmedFeeCap: true, busyGuard: { confirmedBusyFeeBps: 200n, direction: "long" } });
   });
 });
+
+describe("owner decision 3 (round 10): the busy-side fee check fails closed, and the trader sees why", () => {
+  // The hook is mocked here, so its send step is modelled the way lib/tx.ts runs it: the REAL assertBusyFeeNotRisen on the guard the ticket
+  // handed over, THEN the wallet. A read that cannot be made must stop the order before `wallet.sign` is ever called.
+  const NOTHING_SIGNED = "We couldn't check the busy-side fee right now, so we didn't send your order. Nothing was signed. Try again in a moment.";
+  async function sendBehindGuard(wallet: ReturnType<typeof vi.fn>, read: () => Promise<bigint | null>) {
+    const { assertBusyFeeNotRisen } = await import("@/lib/v22/fresh-busy-fee");
+    return async (p: { busyGuard?: import("@/lib/v22/fresh-busy-fee").BusyGuard }) => { await assertBusyFeeNotRisen(p.busyGuard, read); wallet(); return SIG; };
+  }
+  it("trade path: an unreadable busy-side fee shows the plain message and the wallet is never asked to sign", async () => {
+    mocks.utilBps = 46n;
+    const wallet = vi.fn();
+    mocks.trade.mockImplementation(await sendBehindGuard(wallet, async () => { throw new Error("rpc down"); }));
+    withPosition(0n);
+    render(<OrderTicket slabAddress={SLAB} />);
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    await confirmClick();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(mocks.trade).toHaveBeenCalledTimes(1);
+    expect(mocks.trade.mock.calls[0][0].busyGuard).toBeDefined();
+    expect(wallet).not.toHaveBeenCalled();
+    expect(screen.getByTestId("trade-error").textContent).toContain(NOTHING_SIGNED);
+  });
+  it("fund-and-trade path (no account yet): same message, wallet never called", async () => {
+    mocks.utilBps = 200n;
+    const wallet = vi.fn();
+    mocks.fund.mockImplementation(await sendBehindGuard(wallet, async () => null));
+    mocks.useUserAccount.mockReturnValue(null);
+    mocks.useConnectionCompat.mockReturnValue({ connection: { tag: "conn", getTransaction: mocks.getTransaction, getTokenAccountBalance: vi.fn(async () => ({ value: { amount: "1000000000", decimals: 6 } })), getAccountInfo: vi.fn(async () => null) } });
+    render(<OrderTicket slabAddress={SLAB} />);
+    await act(async () => {});
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("trade-submit")); });
+    await confirmClick();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(mocks.fund).toHaveBeenCalledTimes(1);
+    expect(mocks.fund.mock.calls[0][0].busyGuard).toBeDefined();
+    expect(wallet).not.toHaveBeenCalled();
+    expect(screen.getByTestId("trade-error").textContent).toContain(NOTHING_SIGNED);
+  });
+});

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { busyFeeShareAtoms, confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { FeeChangedAfterReviewError, sendWithConfirmedFeeCap } from "@/lib/limits/trade-fee-resolve";
-import { BusyFeeRoseError, assertBusyFeeNotRisen, readFreshBusyFeeBps } from "@/lib/v22/fresh-busy-fee";
+import { BusyFeeRoseError, BusyFeeUnreadableError, BUSY_FEE_UNREADABLE_MESSAGE, assertBusyFeeNotRisen, readFreshBusyFeeBps } from "@/lib/v22/fresh-busy-fee";
 
 describe("marketMayChargeBusyFee", () => {
   it("growth market (view built, or record present but not readable yet): yes; none / unknown limits / legacy: no", () => {
@@ -76,12 +76,30 @@ describe("assertBusyFeeNotRisen (delta review MED-A)", () => {
     await assertBusyFeeNotRisen(g, async () => 99n);
     await assertBusyFeeNotRisen(g, async () => 0n);
   });
-  it("unreadable (null / throws): proceeds on the chain cap and logs", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await assertBusyFeeNotRisen(g, async () => null);
-    await assertBusyFeeNotRisen(g, async () => { throw new Error("rpc"); });
-    expect(warn).toHaveBeenCalledTimes(2);
-    warn.mockRestore();
+  it("unreadable (null / throws / timeout): FAILS CLOSED with the plain message, after exactly one retry", async () => {
+    for (const bad of [async () => null, async () => { throw new Error("rpc"); }]) {
+      const read = vi.fn(bad);
+      const e = await assertBusyFeeNotRisen(g, read).catch((x) => x as Error);
+      expect(e).toBeInstanceOf(BusyFeeUnreadableError);
+      expect((e as Error).message).toBe(BUSY_FEE_UNREADABLE_MESSAGE);
+      expect((e as Error).message).toContain("Nothing was signed");
+      expect(read).toHaveBeenCalledTimes(2);
+    }
+    vi.useFakeTimers();
+    try {
+      const hang = vi.fn(() => new Promise<bigint | null>(() => {}));
+      const p = assertBusyFeeNotRisen(g, hang).catch((x) => x as Error);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(await p).toBeInstanceOf(BusyFeeUnreadableError);
+      expect(hang).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
+  it("one transient failure then a good read: proceeds (a single retry is enough)", async () => {
+    const read = vi.fn<() => Promise<bigint | null>>().mockRejectedValueOnce(new Error("429")).mockResolvedValueOnce(99n);
+    await assertBusyFeeNotRisen(g, read);
+    expect(read).toHaveBeenCalledTimes(2);
+    const read2 = vi.fn<() => Promise<bigint | null>>().mockResolvedValueOnce(null).mockResolvedValueOnce(100n);
+    await expect(assertBusyFeeNotRisen(g, read2)).rejects.toBeInstanceOf(BusyFeeRoseError);
   });
   it("no guard (no confirm screen): nothing is read", async () => {
     const read = vi.fn(async () => 5n);
@@ -99,6 +117,11 @@ describe("the refusal reaches the trader as a line, not a generic error", () => 
     expect(m.kind).toBe("fee-changed-after-review");
     expect(m.body).toContain("Nothing was");
   });
+  it("BusyFeeUnreadableError resolves to a plain line with a retry action", () => {
+    const m = resolveUserMessage(new BusyFeeUnreadableError(new Error("rpc")), { surface: "trade" });
+    expect(m.kind).toBe("busy-fee-unreadable");
+    expect(m.body).toBe(BUSY_FEE_UNREADABLE_MESSAGE);
+  });
   it("BusyFeeRoseError", () => {
     const m = resolveUserMessage(new BusyFeeRoseError(106n), { surface: "trade" });
     expect(m.kind).toBe("busy-fee-rose");
@@ -110,7 +133,7 @@ describe("readFreshBusyFeeBps never guesses", () => {
   const prog = new PublicKey(new Uint8Array(32).fill(5));
   const mkt = new PublicKey(new Uint8Array(32).fill(6));
   const g = { direction: "long" as const, takerEffQ: 0n, sizeQ: 1_000n };
-  it("an unreadable chain is null (the guard then proceeds)", async () => {
+  it("an unreadable chain is null (the guard then REFUSES the order)", async () => {
     const c = { getAccountInfo: vi.fn(async () => { throw new Error("rpc"); }), getMultipleAccountsInfo: vi.fn(), getSlot: vi.fn() };
     expect(await readFreshBusyFeeBps(c as never, prog, mkt, g)).toBeNull();
     expect(await readFreshBusyFeeBps({ ...c, getAccountInfo: vi.fn(async () => null) } as never, prog, mkt, g)).toBeNull();

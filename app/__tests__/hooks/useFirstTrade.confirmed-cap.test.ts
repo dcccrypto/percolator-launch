@@ -113,7 +113,7 @@ vi.mock("@/lib/tx", async (orig) => ({
 
 import { useFirstTrade } from "@/hooks/useFirstTrade";
 import { FeeChangedAfterReviewError } from "@/lib/limits/trade-fee-resolve";
-import { BusyFeeRoseError } from "@/lib/v22/fresh-busy-fee";
+import { BusyFeeRoseError, BusyFeeUnreadableError } from "@/lib/v22/fresh-busy-fee";
 
 const GUARD = { confirmedBusyFeeBps: 99n, direction: "long" as const, takerEffQ: 0n, sizeQ: 1_000_000n };
 async function run(o: Record<string, unknown>) {
@@ -157,6 +157,13 @@ describe("useFirstTrade: a confirmed order signs the chain cap, never silently r
         await run({ confirmedFeeCap: true, busyGuard: { ...GUARD, confirmedBusyFeeBps: 5_000n } });
         expect(signedFees).toEqual([135n, 135n, 234n, 635n, 700n]);
       });
+      it("r9 LOW-3 (mutation M7): a busyGuard WITHOUT confirmedFeeCap forwards no confirmed busy rate (signs exactly 135) but is still guarded", async () => {
+        sendTx.mockResolvedValue("sigOk");
+        await run({ busyGuard: GUARD });
+        expect(signedFees).toEqual([135n]);
+        expect(fetchTradeFeeBps.mock.calls[0][3]).not.toHaveProperty("confirmedUtilFeeBps");
+        expect(typeof preSign()).toBe("function");
+      });
       it("a 500 bps confirmed busy quote with the rate unchanged lands; a rise above it is refused before the wallet", async () => {
         sendTx.mockResolvedValue("sigOk");
         fresh.mockResolvedValue(500n);
@@ -196,10 +203,29 @@ describe("useFirstTrade: a confirmed order signs the chain cap, never silently r
         fresh.mockResolvedValue(106n);
         await expect(preSign()!()).rejects.toBeInstanceOf(BusyFeeRoseError);
       });
-      it("equal / lower / unreadable: proceeds", async () => {
+      it("equal / lower: proceeds", async () => {
         sendTx.mockResolvedValue("sigOk");
         await run({ confirmedFeeCap: true, busyGuard: GUARD });
-        for (const v of [99n, 10n, null]) { fresh.mockResolvedValue(v); await expect(preSign()!()).resolves.toBeUndefined(); }
+        for (const v of [99n, 10n]) { fresh.mockResolvedValue(v); await expect(preSign()!()).resolves.toBeUndefined(); }
+      });
+      it("owner decision 3: unreadable (null / error) FAILS CLOSED: BusyFeeUnreadableError from the real preSignCheck", async () => {
+        sendTx.mockResolvedValue("sigOk");
+        await run({ confirmedFeeCap: true, busyGuard: GUARD });
+        fresh.mockResolvedValue(null);
+        await expect(preSign()!()).rejects.toBeInstanceOf(BusyFeeUnreadableError);
+        fresh.mockRejectedValue(new Error("rpc down"));
+        await expect(preSign()!()).rejects.toThrow("Nothing was signed. Try again in a moment.");
+      });
+      it("owner decision 3: a confirmed order resolves its fee strictly; the fee terms unreadable => refused, nothing sent", async () => {
+        sendTx.mockResolvedValue("sigOk");
+        await run({ confirmedFeeCap: true, busyGuard: GUARD });
+        expect(fetchTradeFeeBps.mock.calls[0][3]).toMatchObject({ strict: true });
+        sendTx.mockClear();
+        fetchTradeFeeBps.mockRejectedValue(new BusyFeeUnreadableError(new Error("rpc")));
+        const { sig, err } = await run({ confirmedFeeCap: true, busyGuard: GUARD });
+        expect(sig).toBeNull();
+        expect(err).toBeInstanceOf(BusyFeeUnreadableError);
+        expect(sendTx).not.toHaveBeenCalled();
       });
       it("confirmed + 98: one send, no raise (no util-max read), generic line when no busy-side rise is shown", async () => {
         sendTx.mockRejectedValue(refusal(98));

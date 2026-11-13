@@ -182,6 +182,8 @@ export function useFirstTrade(slabAddress: string) {
               fallback: p.feeBps ?? wrapperConfigV17?.tradeFeeBps,
               // Council r9 recheck NEW-1: room for the confirmed busy-side rate (0 = the old cap exactly).
               ...(p.confirmedFeeCap && p.busyGuard ? { confirmedUtilFeeBps: p.busyGuard.confirmedBusyFeeBps } : {}),
+              // Owner decision 3 (round 10): a confirmed order never signs on fee terms it could not read (refused before the wallet).
+              ...(p.busyGuard ? { strict: true, fallbackIncludesBusy: p.feeBps !== undefined } : {}),
             })
           : p.feeBps;
         // Delta review MED-A: after a 98 on a confirmed order, say "busy-side fee rose" only if a fresh read shows it did.

@@ -333,7 +333,8 @@ export function useTrade(slabAddress: string) {
       confirmedFeeCap?: boolean;
       /**
        * Delta review MED-A: the busy-side rate the confirm screen showed. Immediately before the wallet is asked to sign (after any wait), the
-       * busy-side fee for this order is re-read; higher than this refuses with nothing signed. Unreadable: proceeds on the chain cap.
+       * busy-side fee for this order is re-read; higher than this refuses with nothing signed. Unreadable (error, timeout, missing account):
+       * one retry, then it refuses too (fails closed, round 10): nothing is signed. Closes carry no guard (reduce-only: no busy-side fee).
        */
       busyGuard?: BusyGuard;
       /** UX WP-2: called while the app waits for the market (no prompt yet): true / false. */
@@ -572,6 +573,8 @@ export function useTrade(slabAddress: string) {
               fallback: params.feeBps ?? wrapperConfigV17?.tradeFeeBps,
               // Council r9 recheck NEW-1: a confirmed order signs room for the busy-side rate it confirmed (0 = the old cap exactly).
               ...(params.confirmedFeeCap && params.busyGuard ? { confirmedUtilFeeBps: params.busyGuard.confirmedBusyFeeBps } : {}),
+              // Owner decision 3 (round 10): a confirmed order never signs on fee terms it could not read (refused before the wallet).
+              ...(params.busyGuard ? { strict: true, fallbackIncludesBusy: params.feeBps !== undefined } : {}),
             })
           : params.feeBps;
 
