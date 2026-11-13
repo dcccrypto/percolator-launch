@@ -3,7 +3,6 @@
 import { UnsupportedLayoutNotice } from "@/components/v22/UnsupportedLayoutNotice";
 import { use, useState, useEffect, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { MobileTradeBand } from "@/components/trade/MobileTradeBand";
 import { isInsideModalSurface } from "@/hooks/useOtherModalOpen";
 import { lockPageScroll } from "@/hooks/useLockBodyScroll";
 import useSWR from "swr";
@@ -12,14 +11,9 @@ import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { UsdToggleProvider } from "@/components/providers/UsdToggleProvider";
-import { OrderTicket } from "@/components/trade/OrderTicket";
 import { useTicketRow, ticketRowShortLabel } from "@/lib/limits/ticket-status-store";
-import { PositionsDock } from "@/components/trade/PositionsDock";
 import dynamic from "next/dynamic";
 import { selectChartEngine, tvLibraryVersion } from "@/lib/tv/config";
-import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
-import { MarketLimitsStrip } from "@/components/limits/MarketLimitsStrip";
-import { MarketHeaderStatus, TradeMarketHealthBanner } from "@/components/market/MarketHealthBadges";
 import { AnalyticsDock } from "@/components/trade/AnalyticsDock";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -32,7 +26,6 @@ import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
 import { ADMIN_BURN_COPY, creatorAdminBurned } from "@/lib/admin-burn-copy";
-import { MultiAssetNotice } from "@/components/trade/MultiAssetNotice";
 import { ResolvedClaimPanel } from "@/components/trade/ResolvedClaimPanel";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { isMultiAssetMarket } from "@/lib/v22/market-cap";
@@ -126,6 +119,7 @@ const TradingChart = dynamic(
  * supplies the frame, so this just stacks the two with a plain divider.
  */
 function OrderTicketRail({ slab, framed = false }: { slab: string; framed?: boolean }) {
+  const { OrderTicket } = tradeParts();
   // Phase 4: DepositTrigger + AccountRiskSidebar + TradeForm consolidated
   // into the single new OrderTicket (its own "account row" now covers
   // balance/buying-power/deposit; its receipt covers the liq-price preview
@@ -167,6 +161,7 @@ const SHEET_FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function MobileOrderSheet({ slab }: { slab: string }) {
+  const { MobileTradeBand } = tradeParts();
   const [open, setOpen] = useState(false);
   // UX WP-3 (§4.2): the collapsed bar names a blocked ticket ("Trade · Close-only").
   const ticketRow = useTicketRow(slab);
@@ -322,10 +317,48 @@ function MobileOrderSheet({ slab }: { slab: string }) {
 
 /* ── Main inner page ──────────────────────────────────────── */
 
+// Everything below the loading skeleton (ticket, positions dock, market bar, ...) lives in
+// ./trade-view-parts and is fetched on mount, in parallel with the slab read, instead of being in
+// the route's first-load JS. The server HTML and the first client frame are the skeleton either way
+// (`slabLoading && !engine`), so nothing that painted before paints later.
+type TradeParts = typeof import("./trade-view-parts");
+let loadedTradeParts: TradeParts | null = null;
+let tradePartsLoad: Promise<TradeParts> | null = null;
+function loadTradeParts(): Promise<TradeParts> {
+  tradePartsLoad ??= import("./trade-view-parts").then(
+    (m) => (loadedTradeParts = m),
+    (e: unknown) => {
+      tradePartsLoad = null; // a failed chunk load can be retried
+      throw e;
+    },
+  );
+  return tradePartsLoad;
+}
+/** Only called by components that render after `useTradeParts()` returned the module. */
+function tradeParts(): TradeParts {
+  if (!loadedTradeParts) throw new Error("trade view parts not loaded");
+  return loadedTradeParts;
+}
+function useTradeParts(): { parts: TradeParts | null; failed: boolean; retry: () => void } {
+  const [parts, setParts] = useState<TradeParts | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    loadTradeParts().then(
+      (m) => { if (live) setParts(() => m); },
+      () => { if (live) setFailed(true); },
+    );
+    return () => { live = false; };
+  }, [attempt]);
+  return { parts, failed, retry: () => { setFailed(false); setAttempt((n) => n + 1); } };
+}
+
 const MARKET_META_SWR_OPTS = { dedupingInterval: 10_000, refreshInterval: 0, revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false } as const;
 
 function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
+  const { parts: loadedParts, failed: partsFailed, retry: retryParts } = useTradeParts();
 
   const { engine, config, header, raw: slabRaw, loading: slabLoading, error: slabError, layoutUnsupported } = useSlabState();
   const claimWalletConnected = useWalletCompat().publicKey !== null;
@@ -490,6 +523,23 @@ function TradePageInner({ slab }: { slab: string }) {
   // market even during a genuine price outage. `config` is the version-agnostic
   // "market loaded" signal.
   const hasNoPriceData = !slabLoading && !!config && !hasPrice;
+
+  if (!loadedParts) {
+    if (!partsFailed) return <TradingPageLoading />;
+    return (
+      <div className="min-h-[calc(100dvh-48px)] flex flex-col items-center justify-center gap-3 px-4" data-testid="trade-view-load-error">
+        <p className="text-sm text-[var(--text-secondary)]">The trading view did not load.</p>
+        <button
+          type="button"
+          onClick={retryParts}
+          className="border border-[var(--border)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors duration-150"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+  const { MarketInfoBar, MarketHeaderStatus, MultiAssetNotice, TradeMarketHealthBanner, MarketLimitsStrip, PositionsDock } = loadedParts;
 
   // Desktop grid — named areas (dYdX pattern, see file-header comment).
   const gridStyle: CSSProperties = {
