@@ -13,6 +13,7 @@
  * from before the first. Every failure is `null` and never fails a trade.
  */
 import { parsePortfolio } from "@/lib/v22/layout";
+import { fundingSampleOf, type FundingSample } from "@/lib/funding-flow";
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { effectiveLeg } from "@/lib/limits/effective-quantity";
@@ -20,6 +21,8 @@ import { effectiveLeg } from "@/lib/limits/effective-quantity";
 export interface PositionChange {
   beforeQ: bigint;
   afterQ: bigint;
+  /** r10: the portfolio's funding counters in the SAME post-trade read (no extra RPC call); null when not readable. */
+  funding?: FundingSample | null;
 }
 
 /** portfolio -> slot of its last measured trade. Bounded. */
@@ -48,19 +51,38 @@ export async function readEffectivePositionQ(
   market: PublicKey,
   minContextSlot?: number,
 ): Promise<bigint | null> {
+  const r = await readEffectivePosition(connection, portfolio, market, minContextSlot);
+  return r === null ? null : r.q;
+}
+
+/** `readEffectivePositionQ` plus the funding counters of the same portfolio bytes (one RPC call). */
+export async function readEffectivePosition(
+  connection: Connection,
+  portfolio: PublicKey,
+  market: PublicKey,
+  minContextSlot?: number,
+): Promise<{ q: bigint; funding: FundingSample | null } | null> {
   try {
     const [pf, mk] = await connection.getMultipleAccountsInfo([portfolio, market], {
       commitment: "confirmed",
       ...(minContextSlot !== undefined ? { minContextSlot } : {}),
     });
     if (!mk) return null;
-    if (!pf) return 0n;
+    if (!pf) return { q: 0n, funding: null };
     const engine = decodeMarketEngineView(new Uint8Array(mk.data));
     if (!engine) return null;
-    const leg = parsePortfolio(new Uint8Array(pf.data)).legs.find((l) => l.active); // VERSION-aware (v2.2 QA NB-1)
-    if (!leg) return 0n;
+    const parsed = parsePortfolio(new Uint8Array(pf.data)); // VERSION-aware (v2.2 QA NB-1)
+    // A funding read that fails must never cost the size measurement: it only leaves the trade result unknown.
+    let funding: FundingSample | null = null;
+    try {
+      funding = fundingSampleOf(parsed);
+    } catch {
+      funding = null;
+    }
+    const leg = parsed.legs.find((l) => l.active);
+    if (!leg) return { q: 0n, funding };
     const eff = effectiveLeg(engine, leg);
-    return eff.kind === "invalid" ? null : eff.signedQ;
+    return eff.kind === "invalid" ? null : { q: eff.signedQ, funding };
   } catch {
     return null;
   }
@@ -85,8 +107,8 @@ export async function measurePositionChange(
     const slot = st.value[0]?.slot;
     if (slot === undefined || slot === null) return null;
     noteSlot(portfolio.toBase58(), slot);
-    const afterQ = await readEffectivePositionQ(connection, portfolio, market, slot);
-    return afterQ === null ? null : { beforeQ, afterQ };
+    const after = await readEffectivePosition(connection, portfolio, market, slot);
+    return after === null ? null : { beforeQ, afterQ: after.q, funding: after.funding };
   } catch {
     return null;
   }

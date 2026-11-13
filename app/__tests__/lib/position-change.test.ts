@@ -14,8 +14,9 @@ import { PublicKey } from "@solana/web3.js";
 const h = vi.hoisted(() => ({
   engine: null as unknown,
   legs: [] as unknown[],
+  funding: null as null | Record<string, bigint>,
 }));
-vi.mock("@percolatorct/sdk", () => ({ parsePortfolioV17: () => ({ legs: h.legs }) }));
+vi.mock("@percolatorct/sdk", () => ({ parsePortfolioV17: () => ({ legs: h.legs, ...(h.funding ?? {}) }) }));
 vi.mock("@/lib/limits/decode", () => ({ decodeMarketEngineView: () => h.engine }));
 
 import {
@@ -51,6 +52,7 @@ type C = Parameters<typeof readEffectivePositionQ>[0];
 beforeEach(() => {
   h.engine = sides();
   h.legs = [];
+  h.funding = null;
 });
 
 describe("readEffectivePositionQ", () => {
@@ -94,7 +96,7 @@ describe("measurePositionChange + pinning", () => {
   it("reads after at the trade's own slot, and pins the NEXT before-read past it", async () => {
     h.legs = [leg(0, 80n)];
     const c = conn({ slot: 777 });
-    expect(await measurePositionChange(c as unknown as C, PF, MK, "sigA", 40n)).toEqual({ beforeQ: 40n, afterQ: 80n });
+    expect(await measurePositionChange(c as unknown as C, PF, MK, "sigA", 40n)).toMatchObject({ beforeQ: 40n, afterQ: 80n });
     expect(c.calls.at(-1)?.minContextSlot).toBe(777);
     // a second trade right after: its pre-trade read can't be served bytes from before slot 777
     const c2 = conn();
@@ -113,7 +115,7 @@ describe("measurePositionChange + pinning", () => {
 describe("recordPositionChange / takePositionChange", () => {
   it("hands the measurement to the caller once", async () => {
     recordPositionChange("sig1", Promise.resolve({ beforeQ: 0n, afterQ: 5n }));
-    expect(await takePositionChange("sig1")).toEqual({ beforeQ: 0n, afterQ: 5n });
+    expect(await takePositionChange("sig1")).toMatchObject({ beforeQ: 0n, afterQ: 5n });
     expect(await takePositionChange("sig1")).toBeNull();
     expect(await takePositionChange(null)).toBeNull();
   });
@@ -123,5 +125,17 @@ describe("recordPositionChange / takePositionChange", () => {
     expect(await takePositionChange("sig2")).toBeNull();
     recordPositionChange("sig3", new Promise(() => {}));
     expect(await takePositionChange("sig3", 10)).toBeNull();
+  });
+});
+
+describe("r10: the post-trade read also carries the funding counters (same RPC call)", () => {
+  it("measurePositionChange returns the sample of the same portfolio bytes; a sample that cannot be built leaves the size measurement intact", async () => {
+    h.legs = [leg(0, 80n)];
+    h.funding = { fundingLongPaidAtomsTotal: 9n, fundingLongReceivedAtomsTotal: 1n, fundingShortPaidAtomsTotal: 0n, fundingShortReceivedAtomsTotal: 0n };
+    const r = await measurePositionChange(conn() as unknown as C, PF, MK, "sigF", 0n);
+    expect(r).toMatchObject({ afterQ: 80n, funding: { netPaid: 8n, legs: 1 } });
+    h.funding = null;
+    const r2 = await measurePositionChange(conn() as unknown as C, PF, MK, "sigF2", 0n);
+    expect(r2).toMatchObject({ afterQ: 80n, funding: null });
   });
 });

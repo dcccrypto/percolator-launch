@@ -26,7 +26,10 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   takeFillResult: vi.fn(),
   getTransaction: vi.fn(),
+  readFundingSample: vi.fn(),
 }));
+
+vi.mock("@/lib/funding-flow", async (orig) => ({ ...(await orig<typeof import("@/lib/funding-flow")>()), readFundingSample: mocks.readFundingSample }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({
   useConnectionCompat: vi.fn(),
@@ -117,7 +120,10 @@ const SOL_PORTFOLIO = new PublicKey("5dsrhZiXunvXcFbCzdJ9Qg5Lv3eX4SGyaBA6NZ3SaoK
 const wallet = new PublicKey("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
 const Q = 223_463n;
 // from the real open: booked 89,535,739, fee 106,043; the real close: booked 89,607,382, fee 102,123
-const EXPECT_RESULT = (Q * (89_607_382n - 89_535_739n)) / 1_000_000n - 106_043n - 102_123n;
+const FUNDING_BASE = 1_000_000n;
+const FUNDING_PAID = 1_234n; // the chain moved 1,234 atoms of funding over the hold
+const PRICE_AND_FEES = (Q * (89_607_382n - 89_535_739n)) / 1_000_000n - 106_043n - 102_123n;
+const EXPECT_RESULT = PRICE_AND_FEES - FUNDING_PAID;
 
 describe("useClosePosition: effective price and lifetime trade result (M7)", () => {
   const openLeg = { active: true, side: 0, aBasis: 1_000_000_000_000_000n, epochSnap: 0n, basisPosQ: Q };
@@ -127,13 +133,15 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     localStorage.clear();
     __setUnknownLotExpForTest(0);
     mocks.takeFillResult.mockReturnValue(undefined);
+    // r10: the funding counters after the closing fill: flat, 1,234 atoms paid over the trade (the book's base is 1,000,000).
+    mocks.readFundingSample.mockResolvedValue({ netPaid: FUNDING_BASE + FUNDING_PAID, legs: 0 });
     mocks.trade.mockResolvedValue("close-sig");
     mocks.withdraw.mockResolvedValue("withdraw-sig");
     mocks.isV17Account.mockReturnValue(true);
     mocks.getLivePriceSnapshot.mockReturnValue({ priceE6: 89_500_000n });
     mocks.getProgramAccounts.mockResolvedValue([{ pubkey: SOL_PORTFOLIO, account: { data: Buffer.alloc(1) } }]);
     mocks.parsePortfolioV17.mockImplementation(() => ({ owner: wallet, capital: 44_140_000n, pnl: 0n, legs: [openLeg] }));
-    mocks.getTransaction.mockResolvedValue({ meta: { err: null, logMessages: closeFx.logMessages } });
+    mocks.getTransaction.mockResolvedValue({ slot: 123, meta: { err: null, logMessages: closeFx.logMessages } });
     vi.mocked(useConnectionCompat).mockReturnValue({
       connection: { getProgramAccounts: mocks.getProgramAccounts, getAccountInfo: async () => ({ data: MARKET_BYTES }), getTransaction: mocks.getTransaction },
     } as unknown as ReturnType<typeof useConnectionCompat>);
@@ -145,7 +153,7 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     } as unknown as ReturnType<typeof useSlabState>);
   });
 
-  const seedOpen = () => saveBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58(), { q: Q, avgE6: 89_535_739n, fees: 106_043n, pnl: 0n });
+  const seedOpen = () => saveBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58(), { q: Q, avgE6: 89_535_739n, fees: 106_043n, pnl: 0n, fundingBase: FUNDING_BASE });
   const effective = () => {
     const f = execFillFromLogs(closeFx.logMessages, SOL_WRAPPER, { market: new PublicKey(SOL_MARKET) })!;
     return formatLotPriceE6(effectivePriceE6(f, decodeMarketEngineView(new Uint8Array(MARKET_BYTES))!.tradeFeeBaseBps), 0);
@@ -158,11 +166,31 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
     expect(call).toContain(`Effective price ${effective()}.`);
     expect(call).not.toContain("$89.607382");
-    expect(call).toContain("Trade result −0.192157 USDC (trading fees, spread and other non-base fees included; funding and maintenance fees not included). Counted from trades made on this device; a trade on another device can make this figure wrong.");
-    expect(EXPECT_RESULT).toBe(-192_157n);
+    expect(call).toContain("Trade result −0.193391 USDC (trading fees, spread, other fees and funding included). Counted from trades made on this device; a trade on another device can make this figure wrong.");
+    expect(PRICE_AND_FEES).toBe(-192_157n);
+    expect(EXPECT_RESULT).toBe(-193_391n); // the old figure minus the funding paid
     expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
     expect(getLastResult(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
     expect(loadBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58())).toBeNull();
+  });
+
+  it("r10: the funding counters could not be read at the close: NO money result is claimed (never one that leaves funding out)", async () => {
+    seedOpen();
+    mocks.readFundingSample.mockResolvedValue(null);
+    const { result } = renderHook(() => useClosePosition(SOL_MARKET));
+    await act(async () => { await result.current.closePosition(100, { skipSweep: true }); });
+    const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
+    expect(call).toContain("Effective price");
+    expect(call).not.toMatch(/Trade result/);
+    expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBeNull();
+  });
+
+  it("r10: a book saved before funding was tracked (no base) claims no result either", async () => {
+    saveBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58(), { q: Q, avgE6: 89_535_739n, fees: 106_043n, pnl: 0n, fundingBase: null });
+    const { result } = renderHook(() => useClosePosition(SOL_MARKET));
+    await act(async () => { await result.current.closePosition(100, { skipSweep: true }); });
+    const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
+    expect(call).not.toMatch(/Trade result/);
   });
 
   it("NEGATIVE: the trade was opened where the app did not see it (no book): the effective price shows, NO money result is claimed", async () => {

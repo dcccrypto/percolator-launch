@@ -1782,7 +1782,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               return;
             }
             const before = change ? change.beforeQ : 0n;
-            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms }, before);
+            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms, funding: change?.funding ?? null }, before);
             if (r !== null) recordRealized(publicKey.toBase58(), slabAddress, r);
           }
         });
@@ -2249,6 +2249,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             entryPriceE6={existingRecordedEntryKnown ? existingEntryPriceE6 : 0n}
             riskEntryPriceE6={existingRecordedEntryKnown ? existingRiskEntryE6 : 0n}
             busyOpenFeeAtoms={existingBusyFeePaidAtoms}
+            fundingPaidAtoms={closeView?.fundingPaidAtoms ?? null}
             capital={capital}
             symbol={baseTicker}
             collateralSymbol={collateralSymbol}

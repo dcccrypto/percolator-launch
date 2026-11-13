@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   useEngineState: vi.fn(),
   trade: vi.fn(),
   refresh: vi.fn(),
-  change: null as null | { beforeQ: bigint; afterQ: bigint },
+  change: null as null | { beforeQ: bigint; afterQ: bigint; funding?: { netPaid: bigint; legs: number } | null },
   getTransaction: vi.fn(),
 }));
 
@@ -152,6 +152,16 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     expect(loadBook(W, SLAB, WALLET.toBase58())).toMatchObject({ q: FILLED, avgE6: BOOKED, fees: FEE });
   });
 
+  it("r10: the funding counter sampled in the post-trade read at the open becomes the book's funding base (null when it was not read)", async () => {
+    withPosition(0n);
+    mocks.change = { beforeQ: 0n, afterQ: FILLED, funding: { netPaid: 4_321n, legs: 1 } };
+    mocks.getTransaction.mockResolvedValue(landed(BOOKED));
+    render(<OrderTicket slabAddress={SLAB} />);
+    await submit("5");
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(loadBook(W, SLAB, WALLET.toBase58())).toMatchObject({ q: FILLED, fundingBase: 4_321n });
+  });
+
   it("NEGATIVE: the fill could not be read: no price is claimed and the mark is NOT saved as the entry", async () => {
     withPosition(0n);
     mocks.change = { beforeQ: 0n, afterQ: FILLED };
@@ -177,7 +187,7 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
   });
 
   it("F3 / probe C: the long on the book was closed on another device, this ticket still RENDERS it (+1), and a short is opened here: the MEASURED size before the trade (0) is used, so no result is fabricated and the new short gets its own book", async () => {
-    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 99_000_000n, fees: 5_000n, pnl: 0n });
+    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 99_000_000n, fees: 5_000n, pnl: 0n, fundingBase: 0n });
     withPosition(FILLED); // stale render-time position
     mocks.change = { beforeQ: 0n, afterQ: -FILLED }; // what the chain actually had
     mocks.getTransaction.mockResolvedValue({
@@ -191,7 +201,7 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
   });
 
   it("probe A: an ADD from existing capital keeps the book (size match), so the later close reports the whole trade", async () => {
-    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 90_000_000n, fees: 5_000n, pnl: 0n });
+    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 90_000_000n, fees: 5_000n, pnl: 0n, fundingBase: 0n });
     withPosition(FILLED, 1_000_000n);
     mocks.change = { beforeQ: FILLED, afterQ: 2n * FILLED };
     mocks.getTransaction.mockResolvedValue(landed(BOOKED));
@@ -202,7 +212,7 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
   });
 
   it("L-3: the size measurement FAILED and the render-time position is not flat (it may be stale): the book is dropped and NO result is claimed, even for a short that would 'close' the old long", async () => {
-    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 99_000_000n, fees: 5_000n, pnl: 0n });
+    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 99_000_000n, fees: 5_000n, pnl: 0n, fundingBase: 0n });
     withPosition(FILLED);
     mocks.change = null; // takePositionChange gave nothing
     mocks.getTransaction.mockResolvedValue({
