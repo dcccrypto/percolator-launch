@@ -76,6 +76,23 @@ export interface TradeBuildRequest {
   maxFeeBps?: bigint;
   /** The owner's portfolio on this market, when the caller knows it: checked (program, owner, market) and the scan is skipped. */
   portfolio?: PublicKey;
+  /**
+   * Caller checks that run once the market, the limit and the owner's position are known and BEFORE anything is simulated
+   * (the bot API's caps: slippage, notional, leverage, reduce-only). Throw to refuse; nothing is built.
+   */
+  preflight?: (p: TradePreflight) => void;
+}
+
+export interface TradePreflight {
+  size: bigint;
+  limitPriceE6: bigint;
+  /** Engine effective price (0 when unreadable). */
+  effectivePriceE6: bigint;
+  /** Signed position on this market before the order (null when unreadable). */
+  positionBeforeQ: bigint | null;
+  reducing: boolean;
+  marketData: Uint8Array;
+  portfolioData: Uint8Array | null;
 }
 
 export interface BuiltTx {
@@ -93,6 +110,9 @@ export interface TradeBuildResult {
    * crank + order in one tx fails 21 (lib/taker-crank.ts). Send it, then ask again for the order.
    */
   resubmitAfter: boolean;
+  /** The blockhash every returned tx carries and the block height after which none of them can land. */
+  blockhash: string;
+  lastValidBlockHeight: number;
   summary: {
     market: string;
     portfolio: string;
@@ -117,6 +137,11 @@ export class TradeBuildRefusal extends Error {
 }
 
 const ZERO = new PublicKey(new Uint8Array(32));
+
+/** Carries a preflight's own error out of buildV22Trade unchanged (every other non-refusal reads as an RPC failure). */
+class PreflightThrow {
+  constructor(readonly inner: unknown) {}
+}
 
 /**
  * The market's LP side, cached per (program, market) like the hook's 60 s trade-account cache: it is a market-wide
@@ -176,6 +201,7 @@ export async function buildV22Trade(connection: Connection, req: TradeBuildReque
     return await buildInner(connection, req);
   } catch (e) {
     if (e instanceof TradeBuildRefusal) throw e;
+    if (e instanceof PreflightThrow) throw e.inner;
     // Anything else is a read that failed (rate limit, timeout, account vanished mid-build). Never a partial result.
     throw new TradeBuildRefusal("rpc", "a market read failed, try again", 503, [], e);
   }
@@ -311,6 +337,21 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     }
   }
   const reducing = isReducingOrder(beforeQ, size, 1);
+  if (req.preflight) {
+    try {
+      req.preflight({
+        size,
+        limitPriceE6,
+        effectivePriceE6: effectiveE6,
+        positionBeforeQ: beforeQ,
+        reducing,
+        marketData: raw,
+        portfolioData: portInfo ? new Uint8Array(portInfo.data) : null,
+      });
+    } catch (e) {
+      throw new PreflightThrow(e);
+    }
+  }
   const prefix: TransactionInstruction[] = [];
   const crankTxIxs: TransactionInstruction[] = [];
   if (hasActiveLegs) {
@@ -322,7 +363,7 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     else if (plan === "separate-tx") crankTxIxs.push(crankIx);
   }
 
-  const [{ blockhash }, priorityFee] = await Promise.all([connection.getLatestBlockhash("confirmed"), getPriorityFee(connection)]);
+  const [{ blockhash, lastValidBlockHeight }, priorityFee] = await Promise.all([connection.getLatestBlockhash("confirmed"), getPriorityFee(connection)]);
   const summary = (): TradeBuildResult["summary"] => ({
     market: slabPk.toBase58(),
     portfolio: accountA.toBase58(),
@@ -346,6 +387,8 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     return {
       transactions: [{ purpose: "crank", transaction: wrap(crankTxIxs, lim, priorityFee, owner, blockhash), computeUnitLimit: lim, unitsConsumed: g.consumed }],
       resubmitAfter: true,
+      blockhash,
+      lastValidBlockHeight,
       summary: summary(),
     };
   }
@@ -425,6 +468,8 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   return {
     transactions: [{ purpose: "order", transaction: wrap(instructions, limit, priorityFee, owner, blockhash), computeUnitLimit: limit, unitsConsumed: sim.consumed }],
     resubmitAfter: false,
+    blockhash,
+    lastValidBlockHeight,
     summary: summary(),
   };
 }
