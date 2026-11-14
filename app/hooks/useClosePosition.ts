@@ -45,13 +45,13 @@ import { readSweepableCapital, SWEEP_COPY } from "@/lib/close-sweep";
 import { useOptionalToast } from "@/hooks/useToast";
 import { formatTokenAmount } from "@/lib/format";
 import { closeLimitFromEngine } from "@/lib/close-limit";
-import { clearEntryPrice, keepEntryAfterReduce } from "@/lib/entry-price";
+import { clearEntryPrice, getSavedEntry, keepEntryAfterReduce } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
 import { holdChainSync, setChainSyncHold } from "@/lib/entry-chain-hold";
 import { prevChangeBeforeFill } from "@/lib/entry-chain-prev";
-import { recordFill } from "@/lib/trade-book";
+import { loadBook, recordFill } from "@/lib/trade-book";
 import { readFundingSample } from "@/lib/funding-flow";
 import { formatLotPriceE6 } from "@/lib/v22/lot";
 import { closeResultText, recordRealized } from "@/lib/realized-pnl";
@@ -206,7 +206,8 @@ async function measureCloseResult(o: {
     if (!fill) return { effectiveE6: null, result: null };
     // Council r10 round 2 MED: the stored book and Entry count only if their newest fill is the position's newest change before this close
     // on chain. A same-size close + reopen on another device keeps the size, so size alone would hand the OLD trade's numbers to this result.
-    const prev = await prevChangeBeforeFill(o.connection, o.programId, { market: new PublicKey(o.slabAddress), portfolio: fill.taker, sig: o.sig });
+    const recordSig = loadBook(o.wallet, o.slabAddress, fill.taker.toBase58())?.lastSig ?? (o.entryIdx != null ? getSavedEntry(o.slabAddress, o.entryIdx, o.wallet)?.lastSig : null) ?? null;
+    const prev = await prevChangeBeforeFill(o.connection, o.programId, { market: new PublicKey(o.slabAddress), portfolio: fill.taker, sig: o.sig, recordSig });
     // Council r10 recheck D6: a partial close keeps the Entry of what is left (a reduce never moves the average). Without this the saved
     // record stayed at the old size and the rest of the position read "unknown entry" on the device that closed it.
     if (o.entryIdx != null) keepEntryAfterReduce(o.slabAddress, o.entryIdx, o.wallet, o.onChainQBefore, o.onChainQBefore + fill.executedQ, o.sig, prev);

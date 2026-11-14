@@ -20,7 +20,8 @@ import { VERIFY_MS, __resetEntryChainSyncForTests, shouldSyncPosition, syncChain
 import { getSavedEntry, saveEntryPrice } from "@/lib/entry-price";
 import { loadBook, loadBookByWallet, recordFill } from "@/lib/trade-book";
 import { MEMO_PROGRAM_ID, fundingMemoIx } from "@/lib/funding-memo";
-import { prevChangeSig } from "@/lib/entry-chain";
+import { openSinceCheck, prevChangeCheck, prevChangeSig } from "@/lib/entry-chain";
+import { prevChangeBeforeFill } from "@/lib/entry-chain-prev";
 
 const WRAPPER = Keypair.generate().publicKey;
 const MARKET = Keypair.generate().publicKey;
@@ -59,7 +60,8 @@ const conn = {
       const u = list.indexOf(o.until);
       if (u >= 0) list = list.slice(0, u);
     }
-    return list.slice(0, o.limit ?? 1000).map((signature) => ({ signature, slot: 1, err: null, memo: null, blockTime: 0 }));
+    // the RPC lists an SPL memo's text in `memo` (as "[len] text")
+    return list.slice(0, o.limit ?? 1000).map((signature) => ({ signature, slot: 1, err: null, memo: txs[signature]?.memo !== undefined ? `[16] perc:fb1:${txs[signature].memo}` : null, blockTime: 0 }));
   }),
   getTransaction: vi.fn(async (s: string) => one(s)),
   getTransactions: vi.fn(async (s: string[]) => s.map(one)),
@@ -177,5 +179,89 @@ describe("the chain check itself", () => {
     expect(v).not.toBe("chain");
     expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
     expect(loadBookByWallet(WALLET, SLAB)?.avgE6).not.toBe(P1);
+  });
+});
+
+/** Runs a promise that waits on paced timers (the sync paces its reads 1 s apart) under fake timers. */
+async function drive<T>(p: Promise<T>): Promise<T> {
+  let done = false;
+  let out: T | undefined;
+  void p.then((v) => { done = true; out = v; });
+  for (let i = 0; i < 5000 && !done; i++) await vi.advanceTimersByTimeAsync(1000);
+  return out as T;
+}
+
+describe("Council round 2 review: beyond the walk's reach", () => {
+  const cranks = (n: number, tag: string) => Array.from({ length: n }, (_, i) => { txs[`${tag}${i}`] = { logs: CRANK }; return `${tag}${i}`; }).reverse();
+
+  it("MED-1: the reopen elsewhere is older than the walk can read (2,000 txs): device 1's old Entry and book are removed (unknown), not shown", async () => {
+    vi.useFakeTimers();
+    try {
+      device1Opens();
+      order = [...cranks(2100, "n"), "open2", "k3", "close1", "k2", "k1", "k0", "open1"];
+      const v = await drive(syncChainEntry(conn, target, () => 10_000_000));
+      expect(v).toBe("incomplete");
+      expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+      expect(loadBookByWallet(WALLET, SLAB)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("MED-1: the same long history with NO reopen (only cranks since device 1's open): its Entry and book stand; the next check within the hour reads only the signature list", async () => {
+    vi.useFakeTimers();
+    try {
+      device1Opens();
+      order = [...cranks(2100, "n"), "k2", "k1", "k0", "open1"];
+      expect(await drive(syncChainEntry(conn, target, () => 10_000_000))).toBe("incomplete");
+      expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(effective(P1));
+      expect(loadBookByWallet(WALLET, SLAB)?.avgE6).toBe(P1);
+      const reads = (conn as unknown as { getTransactions: ReturnType<typeof vi.fn> }).getTransactions;
+      reads.mockClear();
+      expect(await drive(syncChainEntry(conn, target, () => 10_000_000 + VERIFY_MS + 1))).toBe("incomplete");
+      expect(reads).not.toHaveBeenCalled(); // no second 2,000-transaction walk
+      // a reopen elsewhere lands now: the minute check (signature list only) catches it
+      txs.close9 = fillTx(-Q, P2);
+      txs.open9 = fillTx(Q, P2, BASE2);
+      order = ["open9", "close9", ...order];
+      await drive(syncChainEntry(conn, target, () => 10_000_000 + 2 * VERIFY_MS + 2));
+      expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+      expect(loadBookByWallet(WALLET, SLAB)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("MED-2: device 1's own close after a long gap with no stored walk keeps its exact result (the signature list back to its own open shows no reopen)", async () => {
+    device1Opens();
+    txs.close1x = fillTx(-Q, P1);
+    order = ["close1x", ...cranks(400, "g"), "open1"];
+    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close1x", recordSig: "open1" }, { paceMs: 0 });
+    expect(prev).toBe("open1");
+    const r = recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P1, feeAtoms: fee(Q, P1), funding: { netPaid: BASE1 + 50n, legs: 0 }, sig: "close1x" }, Q, prev);
+    expect(r).toBe(0n - 2n * fee(Q, P1) - 50n);
+  });
+
+  it("MED-2: the same long gap, but the position was closed and reopened elsewhere: the check names the reopen, the result is unknown", async () => {
+    device1Opens();
+    txs.close2x = fillTx(-Q, P2);
+    order = ["close2x", ...cranks(400, "g"), "open2", "close1", ...cranks(5, "h"), "open1"];
+    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close2x", recordSig: "open1" }, { paceMs: 0 });
+    expect(prev).toBe("open2");
+    expect(recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 1n, legs: 0 }, sig: "close2x" }, Q, prev)).toBeNull();
+  });
+
+  it("the check stops at the record's own fill; it is retried only while the fill is not listed yet, not after its read limit", async () => {
+    txs.close1x = fillTx(-Q, P1);
+    order = ["close1x", "k1", "k0", "open1"];
+    expect(await prevChangeCheck(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, beforeSig: "close1x", stopAt: "k0" })).toEqual({ kind: "sig", sig: "k0" });
+    expect(await prevChangeCheck(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, beforeSig: "nope" })).toEqual({ kind: "not-listed" });
+    const sigsCalls = (conn as unknown as { getSignaturesForAddress: ReturnType<typeof vi.fn> }).getSignaturesForAddress;
+    order = ["close1x", ...cranks(300, "g"), "open1"];
+    sigsCalls.mockClear();
+    expect(await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close1x" }, { paceMs: 0, waitMs: 0 })).toBeNull(); // no record sig: no list fallback
+    expect(sigsCalls.mock.calls.length).toBeLessThanOrEqual(3); // one bounded pass, no retries
+    order = ["k1", "k0"];
+    expect(await openSinceCheck(conn, PORTFOLIO, { untilSig: "missing" })).toEqual({ kind: "unknown" }); // never reached: cannot tell
   });
 });

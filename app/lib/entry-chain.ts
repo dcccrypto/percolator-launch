@@ -444,62 +444,120 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
   }
 }
 
+/** What `prevChangeCheck` found. `not-listed`: `beforeSig` is not on the portfolio's list yet (a node that has not indexed it): worth a retry. */
+export type PrevChange = { kind: "sig"; sig: string } | { kind: "not-listed" } | { kind: "unknown" };
+
 /**
  * Council r10 round 2 MED: the signature of the newest transaction BEFORE `beforeSig` that changed this position (a fill or a REDUCE), read
  * from the portfolio's own list, skipping keeper cranks and anything that never ran the wrapper. The trade book and a device-written Entry
  * describe the position only while their newest fill is that change: a same-size close + reopen (or an add + reduce) on another device keeps
  * the size but not the history.
  *
- * `known`: an earlier walk's top signature and the newest change it found. Reaching `known.top` with no change in between returns
- * `known.newest` without reading further. Null when it cannot be told: `beforeSig` not on the list yet, an unreadable transaction, or
- * `maxRead` transactions read without finding a change.
+ * `stopAt`: the newest fill the caller's record includes. Reaching it with no change in between returns it (the record is current) without
+ * reading further. `known`: an earlier walk's top signature and the newest change it found; reaching `known.top` with no change in between
+ * returns `known.newest`. `unknown` when it cannot be told (an unreadable transaction, `maxRead` reached, the list ended); reads go in groups
+ * of 10, `paceMs` apart.
  */
-export async function prevChangeSig(
+export async function prevChangeCheck(
   connection: Conn,
   wrapper: PublicKey,
-  o: { market: PublicKey; portfolio: PublicKey; assetIndex?: number; beforeSig: string; known?: { top: string; newest: string } | null; maxRead?: number; pageSize?: number },
-): Promise<string | null> {
+  o: { market: PublicKey; portfolio: PublicKey; assetIndex?: number; beforeSig: string; stopAt?: string | null; known?: { top: string; newest: string } | null; maxRead?: number; pageSize?: number; paceMs?: number },
+): Promise<PrevChange> {
   const assetIndex = o.assetIndex ?? 0;
-  const maxRead = o.maxRead ?? 300;
+  const maxRead = o.maxRead ?? 100;
   const pageSize = o.pageSize ?? 50;
+  const unknown: PrevChange = { kind: "unknown" };
   let txRead = 0;
   let before: string | undefined;
   let found = false; // `beforeSig` seen: everything after it in the list is older
   try {
     for (;;) {
       const page = await connection.getSignaturesForAddress(o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
-      if (page.length === 0) return null;
+      if (page.length === 0) return found ? unknown : { kind: "not-listed" };
       let list = page;
       if (!found) {
         // Listed newest first from the top (a `before` the node has not indexed yet is not reliable): it must be on the first page.
         const at = page.findIndex((s) => s.signature === o.beforeSig);
-        if (at < 0) return null;
+        if (at < 0) return { kind: "not-listed" };
         found = true;
         list = page.slice(at + 1);
       }
-      const knownAt = o.known ? list.findIndex((s) => s.signature === o.known?.top) : -1;
-      const sigs = (knownAt >= 0 ? list.slice(0, knownAt) : list).filter((s) => s.err === null).map((s) => s.signature);
+      // Everything older than the first stop seen is already accounted for.
+      const stopAt = list.findIndex((s) => s.signature === o.stopAt || s.signature === o.known?.top);
+      const head = stopAt >= 0 ? list.slice(0, stopAt) : list;
+      const sigs = head.filter((s) => s.err === null).map((s) => s.signature);
       for (let i = 0; i < sigs.length; i += 10) {
-        if (txRead >= maxRead) return null;
+        if (txRead >= maxRead) return unknown;
+        if (i > 0 && o.paceMs) await new Promise((r) => setTimeout(r, o.paceMs));
         const group = sigs.slice(i, i + 10).slice(0, maxRead - txRead);
         const txs = await fetchTxs(connection, group, 10);
         txRead += group.length;
         for (let j = 0; j < group.length; j++) {
           const tx = txs[j];
-          if (!tx?.meta) return null;
+          if (!tx?.meta) return unknown;
           if (tx.meta.err !== null || !txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
           const ds = deltasFromLogs(group[j], tx.meta.logMessages, true, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex });
-          if (ds === null) return null;
-          if (ds === "irreconcilable" || ds.length > 0) return group[j];
+          if (ds === null) return unknown;
+          if (ds === "irreconcilable" || ds.length > 0) return { kind: "sig", sig: group[j] };
         }
       }
-      if (knownAt >= 0 && o.known) return o.known.newest;
-      if (page.length < pageSize) return null;
+      if (stopAt >= 0) {
+        const hit = list[stopAt].signature;
+        if (o.stopAt && hit === o.stopAt) return { kind: "sig", sig: hit };
+        if (o.known && hit === o.known.top) return { kind: "sig", sig: o.known.newest };
+      }
+      if (page.length < pageSize) return unknown;
       before = page[page.length - 1].signature;
     }
   } catch {
-    return null;
+    return unknown;
   }
+}
+
+/** `prevChangeCheck` as a signature, or null when it could not be told. */
+export async function prevChangeSig(connection: Conn, wrapper: PublicKey, o: Parameters<typeof prevChangeCheck>[2]): Promise<string | null> {
+  const r = await prevChangeCheck(connection, wrapper, o);
+  return r.kind === "sig" ? r.sig : null;
+}
+
+/** The text an open from flat by this app carries (lib/funding-memo.ts); the RPC lists it in `getSignaturesForAddress`'s `memo` field. */
+const OPEN_MEMO = "perc:fb1:";
+
+/**
+ * Council r10 round 2 review: a cheap check that needs no transaction reads, for when the walk cannot reach back far enough. Lists the
+ * portfolio's signatures newer than `untilSig` (the newest fill a record includes), from the top or from just below `fromSig`, and looks at
+ * their memo field: every open from flat by this app carries the funding memo, so a same-size close + reopen made by the app on another device
+ * shows up there, however long ago. "memo": such an open landed after the record (it is stale; `sig` names it). "none": `untilSig` was reached
+ * with no such open in between. "unknown": `untilSig` not reached within `maxPages` pages of 1,000, or the read failed.
+ * What it cannot see: a reopen without the memo (another client, an older app, a memo dropped as too large) or an add + reduce elsewhere.
+ */
+export async function openSinceCheck(
+  connection: Pick<Connection, "getSignaturesForAddress">,
+  portfolio: PublicKey,
+  o: { untilSig: string; fromSig?: string | null; maxPages?: number },
+): Promise<{ kind: "memo"; sig: string } | { kind: "none" } | { kind: "unknown" }> {
+  const maxPages = o.maxPages ?? 10;
+  let before: string | undefined;
+  let started = !o.fromSig;
+  try {
+    for (let n = 0; n < maxPages; n++) {
+      const page = await connection.getSignaturesForAddress(portfolio, { limit: 1000, ...(before ? { before } : {}) }, "confirmed");
+      if (page.length === 0) return { kind: "unknown" };
+      for (const s of page) {
+        if (!started) {
+          if (s.signature === o.fromSig) started = true;
+          continue;
+        }
+        if (s.signature === o.untilSig) return { kind: "none" };
+        if (s.err === null && typeof s.memo === "string" && s.memo.includes(OPEN_MEMO)) return { kind: "memo", sig: s.signature };
+      }
+      if (!started || page.length < 1000) return { kind: "unknown" };
+      before = page[page.length - 1].signature;
+    }
+  } catch {
+    /* fall through */
+  }
+  return { kind: "unknown" };
 }
 
 /** True when undoing a change of `deltaQ` leaves `qBefore` on the OTHER side of flat from where the change ended: a flip, whose opening half starts the position. */

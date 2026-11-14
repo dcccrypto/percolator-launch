@@ -116,7 +116,7 @@ import { growthDepositFloorAtoms, growthGate } from "@/lib/v22/growth-gate";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { feeBpsWithSpread, quotedFillPriceE6 } from "@/lib/v22/spread-estimate";
 import { busyFeeAtoms, effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
-import { recordFill, saveBook } from "@/lib/trade-book";
+import { loadBook, recordFill, saveBook } from "@/lib/trade-book";
 import { recordRealized } from "@/lib/realized-pnl";
 import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
@@ -1680,8 +1680,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // Council r10 round 2 MED: the position's newest change on chain before this fill. The saved Entry and the trade book carry on into this
       // fill only if they include that change: a same-size close + reopen on another device keeps the size, not the history. Read once, shared.
       let prevP: Promise<string | null> | null = null;
+      const entryIdxForCheck = userAccount?.idx ?? (fundingMode ? 0 : null);
       const prevChange = (portfolio: PublicKey): Promise<string | null> =>
-        (prevP ??= prevChangeBeforeFill(connection, slabProgramId as PublicKey, { market: new PublicKey(slabAddress), portfolio, sig: sigKey as string }).catch(() => null));
+        (prevP ??= prevChangeBeforeFill(connection, slabProgramId as PublicKey, {
+          market: new PublicKey(slabAddress), portfolio, sig: sigKey as string,
+          recordSig: (publicKey ? loadBook(publicKey.toBase58(), slabAddress, portfolio.toBase58())?.lastSig : null) ?? (entryIdxForCheck !== null ? getSavedEntry(slabAddress, entryIdxForCheck, publicKey?.toBase58())?.lastSig : null) ?? null,
+        }).catch(() => null));
       const measured = takePositionChange(sig).then((change): PositionChange | null => {
         if (change) return change;
         // Fund-and-trade with no measured change (a new portfolio, or a read that failed) leaves

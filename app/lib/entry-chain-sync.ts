@@ -13,7 +13,7 @@
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
-import { bookFromDeltas, entryFromChain, loadDeltas, storeDeltas, type ChainEntryResult, type ChainEntryVerdict, type ChainResume, type NoBusyCap, type StoredDelta } from "@/lib/entry-chain";
+import { bookFromDeltas, entryFromChain, loadDeltas, openSinceCheck, storeDeltas, type ChainEntryResult, type ChainEntryVerdict, type ChainResume, type NoBusyCap, type StoredDelta } from "@/lib/entry-chain";
 import { loadBook, saveBook } from "@/lib/trade-book";
 import { resolveTradeFeeBps } from "@/lib/limits/trade-fee-resolve";
 import { clearEntryPrice, clearEntryUnknownMark, entryRecordCurrent, getEntryLeverage, getEntryUnknownMark, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice, type SavedEntry } from "@/lib/entry-price";
@@ -29,6 +29,11 @@ export const COOLDOWN_MS = 10 * 60 * 1000;
 export const VERIFY_MS = 60 * 1000;
 /** About 10 transactions a second: half the app's RPC proxy budget per browser (200 per 10 s), so the page's own reads keep working. */
 export const PACE_TX_PER_S = 10;
+/**
+ * Council r10 round 2 review: a walk that ran out of budget ("incomplete") cannot finish later (the history only grows), so it is repeated at most
+ * hourly; in between, a device record is checked each minute against the signature list alone (lib/entry-chain.ts openSinceCheck).
+ */
+export const INCOMPLETE_WALK_MS = 60 * 60 * 1000;
 
 /**
  * Council r10 recheck D1: the trade book rebuilt from the walk (fills + the opening memo's funding base) is stored where every close surface
@@ -65,6 +70,8 @@ interface Attempt {
   topSig?: string;
   /** Council r10 recheck D6: the walk as it stood at `walkTop` (the current position's changes, oldest first), for an incremental rebuild. */
   walk?: { top: string; q: string; startQ: string; deltas: StoredDelta[] };
+  /** When the last full walk ended "incomplete" (it read its whole budget): until INCOMPLETE_WALK_MS later only the cheap memo check runs. */
+  walkTs?: number;
 }
 
 function resumeOf(a: Attempt | null): ChainResume | null {
@@ -105,6 +112,7 @@ export function rebuildDue(prior: Attempt | null, qNow: bigint, now: number): bo
   if (prior.verdict === "no-position") return false;
   // A chain record is re-verified against the portfolio's newest signature, not trusted by size alone (N3).
   if (prior.verdict === "chain") return now - prior.ts >= VERIFY_MS;
+  if (prior.verdict === "incomplete" && prior.walkTs !== undefined) return now - prior.ts >= VERIFY_MS;
   return now - prior.ts >= COOLDOWN_MS;
 }
 
@@ -216,6 +224,11 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   }
   // The device record as it stood before the read: one that differs afterwards was written by this device meanwhile, and stands.
   const atStart = getSavedEntry(t.slab, t.idx, t.wallet);
+  if (prior && prior.verdict === "incomplete" && prior.q === t.qNow.toString() && prior.walkTs !== undefined && now() - prior.walkTs < INCOMPLETE_WALK_MS) {
+    await scanOwn(connection, t, atStart, now);
+    writeAttempt(pk, { ...prior, ts: now() });
+    return;
+  }
   const facts = await marketFacts(connection, t.slab, t.assetIndex ?? 0);
   if (facts === null) {
     writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now(), ...(prior?.walk ? { walk: prior.walk } : {}) });
@@ -285,7 +298,28 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   // of date and cannot replace.
   if (verdict !== "chain" && verdict !== "unreadable" && stale?.chainSig) clearEntryPrice(t.slab, t.idx, t.wallet);
   else if (verdict !== "chain" && ownStale) clearEntryPrice(t.slab, t.idx, t.wallet);
-  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
+  // The walk did not reach the position's start (a long hold, an unreadable or unexplainable transaction): the signature list still shows an
+  // open from flat by the app after this device's own fill, however long ago.
+  if (!readToStart) await scanOwn(connection, t, atStart, now);
+  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "incomplete" ? { walkTs: now() } : {}), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
+}
+
+/**
+ * Council r10 round 2 review: when the walk cannot reach the position's start, a device record (Entry, or the trade book) is checked against
+ * the signature list alone: an open from flat by the app after its newest fill means it describes an earlier position. It is then removed
+ * (unknown), never shown. Nothing is removed when the list cannot be read or a trade on this device is in flight / was written meanwhile.
+ */
+async function scanOwn(connection: Pick<Connection, "getSignaturesForAddress">, t: SyncTarget, atStart: SavedEntry | null, now: () => number): Promise<void> {
+  const pk = t.portfolio.toBase58();
+  const own = atStart && !atStart.chainSig && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
+  const book = loadBook(t.wallet, t.slab, pk);
+  const ownBook = book && book.q === t.qNow ? book : null;
+  const sig = own?.lastSig ?? ownBook?.lastSig ?? null;
+  if (!sig) return;
+  const m = await openSinceCheck(connection, t.portfolio, { untilSig: sig });
+  if (m.kind !== "memo" || chainSyncHeld(t.slab, now()) || !sameRecord(getSavedEntry(t.slab, t.idx, t.wallet), atStart)) return;
+  if (own) clearEntryPrice(t.slab, t.idx, t.wallet);
+  if (ownBook && loadBook(t.wallet, t.slab, pk)?.lastSig === ownBook.lastSig) saveBook(t.wallet, t.slab, pk, null);
 }
 
 function sameRecord(a: SavedEntry | null, b: SavedEntry | null): boolean {
