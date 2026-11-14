@@ -97,7 +97,9 @@ async function tokenBalance(connection: Connection, ata: PublicKey, meta: Meta):
   meta.rpcCalls++;
   const info = await connection.getAccountInfo(ata, "confirmed");
   if (!info || info.data.length < 72) return null;
-  return Buffer.from(info.data).readBigUInt64LE(64);
+  // SPL token account amount: u64 LE at offset 64. DataView, not Buffer BigInt (browser-buffer-bigint-guard).
+  const d = new Uint8Array(info.data);
+  return new DataView(d.buffer, d.byteOffset, d.byteLength).getBigUint64(64, true);
 }
 
 const DEPOSIT_FIELDS = ["owner", "market", "amount", "portfolio", "newPortfolio", "expiresAfter"] as const;
