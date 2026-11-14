@@ -8,6 +8,7 @@ import { PublicKey, type Connection } from "@solana/web3.js";
 import { ApiError } from "@/lib/bot-api/errors";
 import { buildV22Trade, effectiveTakerPosition, TradeBuildRefusal } from "@/lib/v22/trade-build";
 import { findOwnerPortfolio } from "@/lib/owner-portfolio";
+import { parsePortfolio } from "@/lib/v22/layout";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, MAX_SLIPPAGE_BPS } from "./caps";
 import {
@@ -75,10 +76,18 @@ export function parseOrderBody(b: Record<string, unknown>): OrderInput {
  * worst case + a margin, so far above the market's listed base fee): renamed feeCapBps. expectedFeeBps / expectedFeeAtoms are
  * what the fill is expected to charge (reads/quote.ts expectedFee); a fill never charges more than the cap.
  */
-export function orderSummary(base: Record<string, unknown> & { feeBps?: string | null }, size: bigint, fees: { expectedFeeBps: number | null; expectedFeeAtoms: bigint | null }): Record<string, unknown> {
+export function orderSummary(
+  base: Record<string, unknown> & { feeBps?: string | null; positionBeforeQ?: string | null },
+  size: bigint,
+  fees: { expectedFeeBps: number | null; expectedFeeAtoms: bigint | null },
+  position?: { positionBeforeQ: bigint | null; reducing: boolean },
+): Record<string, unknown> {
   const { feeBps, ...rest } = base;
   return {
     ...rest,
+    // The builder's own positionBeforeQ / reducing come from the leg's RAW basis; the caps (and the engine) use the ADL-effective
+    // position, so the summary reports the one the caps used and keeps the raw basis apart.
+    ...(position ? { positionBeforeQ: position.positionBeforeQ === null ? null : position.positionBeforeQ.toString(), reducing: position.reducing, rawBasisQ: base.positionBeforeQ ?? null } : {}),
     side: size > 0n ? "buy" : "sell",
     feeCapBps: feeBps === null || feeBps === undefined ? null : Number(feeBps),
     expectedFeeBps: fees.expectedFeeBps,
@@ -95,6 +104,7 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     explicitLimit: input.limitPriceE6 !== undefined,
   });
   let applied: ReturnType<typeof checkOrderCaps> | null = null;
+  let seen: { positionBeforeQ: bigint | null; reducing: boolean } | null = null;
   let fees: Awaited<ReturnType<typeof checkOpenMarketGuards>> = { expectedFeeBps: null, expectedFeeAtoms: null };
   let r: Awaited<ReturnType<typeof buildV22Trade>>;
   try {
@@ -109,6 +119,7 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       ...(input.portfolio ? { portfolio: input.portfolio } : {}),
       crankOnLossStale: true,
       preflight: async (p) => {
+        seen = { positionBeforeQ: p.positionBeforeQ, reducing: p.reducing };
         applied = checkOrderCaps(caps, p);
         fees = await checkOpenMarketGuards(connection, p);
       },
@@ -126,7 +137,7 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     blockhash: r.blockhash,
     lastValidBlockHeight: r.lastValidBlockHeight,
     resubmitAfter: r.resubmitAfter,
-    summary: orderSummary(r.summary, input.size, fees),
+    summary: orderSummary(r.summary, input.size, fees, (seen as { positionBeforeQ: bigint | null; reducing: boolean } | null) ?? undefined),
     caps: {
       reduceOnly: caps.reduceOnly,
       slippageBps: caps.explicitLimit ? null : caps.slippageBps,
@@ -152,6 +163,7 @@ export async function buildClose(connection: Connection, b: Record<string, unkno
   const slippageBps = intField(b, "slippageBps", { min: 1, max: MAX_SLIPPAGE_BPS, overCode: "slippage_cap_exceeded" });
   const fee = intField(b, "maxFeeBps", { min: 0, max: 10_000 });
   let portfolio = pubkeyField(b, "portfolio", false);
+  const explicitPortfolio = portfolio !== undefined;
 
   let before: bigint;
   let legReset = false;
@@ -164,6 +176,16 @@ export async function buildClose(connection: Connection, b: Record<string, unkno
     portfolio = portfolio ?? (await findOwnerPortfolio(connection, info.owner, market, owner)) ?? undefined;
     if (!portfolio) throw noTradingAccount();
     const pinfo = await connection.getAccountInfo(portfolio, "confirmed");
+    if (explicitPortfolio) {
+      // A named portfolio that does not exist or is not a portfolio is the caller's input: bad_portfolio, not an RPC failure.
+      // Whose it is and which market it sits on is checked by the shared builder (buildV22Trade) right after.
+      try {
+        if (!pinfo || !pinfo.owner.equals(info.owner)) throw new Error("not a portfolio");
+        parsePortfolio(new Uint8Array(pinfo.data));
+      } catch {
+        throw new ApiError("bad_portfolio");
+      }
+    }
     if (!pinfo) throw noTradingAccount();
     // The ADL-EFFECTIVE position, the quantity the engine applies a close to (hooks/useClosePosition.ts effectiveLeg): a close
     // sized from the raw basis over-closes after an ADL and the engine refuses the flip.
