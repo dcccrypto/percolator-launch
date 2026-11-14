@@ -153,3 +153,130 @@ describe("operator F3: bot routes fail fast on RPC 429", () => {
     expect(redactUrls("fetch failed https://devnet.helius-rpc.com/?api-key=abc123 timeout")).toBe("fetch failed <url> timeout");
   });
 });
+
+describe("attacker F3: the lockout never refuses a valid key", () => {
+  const bad = (n: number) => `pbk_${"Z".repeat(12)}_${"a".repeat(43)}${n}`.slice(0, 4 + 12 + 1 + 43);
+  it("a victim's valid key still works on an address that has 20+ failures", async () => {
+    const { key } = await issueKey({ scopes: ["read"] }, kv);
+    for (let i = 0; i < AUTH_FAIL_LIMIT + 3; i++) await readRoute(req("/api/v1/t", { headers: { authorization: `Bearer ${bad(i)}` } }));
+    const bogus = await readRoute(req("/api/v1/t", { headers: { authorization: `Bearer ${bad(0)}` } }));
+    expect(bogus.status).toBe(429); // junk keys from that address are still throttled
+    const ok = await readRoute(req("/api/v1/t", { headers: { authorization: `Bearer ${key}` } }));
+    expect(ok.status).toBe(200);
+  });
+  it("only failures count: valid calls never lock the address", async () => {
+    const { key } = await issueKey({ scopes: ["read"] }, kv);
+    for (let i = 0; i < AUTH_FAIL_LIMIT + 3; i++) expect((await readRoute(req("/api/v1/t", { headers: { authorization: `Bearer ${key}` } }))).status).toBe(200);
+    expect((await readRoute(req("/api/v1/t", { headers: { authorization: `Bearer ${bad(1)}` } }))).status).toBe(401);
+  });
+  it("deployed build with an unresolvable address: anonymous refused with 503 client_ip_unknown, keyed callers unaffected and not merged", async () => {
+    vi.stubEnv("BOT_API_KEY_PEPPER", "p".repeat(40));
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.invalid");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "t");
+    vi.stubEnv("TRUSTED_PROXY_DEPTH", "0");
+    const { key } = await issueKey({ scopes: ["read"] }, kv);
+    const anon = await readRoute(req("/api/v1/t"));
+    expect(anon.status).toBe(503);
+    expect((await anon.json()).error.code).toBe("client_ip_unknown");
+    // junk keys from "unknown" are not counted into one shared bucket, so they never lock out the keyed bot
+    for (let i = 0; i < AUTH_FAIL_LIMIT + 5; i++) expect((await readRoute(req("/api/v1/t", { headers: { authorization: `Bearer ${bad(i)}` } }))).status).toBe(401);
+    expect((await readRoute(req("/api/v1/t", { headers: { authorization: `Bearer ${key}` } }))).status).toBe(200);
+  });
+  it("local (no VERCEL) with no proxy depth keeps working anonymously", async () => {
+    vi.stubEnv("TRUSTED_PROXY_DEPTH", "0");
+    expect((await readRoute(req("/api/v1/t"))).status).toBe(200);
+  });
+});
+
+describe("attacker F1: anonymous IPv6 callers are budgeted by /64", () => {
+  it("clientBucket collapses a /64 and leaves IPv4 alone", async () => {
+    const { clientBucket } = await import("@/lib/bot-api/limits");
+    expect(clientBucket("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe(clientBucket("2001:db8:1:2::1"));
+    expect(clientBucket("2001:db8:1:2::1")).not.toBe(clientBucket("2001:db8:1:3::1"));
+    expect(clientBucket("::ffff:1.2.3.4")).toBe("1.2.3.4");
+    expect(clientBucket("1.2.3.4")).toBe("1.2.3.4");
+    expect(clientBucket("::1")).toBe("0:0:0:0::/64");
+  });
+  it("rotating addresses inside one /64 share one anonymous budget", async () => {
+    const { TIER_BUDGET } = await import("@/lib/bot-api/limits");
+    const heavy = botRoute({ route: "/v1/t", scope: "read", weight: TIER_BUDGET.anon }, async () => ({ body: {} }));
+    expect((await heavy(req("/api/v1/t", { headers: { "x-forwarded-for": "2001:db8:9:9::1" } }))).status).toBe(200);
+    expect((await heavy(req("/api/v1/t", { headers: { "x-forwarded-for": "2001:db8:9:9:1:2:3:4" } }))).status).toBe(429);
+  });
+});
+
+describe("attacker F4 + operator F6: shared ceilings", () => {
+  it("one principal cannot take more than its share of the global build budget", async () => {
+    const { checkLimit, GLOBAL_BUILD_BUDGET, PRINCIPAL_BUILD_CAP } = await import("@/lib/bot-api/limits");
+    expect(PRINCIPAL_BUILD_CAP).toBeLessThanOrEqual(GLOBAL_BUILD_BUDGET / 4);
+    const mm = { kind: "key" as const, id: "mmX", scopes: ["build" as const], tier: "mm" as const };
+    expect((await checkLimit(mm, PRINCIPAL_BUILD_CAP, { kv, nowMs: now, build: true })).allowed).toBe(true);
+    const over = await checkLimit(mm, 10, { kv, nowMs: now, build: true });
+    expect(over.allowed).toBe(false);
+    expect(over.reason).toBe("build-share");
+    const other = { kind: "key" as const, id: "other", scopes: ["build" as const], tier: "default" as const };
+    expect((await checkLimit(other, 10, { kv, nowMs: now, build: true })).allowed).toBe(true);
+  });
+  it("reads and streams hit a global ceiling too", async () => {
+    const { checkLimit, GLOBAL_READ_BUDGET } = await import("@/lib/bot-api/limits");
+    const mk = (i: number) => ({ kind: "key" as const, id: `r${i}`, scopes: ["read" as const], tier: "mm" as const });
+    let i = 0;
+    for (let spent = 0; spent + 3000 <= GLOBAL_READ_BUDGET; spent += 3000) expect((await checkLimit(mk(i++), 3000, { kv, nowMs: now })).allowed).toBe(true);
+    const r = await checkLimit(mk(i++), 10, { kv, nowMs: now });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe("global");
+  });
+});
+
+describe("attacker note: body cap enforced while streaming", () => {
+  it("stops pulling a chunked upload at the cap", async () => {
+    const { readBodyCapped } = await import("@/lib/bot-api/handler");
+    const { MAX_BODY_BYTES } = await import("@/lib/bot-api/config");
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled++;
+        c.enqueue(new Uint8Array(1024));
+        if (pulled > 1000) c.close();
+      },
+    });
+    const r = new Request("http://x/", { method: "POST", body: stream, duplex: "half" } as RequestInit);
+    await expect(readBodyCapped(r, MAX_BODY_BYTES)).rejects.toMatchObject({ code: "payload_too_large" });
+    expect(pulled).toBeLessThan(20);
+  });
+  it("accepts a body under the cap", async () => {
+    const { readBodyCapped } = await import("@/lib/bot-api/handler");
+    expect(await readBodyCapped(new Request("http://x/", { method: "POST", body: '{"a":1}' }), 4096)).toBe('{"a":1}');
+  });
+});
+
+describe("skeptic F5: pinned constants", () => {
+  it("TTL_SEC outlives a blockhash and is the documented 120; body and ceilings are pinned", async () => {
+    const { TTL_SEC } = await import("@/lib/bot-api/idempotency");
+    const { MAX_BODY_BYTES } = await import("@/lib/bot-api/config");
+    const l = await import("@/lib/bot-api/limits");
+    expect(TTL_SEC).toBeGreaterThanOrEqual(90);
+    expect(TTL_SEC).toBe(120);
+    expect(MAX_BODY_BYTES).toBe(4096);
+    expect(l.GLOBAL_BUILD_BUDGET).toBe(3000);
+    expect(l.GLOBAL_READ_BUDGET).toBe(6000);
+    expect(l.PRINCIPAL_BUILD_CAP).toBe(750);
+    expect(l.TIER_BUDGET).toEqual({ anon: 60, default: 600, mm: 3000 });
+  });
+});
+
+describe("first-timer: 401/403 carry X-RateLimit headers", () => {
+  it("401 and 403 answers tell the caller its budget", async () => {
+    const u = await readRoute(req("/api/v1/t", { headers: { authorization: `Bearer pbk_${"Z".repeat(12)}_${"a".repeat(43)}` } }));
+    expect(u.status).toBe(401);
+    expect(u.headers.get("X-RateLimit-Limit")).toBe("60");
+    expect(u.headers.get("X-RateLimit-Remaining")).toBeTruthy();
+    expect(u.headers.get("X-RateLimit-Reset")).toBeTruthy();
+    const { key } = await issueKey({ scopes: ["read"] }, kv);
+    const buildRoute = botRoute({ route: "/v1/b", scope: "build", weight: 1 }, async () => ({ body: {} }));
+    const f = await buildRoute(req("/api/v1/b", { headers: { authorization: `Bearer ${key}` } }));
+    expect(f.status).toBe(403);
+    expect(f.headers.get("X-RateLimit-Limit")).toBe("600");
+  });
+});
