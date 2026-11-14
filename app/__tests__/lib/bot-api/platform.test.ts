@@ -7,7 +7,7 @@ import { getServerConnection } from "@/lib/server-rpc";
 import { botRoute } from "@/lib/bot-api/handler";
 import { MemoryKv, UpstashKv, KvUnavailableError, BREAKER_MS, __setKvForTest, type Kv } from "@/lib/bot-api/kv";
 import { issueKey, verifyKey } from "@/lib/bot-api/keys";
-import { AUTH_FAIL_LIMIT } from "@/lib/bot-api/limits";
+import { AUTH_FAIL_LIMIT, __resetAuthCachesForTest } from "@/lib/bot-api/limits";
 import { __resetMetricsForTest } from "@/lib/bot-api/metrics";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 
@@ -28,6 +28,7 @@ beforeEach(() => {
   kv = new MemoryKv(() => now);
   __setKvForTest(kv);
   __resetMetricsForTest();
+  __resetAuthCachesForTest();
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -189,20 +190,25 @@ describe("attacker F3: the lockout never refuses a valid key", () => {
   });
 });
 
-describe("attacker F1: anonymous IPv6 callers are budgeted by /64", () => {
-  it("clientBucket collapses a /64 and leaves IPv4 alone", async () => {
+describe("attacker F1: anonymous IPv6 callers are budgeted by /56", () => {
+  it("clientBucket collapses a /56 and leaves IPv4 alone", async () => {
     const { clientBucket } = await import("@/lib/bot-api/limits");
     expect(clientBucket("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe(clientBucket("2001:db8:1:2::1"));
-    expect(clientBucket("2001:db8:1:2::1")).not.toBe(clientBucket("2001:db8:1:3::1"));
+    // every /64 of one /56 (4th group 0x0000..0x00ff) is one bucket
+    expect(clientBucket("2001:db8:1:2::1")).toBe(clientBucket("2001:db8:1:3::1"));
+    expect(clientBucket("2001:db8:1:ab::1")).toBe(clientBucket("2001:db8:1::1"));
+    // a different /56 is a different bucket
+    expect(clientBucket("2001:db8:1:100::1")).not.toBe(clientBucket("2001:db8:1:ff::1"));
+    expect(clientBucket("2001:db8:2:2::1")).not.toBe(clientBucket("2001:db8:1:2::1"));
     expect(clientBucket("::ffff:1.2.3.4")).toBe("1.2.3.4");
     expect(clientBucket("1.2.3.4")).toBe("1.2.3.4");
-    expect(clientBucket("::1")).toBe("0:0:0:0::/64");
+    expect(clientBucket("::1")).toBe("0:0:0:0::/56");
   });
-  it("rotating addresses inside one /64 share one anonymous budget", async () => {
+  it("rotating addresses inside one /56 share one anonymous budget", async () => {
     const { TIER_BUDGET } = await import("@/lib/bot-api/limits");
     const heavy = botRoute({ route: "/v1/t", scope: "read", weight: TIER_BUDGET.anon }, async () => ({ body: {} }));
     expect((await heavy(req("/api/v1/t", { headers: { "x-forwarded-for": "2001:db8:9:9::1" } }))).status).toBe(200);
-    expect((await heavy(req("/api/v1/t", { headers: { "x-forwarded-for": "2001:db8:9:9:1:2:3:4" } }))).status).toBe(429);
+    expect((await heavy(req("/api/v1/t", { headers: { "x-forwarded-for": "2001:db8:9:42:1:2:3:4" } }))).status).toBe(429);
   });
 });
 
@@ -220,9 +226,10 @@ describe("attacker F4 + operator F6: shared ceilings", () => {
   });
   it("reads and streams hit a global ceiling too", async () => {
     const { checkLimit, GLOBAL_READ_BUDGET } = await import("@/lib/bot-api/limits");
+    const { PRINCIPAL_READ_CAP } = await import("@/lib/bot-api/limits");
     const mk = (i: number) => ({ kind: "key" as const, id: `r${i}`, scopes: ["read" as const], tier: "mm" as const });
     let i = 0;
-    for (let spent = 0; spent + 3000 <= GLOBAL_READ_BUDGET; spent += 3000) expect((await checkLimit(mk(i++), 3000, { kv, nowMs: now })).allowed).toBe(true);
+    for (let spent = 0; spent + PRINCIPAL_READ_CAP <= GLOBAL_READ_BUDGET; spent += PRINCIPAL_READ_CAP) expect((await checkLimit(mk(i++), PRINCIPAL_READ_CAP, { kv, nowMs: now })).allowed).toBe(true);
     const r = await checkLimit(mk(i++), 10, { kv, nowMs: now });
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe("global");
@@ -435,6 +442,8 @@ describe("operator F4: health reports degraded", () => {
     expect(res.status).toBe(200);
     const j = await res.json();
     expect(j).toMatchObject({ status: "ok", slot: 123, kv: { backend: "memory", degraded: false, memoryOnDeployedBuild: false }, clientIp: { resolved: true } });
+    // operator R3: the kill-switch state the design doc promises
+    expect(j.switches).toEqual({ botApiEnabled: true, anonReads: true, writesPaused: false });
   });
   it("degraded and 503 while the KV is failing", async () => {
     const { redis } = deadRedis();
