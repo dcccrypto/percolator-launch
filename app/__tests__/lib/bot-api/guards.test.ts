@@ -74,7 +74,7 @@ describe("stale oracle", () => {
     expect(await code(checkOpenMarketGuards(conn(stale), pre(reduce)))).toBe("ok");
     expect(await code(checkOpenMarketGuards(conn(stale), pre({ ...reduce, size: -(2n ** 90n) })))).toBe("ok");
     const bad = { getMultipleAccountsInfoAndContext: async () => { throw new Error("429"); } } as unknown as Connection;
-    expect(await checkOpenMarketGuards(bad, pre(reduce))).toEqual({ expectedFeeBps: null, expectedFeeAtoms: null });
+    expect(await checkOpenMarketGuards(bad, pre(reduce))).toEqual({ expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null });
   });
   it("reports the expected fee: base fee plus the matcher's adaptive request, in bps and atoms", async () => {
     const fresh = slotAtAge(decodeMarket(raw(SOL_DATA), at(SOL_SLOT)).oracle.staleBoundSecs - 30);

@@ -245,7 +245,7 @@ export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKe
   const leverageEquity = conservativeEquity(pf.capital, valuePnl, pf.feeCredits);
   const positions = rows.map((x) => ({
     ...x,
-    leverage: typeof x.notional === "bigint" && leverageEquity > 0n ? Number((x.notional * 100n) / leverageEquity) / 100 : null,
+    leverage: typeof x.notional === "bigint" && leverageEquity > 0n ? Number((x.notional * 10_000n) / leverageEquity) / 10_000 : null,
   }));
   return {
     address: p.pubkey.toBase58(),

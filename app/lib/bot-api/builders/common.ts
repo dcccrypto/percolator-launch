@@ -78,7 +78,7 @@ const REFUSAL_TO_API: Record<string, ErrorCode> = {
   bad_size: "bad_request",
   bad_limit: "bad_request",
   market_not_found: "market_not_found",
-  unknown_program: "market_unsupported",
+  unknown_program: "market_not_found",
   not_v22: "market_unsupported",
   multi_asset_unsupported: "market_unsupported",
   lots_unsupported: "market_unsupported",

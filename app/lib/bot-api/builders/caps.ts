@@ -157,8 +157,11 @@ export interface MarketGuardResult {
   /** What the fill is expected to charge (bps of notional, atoms); null when unknown. See reads/quote.ts expectedFee. */
   expectedFeeBps: number | null;
   expectedFeeAtoms: bigint | null;
+  /** The whole cost against the mark (base fee + the quoted spread, once); see reads/quote.ts expectedFee. */
+  allInCostBps: number | null;
+  allInCostAtoms: bigint | null;
 }
-const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null };
+const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null };
 
 /**
  * Checks that need a fresh read of the market, the LP and the matcher, for orders that add risk:
@@ -211,8 +214,8 @@ export async function checkOpenMarketGuards(connection: Pick<Connection, "getMul
         });
       }
     }
-    const f = expectedFee(src.baseFeeBps, mq, (abs(p.size) * src.effectivePriceE6) / 1_000_000n);
-    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms };
+    const f = expectedFee(src, mq, (abs(p.size) * src.effectivePriceE6) / 1_000_000n);
+    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms, allInCostBps: f.allInBps, allInCostAtoms: f.allInAtoms };
   } catch (e) {
     if (enforce) throw e;
     return NO_FEE;

@@ -10,6 +10,7 @@ import { buildV22Trade, effectiveTakerPosition, TradeBuildRefusal } from "@/lib/
 import { findOwnerPortfolio } from "@/lib/owner-portfolio";
 import { parsePortfolio } from "@/lib/v22/layout";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
+import { explainNoLp } from "../reads/no-lp";
 import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, MAX_SLIPPAGE_BPS } from "./caps";
 import {
   finalizeTx,
@@ -79,7 +80,7 @@ export function parseOrderBody(b: Record<string, unknown>): OrderInput {
 export function orderSummary(
   base: Record<string, unknown> & { feeBps?: string | null; positionBeforeQ?: string | null },
   size: bigint,
-  fees: { expectedFeeBps: number | null; expectedFeeAtoms: bigint | null },
+  fees: { expectedFeeBps: number | null; expectedFeeAtoms: bigint | null; allInCostBps?: number | null; allInCostAtoms?: bigint | null },
   position?: { positionBeforeQ: bigint | null; reducing: boolean },
 ): Record<string, unknown> {
   const { feeBps, ...rest } = base;
@@ -92,6 +93,8 @@ export function orderSummary(
     feeCapBps: feeBps === null || feeBps === undefined ? null : Number(feeBps),
     expectedFeeBps: fees.expectedFeeBps,
     expectedFeeAtoms: fees.expectedFeeAtoms === null ? null : fees.expectedFeeAtoms.toString(),
+    allInCostBps: fees.allInCostBps ?? null,
+    allInCostAtoms: fees.allInCostAtoms == null ? null : fees.allInCostAtoms.toString(),
   };
 }
 
@@ -105,7 +108,7 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
   });
   let applied: ReturnType<typeof checkOrderCaps> | null = null;
   let seen: { positionBeforeQ: bigint | null; reducing: boolean } | null = null;
-  let fees: Awaited<ReturnType<typeof checkOpenMarketGuards>> = { expectedFeeBps: null, expectedFeeAtoms: null };
+  let fees: Awaited<ReturnType<typeof checkOpenMarketGuards>> = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null };
   let r: Awaited<ReturnType<typeof buildV22Trade>>;
   try {
     meta.rpcCalls += 8; // market, LP (cached), portfolio scan, identities, fee, lev guard, blockhash, priority fee
@@ -126,7 +129,11 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     });
   } catch (e) {
     if (e instanceof ApiError) throw e;
-    if (e instanceof TradeBuildRefusal) throw refusalToApi(e);
+    if (e instanceof TradeBuildRefusal) {
+      // No LP: say whether a retry could ever help (a dormant or unsupported market cannot be traded, whatever the retry).
+      if (e.code === "no_lp") throw await explainNoLpFor(connection, input.market, meta);
+      throw refusalToApi(e);
+    }
     throw new ApiError("rpc_unavailable");
   }
   const transactions: ReturnedTx[] = [];
@@ -147,6 +154,17 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       leverageAfter: a?.leverageAfter ?? null,
     },
   };
+}
+
+async function explainNoLpFor(connection: Connection, market: PublicKey, meta: { rpcCalls: number }): Promise<ApiError> {
+  try {
+    meta.rpcCalls++;
+    const res = await connection.getAccountInfoAndContext(market, "confirmed");
+    if (!res.value) return new ApiError("no_lp");
+    return explainNoLp(new Uint8Array(res.value.data), { market, programId: res.value.owner, slot: res.context.slot });
+  } catch {
+    return new ApiError("no_lp");
+  }
 }
 
 const CLOSE_FIELDS = ["owner", "market", "size", "slippageBps", "maxFeeBps", "portfolio", "expiresAfter"] as const;

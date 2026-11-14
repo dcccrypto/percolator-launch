@@ -62,7 +62,7 @@ async function readMarket(connection: Connection, market: PublicKey, owner: Publ
   try {
     assertKnownProgram(info.owner);
   } catch {
-    throw new ApiError("market_unsupported", "market is not owned by a known Percolator wrapper");
+    throw new ApiError("market_not_found", "no Percolator market at this address (the account is not owned by a Percolator wrapper)");
   }
   const raw = new Uint8Array(info.data);
   if (!isWrapperAccount(raw)) throw new ApiError("market_unsupported", "not a v2.2 market account");
