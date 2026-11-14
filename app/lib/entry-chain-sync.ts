@@ -22,6 +22,7 @@ import { __resetChainSyncHoldsForTests, chainSyncHeld, holdChainSync } from "@/l
 export { chainSyncHeld, holdChainSync };
 import { growthRecordPresence } from "@/lib/v21/growth-market";
 import { ENTRY_CHAIN_KEY as KEY } from "@/lib/entry-chain-prev";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 export { prevChangeBeforeFill, storedWalkHead } from "@/lib/entry-chain-prev";
 
 export const COOLDOWN_MS = 10 * 60 * 1000;
@@ -72,6 +73,8 @@ interface Attempt {
   walk?: { top: string; q: string; startQ: string; deltas: StoredDelta[] };
   /** When the last full walk ended "incomplete" (it read its whole budget): until INCOMPLETE_WALK_MS later only the cheap memo check runs. */
   walkTs?: number;
+  /** The wallet's newest signature when the record was last checked against the wallet's own trades: unchanged = nothing new to read. */
+  walletTop?: string;
 }
 
 function resumeOf(a: Attempt | null): ChainResume | null {
@@ -225,8 +228,10 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   // The device record as it stood before the read: one that differs afterwards was written by this device meanwhile, and stands.
   const atStart = getSavedEntry(t.slab, t.idx, t.wallet);
   if (prior && prior.verdict === "incomplete" && prior.q === t.qNow.toString() && prior.walkTs !== undefined && now() - prior.walkTs < INCOMPLETE_WALK_MS) {
-    await scanOwn(connection, t, atStart, now);
-    writeAttempt(pk, { ...prior, ts: now() });
+    // Only the wallet check, and only when the wallet signed something since the last one (one getSignaturesForAddress otherwise).
+    const top = ownRecordSig(t, atStart) ? await walletTopSig(connection, t.wallet) : null;
+    if (ownRecordSig(t, atStart) && (top === null || top !== prior.walletTop)) await scanOwn(connection, t, atStart, now);
+    writeAttempt(pk, { ...prior, ts: now(), ...(top ? { walletTop: top } : {}) });
     return;
   }
   const facts = await marketFacts(connection, t.slab, t.assetIndex ?? 0);
@@ -300,8 +305,9 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   else if (verdict !== "chain" && ownStale) clearEntryPrice(t.slab, t.idx, t.wallet);
   // The walk did not reach the position's start (a long hold, an unreadable or unexplainable transaction): the wallet's own transactions since
   // this device's fill still show any trade that changed the position, however long ago.
+  const walletTop = !readToStart && ownRecordSig(t, atStart) ? await walletTopSig(connection, t.wallet) : null;
   if (!readToStart) await scanOwn(connection, t, atStart, now);
-  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "incomplete" ? { walkTs: now() } : {}), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
+  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "incomplete" ? { walkTs: now() } : {}), ...(walletTop ? { walletTop } : {}), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
 }
 
 /**
@@ -310,12 +316,19 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
  * One that changed the position means the record describes an earlier one: it is removed (unknown), never shown. Nothing is removed when it
  * cannot be told, or when a trade on this device is in flight / was written meanwhile.
  */
+/** The newest fill of this device's own record for the position (its Entry, else its trade book), or null when it has none to check. */
+function ownRecordSig(t: SyncTarget, atStart: SavedEntry | null): string | null {
+  const own = atStart && !atStart.chainSig && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
+  const book = loadBook(t.wallet, t.slab, t.portfolio.toBase58());
+  return own?.lastSig ?? (book && book.q === t.qNow ? book.lastSig ?? null : null);
+}
+
 async function scanOwn(connection: Connection, t: SyncTarget, atStart: SavedEntry | null, now: () => number): Promise<void> {
   const pk = t.portfolio.toBase58();
   const own = atStart && !atStart.chainSig && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
   const book = loadBook(t.wallet, t.slab, pk);
   const ownBook = book && book.q === t.qNow ? book : null;
-  const sig = own?.lastSig ?? ownBook?.lastSig ?? null;
+  const sig = ownRecordSig(t, atStart);
   if (!sig) return;
   let wallet: PublicKey;
   try {
@@ -323,10 +336,19 @@ async function scanOwn(connection: Connection, t: SyncTarget, atStart: SavedEntr
   } catch {
     return;
   }
-  const m = await walletChangeCheck(connection, t.wrapper, { wallet, market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, recordSig: sig, paceMs: 1000 / PACE_TX_PER_S * 10 });
+  const m = await walletChangeCheck(connection, t.wrapper, { wallet, market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, recordSig: sig, paceMs: 1000 / PACE_TX_PER_S * 10, nftProgram: PERCOLATOR_NFT_PROGRAM_ID });
   if (m.kind !== "changed" || chainSyncHeld(t.slab, now()) || !sameRecord(getSavedEntry(t.slab, t.idx, t.wallet), atStart)) return;
   if (own) clearEntryPrice(t.slab, t.idx, t.wallet);
   if (ownBook && loadBook(t.wallet, t.slab, pk)?.lastSig === ownBook.lastSig) saveBook(t.wallet, t.slab, pk, null);
+}
+
+async function walletTopSig(connection: Pick<Connection, "getSignaturesForAddress">, wallet: string): Promise<string | null> {
+  try {
+    const r = await connection.getSignaturesForAddress(new PublicKey(wallet), { limit: 1 }, "confirmed");
+    return r[0]?.signature ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function sameRecord(a: SavedEntry | null, b: SavedEntry | null): boolean {

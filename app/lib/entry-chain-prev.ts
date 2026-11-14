@@ -6,6 +6,7 @@
  */
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { prevChangeCheck, walletChangeCheck } from "@/lib/entry-chain";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 
 /** Where lib/entry-chain-sync.ts keeps its last attempt (and walk) per portfolio. */
 export const ENTRY_CHAIN_KEY = (portfolio: string) => `perc:entrychain:v1:${portfolio}`;
@@ -53,7 +54,7 @@ export async function prevChangeBeforeFill(
     }
   }
   if (!listed || !t.recordSig || !t.wallet) return null;
-  const w = await walletChangeCheck(connection, wrapper, { wallet: t.wallet, market: t.market, portfolio: t.portfolio, assetIndex: t.assetIndex, recordSig: t.recordSig, fromSig: t.sig, paceMs: o.paceMs ?? 100 });
+  const w = await walletChangeCheck(connection, wrapper, { wallet: t.wallet, market: t.market, portfolio: t.portfolio, assetIndex: t.assetIndex, recordSig: t.recordSig, fromSig: t.sig, paceMs: o.paceMs ?? 100, nftProgram: PERCOLATOR_NFT_PROGRAM_ID });
   if (w.kind === "current") return t.recordSig;
   if (w.kind === "changed") return w.sig;
   return null;

@@ -22,6 +22,7 @@ import { loadBook, loadBookByWallet, recordFill } from "@/lib/trade-book";
 import { MEMO_PROGRAM_ID, fundingMemoIx } from "@/lib/funding-memo";
 import { prevChangeCheck, prevChangeSig, walletChangeCheck } from "@/lib/entry-chain";
 import { prevChangeBeforeFill } from "@/lib/entry-chain-prev";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 
 const WRAPPER = Keypair.generate().publicKey;
 const MARKET = Keypair.generate().publicKey;
@@ -44,11 +45,11 @@ const P2 = 90_000_000n; // device 2 closed P1 and opened the same size at 90.00,
 const BASE1 = 400_000n;
 const BASE2 = 500_000n;
 
-const txs: Record<string, { logs: string[]; memo?: bigint; wallet?: boolean }> = {};
+const txs: Record<string, { logs: string[]; memo?: bigint; wallet?: boolean; extraKeys?: PublicKey[] }> = {};
 let order: string[] = [];
 const one = (sig: string) => {
   const t = txs[sig];
-  const keys = t.memo !== undefined ? [WRAPPER, MEMO_PROGRAM_ID] : [WRAPPER];
+  const keys = [...(t.memo !== undefined ? [WRAPPER, MEMO_PROGRAM_ID] : [WRAPPER]), ...(t.extraKeys ?? [])];
   const ixs = t.memo !== undefined ? [{ programIdIndex: 1, data: new Uint8Array(fundingMemoIx(t.memo).data) }] : [];
   return { slot: 1, meta: { err: null, logMessages: t.logs }, transaction: { message: { staticAccountKeys: keys, compiledInstructions: ixs } } };
 };
@@ -291,6 +292,21 @@ describe("Council round 2 review: beyond the walk's reach", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("review H6: a Position NFT round trip (another wallet trades the escrowed position, the NFT comes back): the wallet check cannot vouch, the result is unknown", async () => {
+    device1Opens();
+    const nftTx = () => ({ logs: CRANK, wallet: true, extraKeys: [PERCOLATOR_NFT_PROGRAM_ID] });
+    txs.mint = nftTx();
+    txs.burn = nftTx();
+    txs.close2x = fillTx(-Q, P2);
+    // B's close + reopen are signed by B: on the portfolio's list, not on this wallet's
+    txs.bClose = { ...fillTx(-Q, 85_000_000n), wallet: false };
+    txs.bOpen = { ...fillTx(Q, P2), wallet: false };
+    order = ["close2x", ...cranks(400, "g"), "burn", "bOpen", "bClose", "mint", "k0", "open1"];
+    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close2x", recordSig: "open1", wallet: WALLET_PK }, { paceMs: 0 });
+    expect(prev).toBeNull();
+    expect(recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 1n, legs: 0 }, sig: "close2x" }, Q, prev)).toBeNull();
   });
 
   it("the check stops at the record's own fill; it is retried only while the fill is not listed yet, not after its read limit", async () => {

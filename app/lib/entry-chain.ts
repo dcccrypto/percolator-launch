@@ -530,11 +530,15 @@ export async function prevChangeSig(connection: Conn, wrapper: PublicKey, o: Par
  * Lists `wallet`'s signatures from the top (or from just below `fromSig`, which must be on the first page) down to `recordSig` or the first
  * one older than its slot. "current": no transaction in between changed this position. "changed": one did (`sig`). "not-listed": `fromSig`
  * is not listed yet. "unknown": the record's slot or a transaction could not be read, or more than `maxRead` / `maxPages` were needed.
+ *
+ * The one way another wallet can trade this portfolio is the Position NFT: its holder trades the escrowed position, and the NFT can come back
+ * and be burned (wrapper UnwrapEscrowedPortfolio, tag 82). So any wallet transaction in the window that names the NFT program (`nftProgram`)
+ * or carries a wrapper ownership instruction (tag 72 transfer, tag 82 unwrap) gives "unknown": the history in between is not the wallet's.
  */
 export async function walletChangeCheck(
   connection: Conn & Pick<Connection, "getSignatureStatuses">,
   wrapper: PublicKey,
-  o: { wallet: PublicKey; market: PublicKey; portfolio: PublicKey; assetIndex?: number; recordSig: string; fromSig?: string | null; maxPages?: number; maxRead?: number; paceMs?: number },
+  o: { wallet: PublicKey; market: PublicKey; portfolio: PublicKey; assetIndex?: number; recordSig: string; fromSig?: string | null; maxPages?: number; maxRead?: number; paceMs?: number; nftProgram?: PublicKey | null },
 ): Promise<{ kind: "current" } | { kind: "changed"; sig: string } | { kind: "not-listed" } | { kind: "unknown" }> {
   const assetIndex = o.assetIndex ?? 0;
   const maxPages = o.maxPages ?? 3;
@@ -576,7 +580,10 @@ export async function walletChangeCheck(
       for (let j = 0; j < group.length; j++) {
         const tx = txs[j];
         if (!tx?.meta) return unknown;
-        if (tx.meta.err !== null || !txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
+        if (tx.meta.err !== null) continue;
+        if (o.nftProgram && txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], o.nftProgram)) return unknown;
+        if (!txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
+        if (wrapperTagIn(tx.transaction?.message as Parameters<typeof wrapperTagIn>[0], wrapper, OWNERSHIP_TAGS)) return unknown;
         const ds = deltasFromLogs(group[j], tx.meta.logMessages, true, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex });
         if (ds === null) return unknown;
         if (ds === "irreconcilable" || ds.length > 0) return { kind: "changed", sig: group[j] };
@@ -586,6 +593,18 @@ export async function walletChangeCheck(
   } catch {
     return unknown;
   }
+}
+
+/** Wrapper instructions that move a portfolio's ownership: TransferPortfolioOwnership (72), UnwrapEscrowedPortfolio (82). */
+const OWNERSHIP_TAGS = new Set([72, 82]);
+
+/** True when a top-level instruction of the message calls `wrapper` with one of `tags` (first data byte). Unknown shape: true (cannot rule it out). */
+function wrapperTagIn(message: { staticAccountKeys?: readonly PublicKey[]; accountKeys?: readonly PublicKey[]; compiledInstructions?: readonly { programIdIndex: number; data: Uint8Array }[]; instructions?: readonly { programIdIndex: number; data: string }[] } | undefined, wrapper: PublicKey, tags: Set<number>): boolean {
+  const keys = message?.staticAccountKeys ?? message?.accountKeys;
+  if (!keys) return true;
+  const ixs = message?.compiledInstructions;
+  if (!ixs) return message?.instructions ? true : false;
+  return ixs.some((ix) => keys[ix.programIdIndex]?.equals?.(wrapper) && ix.data.length > 0 && tags.has(ix.data[0]));
 }
 
 /** True when undoing a change of `deltaQ` leaves `qBefore` on the OTHER side of flat from where the change ended: a flip, whose opening half starts the position. */
