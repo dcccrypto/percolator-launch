@@ -13,6 +13,7 @@ function routeFiles(dir: string, rel = ""): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
+    if (name.startsWith("[...")) continue; // the JSON not_found catch-all is not an endpoint
     if (statSync(p).isDirectory()) out.push(...routeFiles(p, `${rel}/${name}`));
     else if (name === "route.ts") out.push(rel);
   }

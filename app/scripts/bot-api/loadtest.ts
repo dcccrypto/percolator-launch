@@ -24,6 +24,7 @@
 import { randomBytes } from "node:crypto";
 import { Keypair } from "@solana/web3.js";
 import { NextRequest } from "next/server";
+import { provenance } from "./provenance";
 
 type Cls = "read" | "quote" | "account" | "build";
 const CLASSES: Cls[] = ["read", "quote", "account", "build"];
@@ -297,6 +298,7 @@ async function main() {
     if (rows.length) perClass[c] = tally(rows);
   }
   const report = {
+    ...provenance(),
     label: flag("label", null as never) ?? null,
     mode,
     rpc: mode === "inproc" ? rpcMode : "server-configured",

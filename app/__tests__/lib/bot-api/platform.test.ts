@@ -470,3 +470,22 @@ describe("operator F4: health reports degraded", () => {
     expect(j.status).toBe("degraded");
   });
 });
+
+describe("first-timer: unknown /api/v1 paths answer the JSON not_found envelope", () => {
+  it("every method gets the envelope, not an HTML 404", async () => {
+    const m = await import("@/app/api/v1/[...rest]/route");
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"] as const) {
+      const res = await m[method](req("/api/v1/nope/at/all", { method }));
+      expect(res.status).toBe(404);
+      expect(res.headers.get("content-type")).toMatch(/json/);
+      expect((await res.json()).error).toMatchObject({ code: "not_found", retryable: false });
+    }
+  });
+  it("answers disabled when the API is off", async () => {
+    vi.stubEnv("BOT_API_ENABLED", "");
+    const { GET } = await import("@/app/api/v1/[...rest]/route");
+    const res = await GET(req("/api/v1/nope"));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("disabled");
+  });
+});
