@@ -3,7 +3,7 @@
  * fixed `rpc_unavailable`, never the upstream's text), cache headers, program scope.
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
-import { ApiError } from "../errors";
+import { ApiError, redactUrls } from "../errors";
 import { getMarketDiscoveryProgramIds } from "@/lib/config";
 import { isKnownProgram } from "@/lib/programAllowlist";
 
@@ -36,7 +36,7 @@ export async function rpc<T>(meta: { rpcCalls: number }, fn: () => Promise<T>): 
     return await fn();
   } catch (e) {
     if (e instanceof ApiError) throw e;
-    console.error(JSON.stringify({ svc: "bot-api", event: "rpc_failed", err: e instanceof Error ? e.message.slice(0, 120) : "unknown" }));
+    console.error(JSON.stringify({ svc: "bot-api", event: "rpc_failed", err: e instanceof Error ? redactUrls(e.message).slice(0, 120) : "unknown" }));
     throw new ApiError("rpc_unavailable");
   }
 }

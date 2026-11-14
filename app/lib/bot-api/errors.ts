@@ -23,6 +23,8 @@ export const ERROR_CATALOG = {
   request_expired: { status: 400, retryable: false, message: "expiresAfter is in the past" },
   maintenance: { status: 503, retryable: true, message: "writes are paused for maintenance" },
   rpc_unavailable: { status: 503, retryable: true, message: "the Solana RPC failed, try again" },
+  kv_unavailable: { status: 503, retryable: true, message: "the API's key store is unavailable, try again" },
+  client_ip_unknown: { status: 503, retryable: false, message: "the server could not determine the caller's address; anonymous access is refused until the proxy depth is configured" },
   internal: { status: 500, retryable: true, message: "internal error" },
   // markets / accounts
   market_not_found: { status: 404, retryable: false, message: "market not found" },
@@ -83,6 +85,17 @@ export class ApiError extends Error {
       },
     };
   }
+}
+
+/** Strips URLs (RPC endpoints can carry an api-key in the path or query) from a message that is about to be logged. */
+export function redactUrls(msg: string): string {
+  return msg.replace(/[a-z][a-z0-9+.-]*:\/\/\S*/gi, "<url>");
+}
+
+/** An upstream 429 / rate-limit message (web3.js: "Server responded with 429 Too Many Requests"). */
+export function looksRateLimited(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return /\b429\b|too many requests|rate.?limit/i.test(m);
 }
 
 const NAMES = new Map<number, string>();

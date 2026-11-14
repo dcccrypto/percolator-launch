@@ -181,7 +181,7 @@ Error envelope: `{"error":{"code","message","retryable","onchain":{"code","name"
 | Failure | What the API does | Caller does |
 |---|---|---|
 | RPC down / 429 | 503 `rpc_unavailable`, `retryable:true`, Retry-After | back off |
-| Upstash down | rate limits fall back per instance (existing behaviour, `lib/upstash-rate-limit.ts:83`); idempotency falls back per instance; logged `degraded` | nothing; replay protection is weaker across instances, the chain still dedupes identical signed bytes |
+| Upstash down | API key lookups fail fast (Upstash client: 1 retry, 1.5 s timeout) as 503 `kv_unavailable`, `retryable:true`, Retry-After 2; they are never answered from a per-instance map and never count toward the auth lockout; a 30 s circuit breaker skips Upstash while it is failing; rate limits and idempotency fall back per instance (existing behaviour, `lib/upstash-rate-limit.ts:83`); `/v1/health` reports `degraded` (503); logged `kv_degraded` | retry after a couple of seconds; replay protection is weaker across instances meanwhile, the chain still dedupes identical signed bytes |
 | Oracle stale / keeper down | builders refuse `market_stale`; reads show `stale:true` | wait |
 | Owner needs a maintenance crank first | returns only the crank, `resubmitAfter:true` (#3836) | send crank, build again |
 | Blockhash expired | status `expired` | rebuild with a new key |
