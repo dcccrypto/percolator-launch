@@ -3,12 +3,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type { Redis } from "@upstash/redis";
+import { getServerConnection } from "@/lib/server-rpc";
 import { botRoute } from "@/lib/bot-api/handler";
 import { MemoryKv, UpstashKv, KvUnavailableError, BREAKER_MS, __setKvForTest, type Kv } from "@/lib/bot-api/kv";
 import { issueKey, verifyKey } from "@/lib/bot-api/keys";
 import { AUTH_FAIL_LIMIT } from "@/lib/bot-api/limits";
 import { __resetMetricsForTest } from "@/lib/bot-api/metrics";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+
+vi.mock("@/lib/server-rpc", () => ({ getServerConnection: vi.fn(() => ({})) }));
 
 let now = 1_700_000_000_000;
 let kv: MemoryKv;
@@ -117,13 +120,10 @@ describe("operator F2: refuse to enable on a deployed build without the shared K
 
 describe("operator F3: bot routes fail fast on RPC 429", () => {
   it("getBotConnection disables web3.js 429 retries", async () => {
-    vi.resetModules();
-    const spy = vi.fn(() => ({}));
-    vi.doMock("@/lib/server-rpc", () => ({ getServerConnection: spy }));
+    const spy = vi.mocked(getServerConnection);
     const { getBotConnection } = await import("@/lib/bot-api/rpc");
     getBotConnection();
     expect(spy).toHaveBeenCalledWith("confirmed", { disableRetryOnRateLimit: true });
-    vi.doUnmock("@/lib/server-rpc");
   });
   it("no /api/v1 route or bot-api lib calls getServerConnection directly", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
@@ -283,7 +283,6 @@ describe("first-timer: 401/403 carry X-RateLimit headers", () => {
 
 describe("attacker F2 / skeptic F1: cancel during an in-flight build is not lost", () => {
   it("cancel answers 409 idempotency_in_progress while the build runs, and the build still completes normally", async () => {
-    vi.doMock("@/lib/server-rpc", () => ({ getServerConnection: () => ({}) }));
     const { POST: cancel } = await import("@/app/api/v1/orders/cancel/route");
     const { key } = await issueKey({ scopes: ["read", "build"] }, kv);
     let release!: () => void;
@@ -309,7 +308,6 @@ describe("attacker F2 / skeptic F1: cancel during an in-flight build is not lost
     const replay = await build(req("/api/v1/orders", { method: "POST", body, headers: h }));
     expect(replay.status).toBe(409);
     expect((await replay.json()).error.code).toBe("order_cancelled");
-    vi.doUnmock("@/lib/server-rpc");
   });
   it("finishIdempotent never overwrites a cancelled entry (skeptic RACE)", async () => {
     const { beginIdempotent, finishIdempotent } = await import("@/lib/bot-api/idempotency");
