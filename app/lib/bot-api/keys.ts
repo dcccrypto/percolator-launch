@@ -69,8 +69,12 @@ export async function issueKey(
     createdAt: new Date().toISOString(),
     revoked: false,
   };
-  const ok = await kv.set(recKey(id), JSON.stringify(record), { nx: true });
+  const put = (v: string, o: { nx?: boolean }) => (kv.setAuthoritative ? kv.setAuthoritative(recKey(id), v, o) : kv.set(recKey(id), v, o));
+  const ok = await put(JSON.stringify(record), { nx: true });
   if (!ok) throw new Error("key id collision, try again");
+  // Read it back from the shared store: a key that is printed must be one the API can verify.
+  const back = await getKeyRecord(id, kv);
+  if (!back || back.hash !== record.hash) throw new Error(`key ${id} was not stored (the key store did not confirm the write)`);
   return { key: `pbk_${id}_${secret}`, record };
 }
 
@@ -78,7 +82,12 @@ export async function revokeKey(id: string, kv: Kv = getKv()): Promise<boolean> 
   const rec = await getKeyRecord(id, kv);
   if (!rec) return false;
   rec.revoked = true;
-  await kv.set(recKey(id), JSON.stringify(rec));
+  const raw = JSON.stringify(rec);
+  if (kv.setAuthoritative) await kv.setAuthoritative(recKey(id), raw);
+  else await kv.set(recKey(id), raw);
+  // Never report a revoke that did not land: re-read the shared record and insist it is revoked.
+  const back = await getKeyRecord(id, kv);
+  if (!back?.revoked) throw new Error(`key ${id} was NOT revoked (the key store did not confirm the write); it is still live`);
   return true;
 }
 
@@ -98,15 +107,23 @@ export async function getKeyRecord(id: string, kv: Kv = getKv()): Promise<KeyRec
   }
 }
 
-/** The key's record when `raw` is a live key, else null. Constant-time hash compare. */
-export async function verifyKey(raw: string, kv: Kv = getKv()): Promise<KeyRecord | null> {
+/**
+ * Like verifyKey, and says whether the key id has no usable record (absent or revoked). Only that case may be cached as
+ * "missing": a wrong secret on a real key id must never make the real key look missing.
+ */
+export async function verifyKeyDetailed(raw: string, kv: Kv = getKv()): Promise<{ rec: KeyRecord | null; missingId: string | null }> {
   const p = parseKey(raw);
-  if (!p) return null;
+  if (!p) return { rec: null, missingId: null };
   const rec = await getKeyRecord(p.id, kv);
-  if (!rec || rec.revoked) return null;
+  if (!rec || rec.revoked) return { rec: null, missingId: p.id };
   const a = Buffer.from(hashSecret(p.secret), "hex");
   const b = Buffer.from(rec.hash, "hex");
-  return a.length === b.length && timingSafeEqual(a, b) ? rec : null;
+  return { rec: a.length === b.length && timingSafeEqual(a, b) ? rec : null, missingId: null };
+}
+
+/** The key's record when `raw` is a live key, else null. Constant-time hash compare. */
+export async function verifyKey(raw: string, kv: Kv = getKv()): Promise<KeyRecord | null> {
+  return (await verifyKeyDetailed(raw, kv)).rec;
 }
 
 /** `Authorization: Bearer pbk_...` or `X-API-Key: pbk_...`. */

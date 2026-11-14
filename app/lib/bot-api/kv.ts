@@ -35,6 +35,11 @@ export interface Kv {
    * Used where an empty answer would be wrong (API key records).
    */
   getAuthoritative?(key: string): Promise<string | null>;
+  /**
+   * Like set, but a store failure throws KvUnavailableError instead of writing to a per-instance fallback. Used where a write
+   * that did not reach the shared store must fail loudly (issuing and revoking API keys).
+   */
+  setAuthoritative?(key: string, value: string, opts?: { ttlSec?: number; nx?: boolean }): Promise<boolean>;
   readonly backend: "upstash" | "memory";
   degraded(): boolean;
 }
@@ -128,6 +133,16 @@ export class UpstashKv implements Kv {
       const r = await this.r.set(key, value, o as never);
       return r === "OK";
     }, () => this.fallback.set(key, value, opts));
+  }
+  async setAuthoritative(key: string, value: string, opts: { ttlSec?: number; nx?: boolean } = {}): Promise<boolean> {
+    if (this.open()) throw new KvUnavailableError();
+    try {
+      const o = opts.ttlSec ? (opts.nx ? { ex: opts.ttlSec, nx: true as const } : { ex: opts.ttlSec }) : opts.nx ? { nx: true as const } : undefined;
+      return (await this.r.set(key, value, o as never)) === "OK";
+    } catch {
+      this.fail();
+      throw new KvUnavailableError();
+    }
   }
   del(key: string) {
     return this.run(async () => void (await this.r.del(key)), () => this.fallback.del(key));
