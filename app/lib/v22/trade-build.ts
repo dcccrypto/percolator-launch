@@ -104,8 +104,8 @@ export interface TradeBuildResult {
 
 /** A refusal with a stable code and the HTTP status the route answers with. */
 export class TradeBuildRefusal extends Error {
-  constructor(readonly code: string, message: string, readonly status = 422, readonly logs: string[] = []) {
-    super(message);
+  constructor(readonly code: string, message: string, readonly status = 422, readonly logs: string[] = [], cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
     this.name = "TradeBuildRefusal";
   }
 }
@@ -130,7 +130,7 @@ export async function buildV22Trade(connection: Connection, req: TradeBuildReque
   } catch (e) {
     if (e instanceof TradeBuildRefusal) throw e;
     // Anything else is a read that failed (rate limit, timeout, account vanished mid-build). Never a partial result.
-    throw new TradeBuildRefusal("rpc", "a market read failed, try again", 503);
+    throw new TradeBuildRefusal("rpc", "a market read failed, try again", 503, [], e);
   }
 }
 
