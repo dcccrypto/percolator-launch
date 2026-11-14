@@ -195,6 +195,10 @@ export function marketEventStream(plan: StreamPlan, now: () => number = Date.now
 }
 
 const plans = new Map<string, StreamPlan>();
+/** Test seam: plans prepared but not yet taken by their response (must be 0 at rest). */
+export function pendingStreamPlans(): number {
+  return plans.size;
+}
 const MARKER = "X-Bot-Stream";
 
 /**
@@ -207,8 +211,16 @@ export function sseRoute<P = Record<string, string>>(spec: RouteSpec, prepare: (
     if (!release) {
       throw new ApiError("rate_limited", `too many open streams for this caller (max ${MAX_OPEN_STREAMS[ctx.principal.tier]}); close one first`, { headers: { "Retry-After": "5" } });
     }
+    // The deadline fires while prepare is still running: the request is already answered 503, so free the slot now (not after
+    // the 70 s TTL) and, if prepare ever returns, discard its plan instead of parking it in `plans` forever.
+    const onDeadline = () => void release().catch(() => undefined);
+    ctx.signal.addEventListener("abort", onDeadline, { once: true });
     try {
       const plan = await prepare(ctx);
+      if (ctx.signal.aborted) {
+        await release().catch(() => undefined);
+        throw new ApiError("rpc_unavailable", "the upstream RPC did not answer in time, try again");
+      }
       plans.set(ctx.reqId, {
         ...plan,
         lastEventId: plan.lastEventId ?? parseLastEventId(ctx.req.headers.get("last-event-id")),
@@ -218,6 +230,8 @@ export function sseRoute<P = Record<string, string>>(spec: RouteSpec, prepare: (
     } catch (e) {
       await release().catch(() => undefined);
       throw e;
+    } finally {
+      ctx.signal.removeEventListener("abort", onDeadline);
     }
     return { body: { stream: true }, headers: { [MARKER]: ctx.reqId } };
   });
