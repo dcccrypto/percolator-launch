@@ -349,6 +349,26 @@ describe("Council round 2 review: beyond the walk's reach", () => {
     }
   });
 
+  it("live (devnet, RPC 429s): the walk is unreadable and the wallet check fails too; the next minute only the wallet check runs again and removes the old Entry", async () => {
+    vi.useFakeTimers();
+    try {
+      device1Opens();
+      const c = conn as unknown as { getTransactions: ReturnType<typeof vi.fn>; getSignatureStatuses: ReturnType<typeof vi.fn>; getSignaturesForAddress: ReturnType<typeof vi.fn> };
+      c.getTransactions.mockRejectedValueOnce(new Error("429")); // the walk's first read
+      c.getSignatureStatuses.mockRejectedValueOnce(new Error("429")); // the wallet check's first read
+      expect(await drive(syncChainEntry(conn, target, () => 10_000_000))).toBe("unreadable");
+      expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(effective(P1)); // could not tell yet
+      c.getSignaturesForAddress.mockClear();
+      await drive(syncChainEntry(conn, target, () => 10_000_000 + VERIFY_MS + 1));
+      expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull(); // a minute later, not after the 10-minute unreadable cooldown
+      expect(loadBookByWallet(WALLET, SLAB)).toBeNull();
+      // only the wallet's own list was read, not the portfolio walk
+      expect(c.getSignaturesForAddress.mock.calls.every(([pk]) => (pk as PublicKey).toBase58() === WALLET)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("the check stops at the record's own fill; it is retried only while the fill is not listed yet, not after its read limit", async () => {
     txs.close1x = fillTx(-Q, P1);
     order = ["close1x", "k1", "k0", "open1"];

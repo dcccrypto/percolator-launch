@@ -75,6 +75,8 @@ interface Attempt {
   walkTs?: number;
   /** The wallet's newest signature when the record was last checked against the wallet's own trades: unchanged = nothing new to read. */
   walletTop?: string;
+  /** An unreadable walk left this device's own record unchecked (the wallet check failed too): the wallet check alone is repeated each minute. */
+  ownOpen?: boolean;
 }
 
 function resumeOf(a: Attempt | null): ChainResume | null {
@@ -116,6 +118,7 @@ export function rebuildDue(prior: Attempt | null, qNow: bigint, now: number): bo
   // A chain record is re-verified against the portfolio's newest signature, not trusted by size alone (N3).
   if (prior.verdict === "chain") return now - prior.ts >= VERIFY_MS;
   if (prior.verdict === "incomplete" && prior.walkTs !== undefined) return now - prior.ts >= VERIFY_MS;
+  if (prior.verdict === "unreadable" && prior.ownOpen) return now - prior.ts >= VERIFY_MS;
   return now - prior.ts >= COOLDOWN_MS;
 }
 
@@ -237,9 +240,17 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
     writeAttempt(pk, { ...rest, ts: now(), ...(top && settled ? { walletTop: top } : {}) });
     return;
   }
+  if (prior && prior.verdict === "unreadable" && prior.ownOpen && prior.q === t.qNow.toString() && prior.walkTs !== undefined && now() - prior.walkTs < COOLDOWN_MS) {
+    // Live devnet: an unreadable walk (RPC 429s) must not leave an unchecked device record shown for the whole cooldown. Until the next full
+    // walk, only the wallet check runs, each minute, until it settles.
+    const settled = !ownRecordSig(t, atStart) || (await scanOwn(connection, t, atStart, now));
+    writeAttempt(pk, { ...prior, ts: now(), ownOpen: !settled });
+    return;
+  }
   const facts = await marketFacts(connection, t.slab, t.assetIndex ?? 0);
   if (facts === null) {
-    writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now(), ...(prior?.walk ? { walk: prior.walk } : {}) });
+    const settled = !ownRecordSig(t, atStart) || (await scanOwn(connection, t, atStart, now));
+    writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now(), walkTs: now(), ...(settled ? {} : { ownOpen: true }), ...(prior?.walk ? { walk: prior.walk } : {}) });
     return;
   }
   // The walk is over the PORTFOLIO's own signature list only. (A wallet-first walk was tried and removed: a keeper-signed REDUCE is not on the
@@ -309,8 +320,10 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   // The walk did not reach the position's start (a long hold, an unreadable or unexplainable transaction): the wallet's own transactions since
   // this device's fill still show any trade that changed the position, however long ago.
   let walletTop = !readToStart && ownRecordSig(t, atStart) ? await walletTopSig(connection, t.wallet) : null;
-  if (!readToStart && !(await scanOwn(connection, t, atStart, now))) walletTop = null;
-  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "incomplete" ? { walkTs: now() } : {}), ...(walletTop ? { walletTop } : {}), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
+  const ownSettled = readToStart || (await scanOwn(connection, t, atStart, now));
+  if (!ownSettled) walletTop = null;
+  const ownOpen = verdict === "unreadable" && !ownSettled && ownRecordSig(t, getSavedEntry(t.slab, t.idx, t.wallet)) !== null;
+  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "incomplete" || ownOpen ? { walkTs: now() } : {}), ...(ownOpen ? { ownOpen } : {}), ...(walletTop ? { walletTop } : {}), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
 }
 
 /**
