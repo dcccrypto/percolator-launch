@@ -313,3 +313,21 @@ describe("buildV22Trade", () => {
     expect([e.code, e.status]).toEqual(["rpc", 503]);
   });
 });
+
+describe("buildV22Trade preflight (bot API caps)", () => {
+  it("runs once with the limit, effective price and position before anything is simulated; returns lastValidBlockHeight", async () => {
+    const seen: unknown[] = [];
+    const r = await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 2_000_000n, slippageBps: 100n, preflight: (p) => void seen.push({ ...p, marketData: p.marketData.length }) });
+    expect(seen).toHaveLength(1);
+    const eff = decodeMarketEngineView(new Uint8Array(MARKET_DATA))!.effectivePriceE6;
+    expect(seen[0]).toMatchObject({ size: 2_000_000n, effectivePriceE6: eff, limitPriceE6: BigInt(r.summary.limitPriceE6), marketData: MARKET_DATA.length, reducing: false });
+    expect(r.lastValidBlockHeight).toBe(1);
+    expect(r.blockhash).toBe("11111111111111111111111111111111");
+  });
+  it("a preflight throw comes out unchanged (not as an rpc refusal) and nothing is simulated", async () => {
+    class Cap extends Error {}
+    const e = await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n, preflight: () => { throw new Cap("over cap"); } }).then(() => null, (x) => x);
+    expect(e).toBeInstanceOf(Cap);
+    expect(m.simCalls).toHaveLength(0);
+  });
+});
