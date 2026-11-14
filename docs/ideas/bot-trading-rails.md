@@ -167,7 +167,7 @@ Error envelope: `{"error":{"code","message","retryable","onchain":{"code","name"
 
 - One JSON log line per request: request id, route, keyId, status, error code, latency ms, RPC calls, simulations. No secrets, no raw key.
 - Metrics: in-process counters and latency histograms per route/code at `GET /v1/metrics` (Prometheus text, needs an `ops` scope). Per serverless instance; a shared store is later.
-- Health: `GET /v1/health` with RPC slot, slot lag, per-market oracle age, kill switch state. Uptime: `app/scripts/bot-api/uptime.ts` (runs anywhere, exits non-zero on failure); scheduling it is an ops decision, not done here.
+- Health: `GET /v1/health` returns what it can read in one cheap call: RPC slot and block height, RPC latency (`rpcMs`), KV backend and degraded state, client-address resolution, `writesPaused`, and `switches` (`botApiEnabled`, `anonReads`, `writesPaused`). It does NOT report slot lag against a second source (that needs a second RPC provider, not configured) or per-market oracle age (that is a program-account read per market, not a health-check cost); a market's `stale` flag and `observedAt` on `GET /v1/markets/{market}` are the oracle-age signal. Uptime: `app/scripts/bot-api/uptime.ts` (runs anywhere, exits non-zero on failure); scheduling it is an ops decision, not done here.
 - Load tests: `app/scripts/bot-api/loadtest.ts` (no new dependency) against a local `next start`, (a) with a recorded-fixture RPC to measure our own overhead and throughput, and (b) against public devnet at a low rate for real end-to-end latency. Report p50/p95/p99, requests/s, error rate.
 
 ### 3.8 Docs and SDK
@@ -188,7 +188,7 @@ Error envelope: `{"error":{"code","message","retryable","onchain":{"code","name"
 | Fee rose between build and sign | simulation would fail; on chain 98 | build again with `maxFeeBps` |
 | Layout / program change | `not_v22` / `market_unreadable` | wait for release |
 | Maintenance flag | 503 `maintenance` (`lib/maintenance`) | wait |
-| Abuse | weighted limits per key and per address (anonymous IPv6 by /64); global build ceiling (3000/min) with at most 25% (750) per principal; global read/stream ceiling (6000/min); at most 2 open streams per anonymous caller and 5 per key, each stream tick charged; 4 KB body cap enforced while reading; failed-key throttle per address (a valid key is verified first and never refused for others' failures) | — |
+| Abuse | weighted limits per key and per address (anonymous IPv6 by /56, so one customer delegation is one budget; unrelated subscribers sharing a /56 share it, and can take a key); global build ceiling (3000/min, a sliding two-window estimate so it cannot be doubled across a minute boundary) with at most 25% (750) per principal; global read/stream ceiling (6000/min, fixed clock minutes: a caller can burst up to 2x its own budget across a boundary) with anonymous callers together capped at 25% (1500) and any one principal at 25% (1500), so keyed bots always keep headroom; history costs 3 + 1 per portfolio scanned; at most 2 open streams per anonymous caller and 5 per key, each stream tick charged, a stream whose setup outlives the deadline frees its slot at once; 4 KB body cap enforced while reading; failed-key throttle per address (a valid key is verified first and never refused for others' failures; a junk key costs one store read and, until the address is locked, one counter write; a key id found missing is not looked up again for 5 s on that instance). `BOT_API_ANON_READS=0` removes the anonymous lever entirely | — |
 | Client address unknown (`TRUSTED_PROXY_DEPTH` does not match the deployment) | on a deployed build anonymous callers get 503 `client_ip_unknown`; keyed callers are limited per key only and no per-address state is kept; `/v1/health` shows `clientIp.resolved:false` and status `degraded` | operator fixes `TRUSTED_PROXY_DEPTH` |
 | Upstream RPC 429 | bot routes do not retry 429 (`disableRetryOnRateLimit`): 503 `rpc_unavailable`, Retry-After 2; handler deadline 20 s | back off |
 | Deployed build without the shared KV | the API refuses to enable (503 `disabled`, reason names the missing Upstash variables); `/v1/health` flags a memory backend on a deployed build | operator sets `UPSTASH_REDIS_REST_URL` and `_TOKEN` |
@@ -283,10 +283,10 @@ Then a full Council on A-D.
 
 None of these has been decided. The code ships with the defaults below only so it can be tested on devnet; changing any of them is a one-line edit.
 
-1. Whether `/api/v1` may bypass the playground waitlist gate on the v2.2 preview when `BOT_API_ENABLED=1` (default: off, so no change).
+1. Whether `/api/v1` may bypass the playground waitlist gate on the v2.2 preview when `BOT_API_ENABLED=1` (default: off, so no change). Provisional: the exemption is tied to `BOT_API_ENABLED` and has no switch of its own, so today "API on" means "bypass on"; if the answer is "API on but behind the waitlist", a separate setting has to be added first. Not approved.
 2. Default caps for devnet: 100 bps slippage, 5,000 USD notional per order, 10x leverage.
-3. Who issues keys in v1 (ops script) and whether anonymous reads are allowed (code default today: allowed, `BOT_API_ANON_READS=0` turns them off).
-4. Whether #3836's `/api/v22/trade` stays as a public alias or is folded into `/v1/orders`.
+3. Who issues keys in v1 (ops script) and whether anonymous reads are allowed (code default today: allowed, `BOT_API_ANON_READS=0` turns them off). Provisional, not approved. `BOT_API_ANON_READS=0` is also the first lever against an anonymous flood.
+4. Whether #3836's `/api/v22/trade` stays as a public alias or is folded into `/v1/orders`. Note: this stack changes two error answers of that held route, because it shares `buildV22Trade` (pinned in `app/__tests__/api/v22-trade-route-codes.test.ts`): an LP scan that fails on RPC now answers 503 `rpc` (was 503 `no_lp`), and the owner's account is checked before the LP, so a wallet with no portfolio now answers 409 `no_portfolio` (was 503 `no_lp` on a market without an LP). Both are improvements, but the route was put on hold, so the owner should see them. Otherwise `/api/v22/trade` output is unchanged.
 
 ### What the equity, fee and error figures do and do not count
 

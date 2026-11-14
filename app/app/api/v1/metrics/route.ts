@@ -3,6 +3,8 @@ import { botRoute } from "@/lib/bot-api/handler";
 import { renderPrometheus } from "@/lib/bot-api/metrics";
 
 export const dynamic = "force-dynamic";
+/** Above the 20 s handler deadline (RPC_DEADLINE_MS), so a hung RPC answers JSON rpc_unavailable, not a platform 504. */
+export const maxDuration = 30;
 
 const inner = botRoute({ route: "/v1/metrics", scope: "ops", weight: 1 }, async () => ({ body: renderPrometheus() }));
 

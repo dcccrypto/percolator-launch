@@ -11,6 +11,8 @@ import { loadAllMarkets } from "@/lib/bot-api/reads/market-source";
 import { decodeMarket, type MarketView } from "@/lib/bot-api/reads/market";
 
 export const dynamic = "force-dynamic";
+/** Above the 20 s handler deadline (RPC_DEADLINE_MS), so a hung RPC answers JSON rpc_unavailable, not a platform 504. */
+export const maxDuration = 30;
 
 export const GET = botRoute({ route: "/v1/markets", scope: "read", weight: 2 }, async ({ meta }) => {
   const { markets, slot } = await loadAllMarkets(getBotConnection("confirmed"), meta);

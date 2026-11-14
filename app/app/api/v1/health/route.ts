@@ -1,6 +1,6 @@
 /** GET /api/v1/health: RPC slot and block height, KV backend, and whether the bot API is on. For uptime checks. */
 import { getBotConnection } from "@/lib/bot-api/rpc";
-import { memoryKvOnDeployedBuild } from "@/lib/bot-api/config";
+import { anonReadsAllowed, memoryKvOnDeployedBuild } from "@/lib/bot-api/config";
 import { trustedProxyDepth } from "@/lib/trusted-proxy-depth";
 import { getClientIp } from "@/lib/get-client-ip";
 import { botRoute } from "@/lib/bot-api/handler";
@@ -9,6 +9,8 @@ import { getMaintenanceConfig } from "@/lib/maintenance";
 import { ApiError } from "@/lib/bot-api/errors";
 
 export const dynamic = "force-dynamic";
+/** Above the 20 s handler deadline (RPC_DEADLINE_MS), so a hung RPC answers JSON rpc_unavailable, not a platform 504. */
+export const maxDuration = 30;
 
 export const GET = botRoute({ route: "/v1/health", scope: "read", weight: 1 }, async ({ meta, req }) => {
   const conn = getBotConnection("confirmed");
@@ -41,6 +43,9 @@ export const GET = botRoute({ route: "/v1/health", scope: "read", weight: 1 }, a
       // When the address cannot be resolved on a deployed build, anonymous callers are refused (client_ip_unknown).
       clientIp: { resolved: clientIpResolved, trustedProxyDepth: trustedProxyDepth() },
       writesPaused: getMaintenanceConfig().blockWrites,
+      // Switch state an operator needs at a glance: the API answering means BOT_API_ENABLED is on; anonymous reads and the
+      // app-wide write pause are the other two levers.
+      switches: { botApiEnabled: true, anonReads: anonReadsAllowed(), writesPaused: getMaintenanceConfig().blockWrites },
     },
   };
 });

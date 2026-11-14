@@ -10,6 +10,8 @@ import { MARKET_CACHE, observedAt, parsePubkey, queryParam } from "@/lib/bot-api
 import { DEFAULT_QUOTE_SLIPPAGE_BPS, MAX_QUOTE_SLIPPAGE_BPS, loadQuoteSource, quoteView } from "@/lib/bot-api/reads/quote";
 
 export const dynamic = "force-dynamic";
+/** Above the 20 s handler deadline (RPC_DEADLINE_MS), so a hung RPC answers JSON rpc_unavailable, not a platform 504. */
+export const maxDuration = 30;
 const MAX_ABS_Q = (1n << 127n) - 1n;
 
 export const GET = botRoute<{ market: string }>({ route: "/v1/markets/{market}/quote", scope: "read", weight: 2 }, async ({ req, params, meta }) => {
