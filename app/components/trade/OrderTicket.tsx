@@ -87,6 +87,7 @@ import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { isEntryKnown } from "@/lib/entry-price-display";
 import { holdChainSync, setChainSyncHold } from "@/lib/entry-chain-hold";
+import { prevChangeBeforeFill } from "@/lib/entry-chain-prev";
 import { saveEntryPrice, clearEntryPrice, markUnpricedFill, clearEntryUnknownMark, entryAfterTrade, entryRecordCurrent, getSavedEntry, busyFeeAfterTrade } from "@/lib/entry-price";
 import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from "@/lib/v22/busy-fee";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
@@ -1676,6 +1677,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const execFillP: Promise<ExecFill | null> = v22Fill
         ? readExecFill(connection, sigKey as string, slabProgramId as PublicKey, { market: new PublicKey(slabAddress), taker: userAccount?.pubkey ?? null }).catch(() => null)
         : Promise.resolve(null);
+      // Council r10 round 2 MED: the position's newest change on chain before this fill. The saved Entry and the trade book carry on into this
+      // fill only if they include that change: a same-size close + reopen on another device keeps the size, not the history. Read once, shared.
+      let prevP: Promise<string | null> | null = null;
+      const prevChange = (portfolio: PublicKey): Promise<string | null> =>
+        (prevP ??= prevChangeBeforeFill(connection, slabProgramId as PublicKey, { market: new PublicKey(slabAddress), portfolio, sig: sigKey as string }).catch(() => null));
       const measured = takePositionChange(sig).then((change): PositionChange | null => {
         if (change) return change;
         // Fund-and-trade with no measured change (a new portfolio, or a read that failed) leaves
@@ -1746,7 +1752,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         if (existingPositionSize === 0n) {
           // r8: this save has no size yet (it is measured below). It is flagged pending so the opening device keeps showing it in the
           // meantime; the measured save replaces it, and once the short window passes an unmeasured one stops counting.
-          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet, undefined, { bookedPriceE6, pending: true, busyFeeAtoms: fillBusyFeeAtoms });
+          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet, undefined, { bookedPriceE6, pending: true, busyFeeAtoms: fillBusyFeeAtoms, lastSig: sigKey });
         } else {
           clearEntryPrice(slab, entryIdx, wallet);
         }
@@ -1754,9 +1760,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // (ADL-effective, lib/position-change.ts): an add averages the saved entry with this fill,
         // a reduce keeps it, a flip or new position takes this fill (lib/entry-price.ts
         // entryAfterTrade). No measurement (read failed, legacy market): the step above stands.
-        void measured.then((change) => {
+        void measured.then(async (change) => {
           if (!change) return;
-          const next = entryAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillPriceE6 });
+          // An add or a reduce carries the saved Entry on only when it includes the chain's newest change before this fill (v2.2: read from chain).
+          let base = prior;
+          const carries = change.beforeQ !== 0n && change.afterQ !== 0n && (change.beforeQ > 0n) === (change.afterQ > 0n);
+          if (carries && v22Fill) {
+            const pk = (await execFillP.catch(() => null))?.taker ?? userAccount?.pubkey ?? null;
+            const prev = pk ? await prevChange(pk) : null;
+            if (!base || base.lastSig === null || base.lastSig !== prev) base = null;
+          }
+          const next = entryAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: base, fillPriceE6 });
           if (next === null) {
             clearEntryPrice(slab, entryIdx, wallet, { flat: change.afterQ === 0n });
             return;
@@ -1766,15 +1780,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             entryAfterTrade({
               beforeQ: change.beforeQ,
               afterQ: change.afterQ,
-              saved: prior ? { entryPriceE6: prior.bookedPriceE6, sizeQ: prior.sizeQ } : null,
+              saved: base ? { entryPriceE6: base.bookedPriceE6, sizeQ: base.sizeQ } : null,
               fillPriceE6: bookedPriceE6,
             }) ?? next;
           const opened = change.beforeQ === 0n || (change.beforeQ > 0n) !== (change.afterQ > 0n);
           // The saved leverage describes the order that opened the position (PositionPanel's
           // "Order Lev."), so an add or a reduce keeps it.
-          const lev = opened ? orderLeverage : prior?.leverage ?? undefined;
-          const nextBusy = busyFeeAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillBusyFeeAtoms });
-          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ, { bookedPriceE6: nextBooked, busyFeeAtoms: nextBusy });
+          const lev = opened ? orderLeverage : base?.leverage ?? undefined;
+          const nextBusy = busyFeeAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: base, fillBusyFeeAtoms });
+          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ, { bookedPriceE6: nextBooked, busyFeeAtoms: nextBusy, lastSig: sigKey });
         });
       }
       };
@@ -1818,7 +1832,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               return;
             }
             const before = change ? change.beforeQ : 0n;
-            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), ticketFillIn(ef, change?.funding, before, sig), before);
+            // A book carried on from before this fill must include the chain's newest change before it (Council r10 round 2 MED).
+            const prev = before !== 0n ? await prevChange(ef.taker) : undefined;
+            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { ...ticketFillIn(ef, change?.funding, before, sig), sig: sigKey }, before, prev);
             if (r !== null) recordRealized(publicKey.toBase58(), slabAddress, r);
           }
         });

@@ -140,8 +140,8 @@ describe("D1: both devices compute the same funding, and no close surface says '
 
   it("the trading device's book (memo base) and the book rebuilt from chain on device 2 are identical, through a partial close", async () => {
     // Device 1: the book it records itself (the ticket passes the memo base it wrote as fundingBefore).
-    recordFill(WALLET, SLAB, PORTFOLIO.toBase58(), { q: OPEN, bookedPriceE6: BOOKED, feeAtoms: rec(OPEN, BOOKED, 23n).feeAtoms, funding: null, fundingBefore: BASE_AT_OPEN }, 0n);
-    recordFill(WALLET, SLAB, PORTFOLIO.toBase58(), { q: -T, bookedPriceE6: 80_020_000n, feeAtoms: rec(-T, 80_020_000n, 23n).feeAtoms, funding: null }, OPEN);
+    recordFill(WALLET, SLAB, PORTFOLIO.toBase58(), { q: OPEN, bookedPriceE6: BOOKED, feeAtoms: rec(OPEN, BOOKED, 23n).feeAtoms, funding: null, fundingBefore: BASE_AT_OPEN, sig: "open" }, 0n);
+    recordFill(WALLET, SLAB, PORTFOLIO.toBase58(), { q: -T, bookedPriceE6: 80_020_000n, feeAtoms: rec(-T, 80_020_000n, 23n).feeAtoms, funding: null, sig: "part" }, OPEN);
     const dev1 = loadBook(WALLET, SLAB, PORTFOLIO.toBase58());
 
     // Device 2: empty storage; the walk over the same transactions (cranks in between) with the memo on the opening fill.
@@ -207,13 +207,23 @@ describe("D1: both devices compute the same funding, and no close surface says '
     expect(storeChainBook(t, { positionDeltas: deltas, startQ: 0n })).toBe(true);
     expect(loadBookByWallet(WALLET, SLAB)?.fundingBase).toBe(BASE_AT_OPEN);
     // a device book of the same size with an unread base (a post-trade read that hit a rate limit) gets the chain's base, nothing else changes
-    saveBook(WALLET, SLAB, PORTFOLIO.toBase58(), { q: OPEN, avgE6: BOOKED, fees: 9n, pnl: 0n, fundingBase: null });
+    saveBook(WALLET, SLAB, PORTFOLIO.toBase58(), { q: OPEN, avgE6: BOOKED, fees: 9n, pnl: 0n, fundingBase: null, lastSig: "o" });
     expect(storeChainBook(t, { positionDeltas: deltas, startQ: 0n })).toBe(true);
-    expect(loadBook(WALLET, SLAB, PORTFOLIO.toBase58())).toEqual({ q: OPEN, avgE6: BOOKED, fees: 9n, pnl: 0n, fundingBase: BASE_AT_OPEN });
-    // a complete device book of the same size is the trading device's own: left alone
-    saveBook(WALLET, SLAB, PORTFOLIO.toBase58(), { q: OPEN, avgE6: BOOKED, fees: 9n, pnl: 0n, fundingBase: 1n });
+    expect(loadBook(WALLET, SLAB, PORTFOLIO.toBase58())).toEqual({ q: OPEN, avgE6: BOOKED, fees: 9n, pnl: 0n, fundingBase: BASE_AT_OPEN, lastSig: "o" });
+    // a complete device book of the same size whose newest fill is the chain's newest change is the trading device's own: left alone
+    saveBook(WALLET, SLAB, PORTFOLIO.toBase58(), { q: OPEN, avgE6: BOOKED, fees: 9n, pnl: 0n, fundingBase: 1n, lastSig: "o" });
     expect(storeChainBook(t, { positionDeltas: deltas, startQ: 0n })).toBe(false);
     expect(loadBook(WALLET, SLAB, PORTFOLIO.toBase58())?.fundingBase).toBe(1n);
+    // the same size from another fill (a same-size close + reopen elsewhere), or a book saved without its fill: the chain's book replaces it
+    for (const lastSig of ["older", undefined]) {
+      saveBook(WALLET, SLAB, PORTFOLIO.toBase58(), { q: OPEN, avgE6: BOOKED, fees: 9n, pnl: 0n, fundingBase: 1n, ...(lastSig ? { lastSig } : {}) });
+      expect(storeChainBook(t, { positionDeltas: deltas, startQ: 0n })).toBe(true);
+      expect(loadBook(WALLET, SLAB, PORTFOLIO.toBase58())).toMatchObject({ fundingBase: BASE_AT_OPEN, lastSig: "o" });
+    }
+    // ... and is removed when the chain cannot rebuild one (no memo-less guess, no old numbers)
+    saveBook(WALLET, SLAB, PORTFOLIO.toBase58(), { q: OPEN, avgE6: BOOKED, fees: 9n, pnl: 0n, fundingBase: 1n, lastSig: "older" });
+    expect(storeChainBook(t, { positionDeltas: [{ ...deltas[0], fill: undefined }], startQ: 0n })).toBe(true);
+    expect(loadBook(WALLET, SLAB, PORTFOLIO.toBase58())).toBeNull();
   });
 });
 

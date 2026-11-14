@@ -26,12 +26,12 @@
  * the walk must not spend its budget on them:
  *   - a transaction that does not name the wrapper program among its accounts cannot have touched the position and is skipped unread for
  *     events (a third party cannot push the walk to "unknown" with a truncated log in a transaction that never ran the wrapper);
- *   - `maxTx` (default 60) counts only transactions that CHANGED this position (a fill or a REDUCE); `maxRead` (default 2,000, about 16 hours
- *     of cranks at the busiest rate seen) bounds every transaction read, cranks included;
+ *   - `maxTx` (default 60) counts only transactions that CHANGED this position (a fill or a REDUCE); `maxRead` (default 2,000, about 11 hours
+ *     of cranks at one every ~20 s) bounds every transaction read, cranks included;
  *   - reads go in batches (`getTransactions`, one HTTP request) when the connection has it, paced by `paceMs` between batches;
  *   - `resume`: the position as an earlier walk rebuilt it at `topSig`. A later rebuild reads only the transactions newer than that and joins
  *     them on, so a position held for days costs only what changed since the last look.
- * A rebuild runs only for a position this device has no current entry for, at most once per cooldown per portfolio and size (memory + storage).
+ * A rebuild is due per portfolio and size (lib/entry-chain-sync.ts rebuildDue: re-checked each minute after a complete read, cooled down otherwise).
  *
  * Funding (Council r10 recheck D1). The opening fill of a position opened by this app carries the portfolio's funding counter in a memo
  * (lib/funding-memo.ts). The walk keeps it on that fill, so `bookFromDeltas` can rebuild the trade book behind the Trade result on any device:
@@ -356,7 +356,7 @@ export function bookFromDeltas(deltas: readonly ChainDelta[], startQ: bigint, qN
     const d = deltas[i];
     if (!d.fill) return null;
     const base = i === 0 && d.fundingBase != null ? { netPaid: d.fundingBase, legs: 1 } : null;
-    book = applyFill(book, { q: d.fill.executedQ, bookedPriceE6: d.fill.bookedPriceE6, feeAtoms: d.fill.feeAtoms, funding: base }).book;
+    book = applyFill(book, { q: d.fill.executedQ, bookedPriceE6: d.fill.bookedPriceE6, feeAtoms: d.fill.feeAtoms, funding: base, sig: d.sig }).book;
     if (i === 0 && book && d.fundingBase == null) book = { ...book, fundingBase: null };
   }
   return book && book.q === qNow ? book : null;
@@ -441,6 +441,64 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
     }
   } catch {
     return { verdict: "unreadable", entry: null, txRead, topSig, changesRead };
+  }
+}
+
+/**
+ * Council r10 round 2 MED: the signature of the newest transaction BEFORE `beforeSig` that changed this position (a fill or a REDUCE), read
+ * from the portfolio's own list, skipping keeper cranks and anything that never ran the wrapper. The trade book and a device-written Entry
+ * describe the position only while their newest fill is that change: a same-size close + reopen (or an add + reduce) on another device keeps
+ * the size but not the history.
+ *
+ * `known`: an earlier walk's top signature and the newest change it found. Reaching `known.top` with no change in between returns
+ * `known.newest` without reading further. Null when it cannot be told: `beforeSig` not on the list yet, an unreadable transaction, or
+ * `maxRead` transactions read without finding a change.
+ */
+export async function prevChangeSig(
+  connection: Conn,
+  wrapper: PublicKey,
+  o: { market: PublicKey; portfolio: PublicKey; assetIndex?: number; beforeSig: string; known?: { top: string; newest: string } | null; maxRead?: number; pageSize?: number },
+): Promise<string | null> {
+  const assetIndex = o.assetIndex ?? 0;
+  const maxRead = o.maxRead ?? 300;
+  const pageSize = o.pageSize ?? 50;
+  let txRead = 0;
+  let before: string | undefined;
+  let found = false; // `beforeSig` seen: everything after it in the list is older
+  try {
+    for (;;) {
+      const page = await connection.getSignaturesForAddress(o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
+      if (page.length === 0) return null;
+      let list = page;
+      if (!found) {
+        // Listed newest first from the top (a `before` the node has not indexed yet is not reliable): it must be on the first page.
+        const at = page.findIndex((s) => s.signature === o.beforeSig);
+        if (at < 0) return null;
+        found = true;
+        list = page.slice(at + 1);
+      }
+      const knownAt = o.known ? list.findIndex((s) => s.signature === o.known?.top) : -1;
+      const sigs = (knownAt >= 0 ? list.slice(0, knownAt) : list).filter((s) => s.err === null).map((s) => s.signature);
+      for (let i = 0; i < sigs.length; i += 10) {
+        if (txRead >= maxRead) return null;
+        const group = sigs.slice(i, i + 10).slice(0, maxRead - txRead);
+        const txs = await fetchTxs(connection, group, 10);
+        txRead += group.length;
+        for (let j = 0; j < group.length; j++) {
+          const tx = txs[j];
+          if (!tx?.meta) return null;
+          if (tx.meta.err !== null || !txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
+          const ds = deltasFromLogs(group[j], tx.meta.logMessages, true, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex });
+          if (ds === null) return null;
+          if (ds === "irreconcilable" || ds.length > 0) return group[j];
+        }
+      }
+      if (knownAt >= 0 && o.known) return o.known.newest;
+      if (page.length < pageSize) return null;
+      before = page[page.length - 1].signature;
+    }
+  } catch {
+    return null;
   }
 }
 

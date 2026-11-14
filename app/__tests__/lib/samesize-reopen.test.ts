@@ -20,7 +20,7 @@ import { VERIFY_MS, __resetEntryChainSyncForTests, shouldSyncPosition, syncChain
 import { getSavedEntry, saveEntryPrice } from "@/lib/entry-price";
 import { loadBook, loadBookByWallet, recordFill } from "@/lib/trade-book";
 import { MEMO_PROGRAM_ID, fundingMemoIx } from "@/lib/funding-memo";
-import * as chain from "@/lib/entry-chain";
+import { prevChangeSig } from "@/lib/entry-chain";
 
 const WRAPPER = Keypair.generate().publicKey;
 const MARKET = Keypair.generate().publicKey;
@@ -71,8 +71,8 @@ const row = { slabAddress: SLAB, idx: 0, adlKnown: true, effectiveSize: Q, portf
 
 /** Device 1 opens P1 from flat with its own ticket: the measured Entry save and the trade book, as OrderTicket writes them (sig "open1"). */
 function device1Opens(): void {
-  saveEntryPrice(SLAB, 0, effective(P1), 2, WALLET, Q, { bookedPriceE6: P1, busyFeeAtoms: 0n, lastSig: "open1" } as never);
-  recordFill(WALLET, SLAB, PF, { q: Q, bookedPriceE6: P1, feeAtoms: fee(Q, P1), fundingBefore: BASE1, sig: "open1" } as never, 0n);
+  saveEntryPrice(SLAB, 0, effective(P1), 2, WALLET, Q, { bookedPriceE6: P1, busyFeeAtoms: 0n, lastSig: "open1" });
+  recordFill(WALLET, SLAB, PF, { q: Q, bookedPriceE6: P1, feeAtoms: fee(Q, P1), fundingBefore: BASE1, sig: "open1" }, 0n);
 }
 
 beforeEach(() => {
@@ -105,7 +105,7 @@ describe("same-size close + reopen on another device, seen from device 1", () =>
   it("a close on device 1 before any check: the Trade result is unknown, not P1's book (+19.x USDC)", () => {
     device1Opens();
     // device 1 closes P2 flat at 90.00; the newest position change before the close is device 2's open2
-    const r = recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 300n, legs: 0 }, sig: "close2" } as never, Q, "open2" as never);
+    const r = recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 300n, legs: 0 }, sig: "close2" }, Q, "open2");
     expect(r).toBeNull();
     expect(loadBook(WALLET, SLAB, PF)).toBeNull();
   });
@@ -113,14 +113,14 @@ describe("same-size close + reopen on another device, seen from device 1", () =>
   it("a close on device 1 after the check: the Trade result is P2's exact result (fees of open2 + close, funding 300)", async () => {
     device1Opens();
     await syncChainEntry(conn, target, () => 10_000_000);
-    const r = recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 300n, legs: 0 }, sig: "close2" } as never, Q, "open2" as never);
+    const r = recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 300n, legs: 0 }, sig: "close2" }, Q, "open2");
     expect(r).toBe(0n - 2n * fee(Q, P2) - 300n);
   });
 
   it("the newest position change before a fill is found from chain, skipping cranks", async () => {
     order = ["close2", "k5", "k4", "open2", "k3", "close1", "k2", "k1", "k0", "open1"];
     txs.close2 = fillTx(-Q, P2);
-    const prev = await (chain as unknown as { prevChangeSig: (...a: unknown[]) => Promise<unknown> }).prevChangeSig?.(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, beforeSig: "close2" });
+    const prev = await prevChangeSig(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, beforeSig: "close2" });
     expect(prev).toBe("open2");
   });
 });
@@ -143,7 +143,39 @@ describe("device 1 when nothing happened elsewhere (no regression)", () => {
 
   it("its own close gives the exact result when the newest change before it is its own open", () => {
     device1Opens();
-    const r = recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P1, feeAtoms: fee(Q, P1), funding: { netPaid: BASE1 + 50n, legs: 0 }, sig: "close1" } as never, Q, "open1" as never);
+    const r = recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P1, feeAtoms: fee(Q, P1), funding: { netPaid: BASE1 + 50n, legs: 0 }, sig: "close1" }, Q, "open1");
     expect(r).toBe(0n - 2n * fee(Q, P1) - 50n);
+  });
+});
+
+describe("the chain check itself", () => {
+  it("stops at a stored walk's top (only what is new is read); unknown when the fill is not listed yet", async () => {
+    order = ["close2", "k5", "k4", "open2", "k3", "close1", "k2", "k1", "k0", "open1"];
+    txs.close2 = fillTx(-Q, P2);
+    const reads: string[] = [];
+    const c = { ...(conn as object), getTransactions: vi.fn(async (s: string[]) => { reads.push(...s); return s.map(one); }) } as never;
+    expect(await prevChangeSig(c, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, beforeSig: "close2", known: { top: "k4", newest: "open2" } })).toBe("open2");
+    expect(reads).toEqual(["k5"]);
+    expect(await prevChangeSig(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, beforeSig: "not-yet" })).toBeNull();
+    expect(await prevChangeSig(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, beforeSig: "close2", maxRead: 1 })).toBeNull();
+  });
+
+  it("a partial close keeps the Entry only when the record includes the chain's newest change before it", async () => {
+    const { keepEntryAfterReduce } = await import("@/lib/entry-price");
+    device1Opens();
+    expect(keepEntryAfterReduce(SLAB, 0, WALLET, Q, T, "part", "open2")).toBe(false); // the record is P1's; the chain's last change is P2's open
+    expect(getSavedEntry(SLAB, 0, WALLET)?.sizeQ).toBe(Q);
+    expect(keepEntryAfterReduce(SLAB, 0, WALLET, Q, T, "part", "open1")).toBe(true);
+    expect(getSavedEntry(SLAB, 0, WALLET)).toMatchObject({ sizeQ: T, lastSig: "part", entryPriceE6: effective(P1) });
+  });
+
+  it("a stale device record the chain cannot price (unexplained) is removed, not shown: Entry unknown until it can", async () => {
+    device1Opens();
+    // P2's open fee cannot be explained by base + the signed request (a busy-side fee on a market that may charge one)
+    txs.open2 = { logs: fillEventLogs(WRAPPER, MARKET, [{ ...rec(Q, P2), feeAtoms: fee(Q, P2) * 3n }], PORTFOLIO), memo: BASE2 };
+    const v = await syncChainEntry(conn, target, () => 10_000_000);
+    expect(v).not.toBe("chain");
+    expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+    expect(loadBookByWallet(WALLET, SLAB)?.avgE6).not.toBe(P1);
   });
 });
