@@ -60,6 +60,16 @@ export async function beginIdempotent(principal: string, key: string, hash: stri
 
 /** Stores the final response. Only successful builds are kept; an error frees the key so the caller can retry it. */
 export async function finishIdempotent(principal: string, key: string, hash: string, res: StoredResponse, kv: Kv = getKv()): Promise<void> {
+  // A cancelled entry is final: a build that finishes after the cancel must not bring its bytes back (read, then write;
+  // cancel itself refuses while the entry is running, so this only guards the remaining interleavings).
+  const cur = await kv.get(k(principal, key));
+  if (cur) {
+    try {
+      if ((JSON.parse(cur) as Entry).state === "cancelled") return;
+    } catch {
+      /* unreadable entry: overwrite below */
+    }
+  }
   if (res.status >= 200 && res.status < 300) {
     const e: Entry = { h: hash, state: "done", res };
     await kv.set(k(principal, key), JSON.stringify(e), { ttlSec: TTL_SEC });
@@ -77,7 +87,7 @@ export async function cancelIdempotent(
   principal: string,
   key: string,
   kv: Kv = getKv(),
-): Promise<{ found: false } | { found: true; alreadyCancelled: boolean; lastValidBlockHeight: number | null }> {
+): Promise<{ found: false } | { found: true; inProgress: true } | { found: true; inProgress?: false; alreadyCancelled: boolean; lastValidBlockHeight: number | null }> {
   const raw = await kv.get(k(principal, key));
   if (!raw) return { found: false };
   let e: Entry;
@@ -86,8 +96,10 @@ export async function cancelIdempotent(
   } catch {
     return { found: false };
   }
+  // The build is still running: there are no bytes to cancel yet and its finish would otherwise resurrect them.
+  if (e.state === "running") return { found: true, inProgress: true };
   if (e.state === "cancelled") return { found: true, alreadyCancelled: true, lastValidBlockHeight: e.lastValidBlockHeight };
-  const body = e.state === "done" ? (e.res.body as { lastValidBlockHeight?: unknown } | null) : null;
+  const body = (e.res.body as { lastValidBlockHeight?: unknown } | null);
   const lvbh = body && typeof body.lastValidBlockHeight === "number" ? body.lastValidBlockHeight : null;
   const c: Entry = { h: e.h, state: "cancelled", lastValidBlockHeight: lvbh };
   await kv.set(k(principal, key), JSON.stringify(c), { ttlSec: TTL_SEC });

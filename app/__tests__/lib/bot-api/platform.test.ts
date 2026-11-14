@@ -280,3 +280,50 @@ describe("first-timer: 401/403 carry X-RateLimit headers", () => {
     expect(f.headers.get("X-RateLimit-Limit")).toBe("600");
   });
 });
+
+describe("attacker F2 / skeptic F1: cancel during an in-flight build is not lost", () => {
+  it("cancel answers 409 idempotency_in_progress while the build runs, and the build still completes normally", async () => {
+    vi.doMock("@/lib/server-rpc", () => ({ getServerConnection: () => ({}) }));
+    const { POST: cancel } = await import("@/app/api/v1/orders/cancel/route");
+    const { key } = await issueKey({ scopes: ["read", "build"] }, kv);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const build = botRoute({ route: "/v1/orders", scope: "build", weight: 10, build: true, body: true, idempotent: true }, async () => {
+      await gate;
+      return { body: { transaction: "BYTES", lastValidBlockHeight: 99 } };
+    });
+    const h = { authorization: `Bearer ${key}`, "idempotency-key": "order-0001", "content-type": "application/json" };
+    const body = JSON.stringify({ a: 1 });
+    const first = build(req("/api/v1/orders", { method: "POST", body, headers: h }));
+    await new Promise((r) => setTimeout(r, 20));
+    const c = await cancel(req("/api/v1/orders/cancel", { method: "POST", body: JSON.stringify({ idempotencyKey: "order-0001" }), headers: { authorization: `Bearer ${key}` } }));
+    expect(c.status).toBe(409);
+    const cj = await c.json();
+    expect(cj.error).toMatchObject({ code: "idempotency_in_progress", retryable: true });
+    expect(cj.cancelled).toBeUndefined();
+    release();
+    expect((await first).status).toBe(200);
+    // Now that the build is done, cancel works and blocks the replay.
+    const c2 = await cancel(req("/api/v1/orders/cancel", { method: "POST", body: JSON.stringify({ idempotencyKey: "order-0001" }), headers: { authorization: `Bearer ${key}` } }));
+    expect(c2.status).toBe(200);
+    const replay = await build(req("/api/v1/orders", { method: "POST", body, headers: h }));
+    expect(replay.status).toBe(409);
+    expect((await replay.json()).error.code).toBe("order_cancelled");
+    vi.doUnmock("@/lib/server-rpc");
+  });
+  it("finishIdempotent never overwrites a cancelled entry (skeptic RACE)", async () => {
+    const { beginIdempotent, finishIdempotent } = await import("@/lib/bot-api/idempotency");
+    await beginIdempotent("p", "key-race-1", "h", kv);
+    // A cancel that landed through some other path (older instance, manual write) before finish runs:
+    await kv.set("botapi:idem:p:key-race-1", JSON.stringify({ h: "h", state: "cancelled", lastValidBlockHeight: null }), { ttlSec: 120 });
+    await finishIdempotent("p", "key-race-1", "h", { status: 200, body: { transaction: "BYTES" } }, kv);
+    expect(await beginIdempotent("p", "key-race-1", "h", kv)).toEqual({ kind: "cancelled" });
+  });
+  it("cancelIdempotent reports a running build as in progress and leaves it running", async () => {
+    const { beginIdempotent, cancelIdempotent, finishIdempotent } = await import("@/lib/bot-api/idempotency");
+    await beginIdempotent("p", "key-race-2", "h", kv);
+    expect(await cancelIdempotent("p", "key-race-2", kv)).toEqual({ found: true, inProgress: true });
+    await finishIdempotent("p", "key-race-2", "h", { status: 200, body: {} }, kv);
+    expect((await beginIdempotent("p", "key-race-2", "h", kv)).kind).toBe("replay");
+  });
+});
