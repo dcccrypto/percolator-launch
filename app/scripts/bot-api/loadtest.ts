@@ -1,6 +1,6 @@
 /**
  * Load test for /api/v1. Prints one JSON report: latency p50/p95/p99, throughput, error rate and status breakdown,
- * overall and per request class. Devnet only; nothing is signed or sent (builders only simulate, and the mock RPC cannot).
+ * overall and per request class. Devnet only; nothing is signed or sent (builders only simulate; the mock RPC answers simulations cleanly).
  *
  * Modes
  *   inproc (default)  calls the route handlers directly in this process. `--rpc mock` (default) serves them from a local
@@ -106,13 +106,14 @@ async function main() {
 
   if (mode === "inproc") {
     if (rpcMode === "mock") {
-      const { startMockRpc, MOCK_MARKETS } = await import("./mock-rpc");
+      const { startMockRpc, MOCK_MARKETS, MOCK_OWNER } = await import("./mock-rpc");
       const m = await startMockRpc(0);
       process.env.DEVNET_RPC_URL = m.url;
       process.env.DEVNET_RPC_FALLBACK_URLS = ""; // no fallback: the mock is the only upstream
       mockRequests = m.requests;
       mockClose = () => m.server.close();
       market = market ?? MOCK_MARKETS.sol;
+      owner = owner ?? MOCK_OWNER; // the mock's flat taker account: builds reach a clean simulated 200
     }
     if (!process.env.BOT_API_KEY_PEPPER) process.env.BOT_API_KEY_PEPPER = randomBytes(32).toString("hex"); // throwaway
     const { issueKey } = await import("@/lib/bot-api/keys");
@@ -190,7 +191,7 @@ async function main() {
     }
   }
   if (!market) throw new Error("no market found; pass --market");
-  if (mix.build > 0 && !owner) owner = Keypair.generate().publicKey.toBase58(); // a wallet without an account: the builder answers no_portfolio
+  if (mix.build > 0 && !owner) owner = Keypair.generate().publicKey.toBase58(); // a wallet without an account: the builder answers no_portfolio (not with --rpc mock: it has a taker account)
   const discover = num("discover-owners", 0);
   if (discover > 0 && mode === "inproc" && rpcMode === "env") {
     const { getServerConnection } = await import("@/lib/server-rpc");
@@ -315,7 +316,7 @@ async function main() {
     notes: [
       "errorRate = transport failures + 5xx; non2xxRate also counts 4xx (rate limits, coded refusals).",
       "latencyServedMs leaves out 429s, which are answered before any work.",
-      ...(rpcMode === "mock" && mode === "inproc" ? ["mock RPC cannot simulate: build requests stop at a coded refusal, so they measure auth, limits, idempotency, parsing and the market and owner reads, not trade building."] : []),
+      ...(rpcMode === "mock" && mode === "inproc" ? ["mock RPC answers simulateTransaction cleanly and serves a flat taker account for MOCK_OWNER: build requests run the whole build path (reads, caps, LP selection, simulations) and measure the API's own cost, not the program or a real RPC's latency. Builds draw on the global build budget (300 per minute), so an unpaced run is mostly 429 on builds; pace with --rps to measure served builds."] : []),
     ],
   };
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
