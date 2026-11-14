@@ -97,6 +97,10 @@ vi.mock("@percolatorct/sdk", () => ({
   parseAccount: mocks.parseAccount,
 }));
 
+// Council r10 round 2 MED: the chain's newest position change before the close (lib/entry-chain-prev.ts). The stored book counts only if its
+// newest fill is that change; "open-sig" is the real open the seeded book was made from.
+const prevMock = vi.hoisted(() => ({ prev: "open-sig" as string | null }));
+vi.mock("@/lib/entry-chain-prev", () => ({ prevChangeBeforeFill: async () => prevMock.prev }));
 import {
   useConnectionCompat,
   useWalletCompat,
@@ -132,6 +136,7 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    prevMock.prev = "open-sig";
     __setUnknownLotExpForTest(0);
     observeLotExp(SOL_MARKET, new Uint8Array(MARKET_BYTES)); // the market bytes the app read: no holding fee on this market (r10 #3817 MED-1)
     mocks.takeFillResult.mockReturnValue(undefined);
@@ -155,7 +160,7 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     } as unknown as ReturnType<typeof useSlabState>);
   });
 
-  const seedOpen = () => saveBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58(), { q: Q, avgE6: 89_535_739n, fees: 106_043n, pnl: 0n, fundingBase: FUNDING_BASE });
+  const seedOpen = () => saveBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58(), { q: Q, avgE6: 89_535_739n, fees: 106_043n, pnl: 0n, fundingBase: FUNDING_BASE, lastSig: "open-sig" });
   const effective = () => {
     const f = execFillFromLogs(closeFx.logMessages, SOL_WRAPPER, { market: new PublicKey(SOL_MARKET) })!;
     return formatLotPriceE6(effectivePriceE6(f, decodeMarketEngineView(new Uint8Array(MARKET_BYTES))!.tradeFeeBaseBps), 0);
@@ -174,6 +179,22 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
     expect(getLastResult(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
     expect(loadBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58())).toBeNull();
+  });
+
+  it("Council r10 round 2 MED: the chain's newest change before the close is not the book's (a same-size close + reopen on another device): no result, the book is dropped", async () => {
+    seedOpen();
+    prevMock.prev = "reopen-elsewhere";
+    const { result } = renderHook(() => useClosePosition(SOL_MARKET));
+    await act(async () => { await result.current.closePosition(100, { skipSweep: true }); });
+    const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
+    expect(call).not.toContain("Trade result");
+    expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBeNull();
+    expect(loadBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58())).toBeNull();
+    // ... and when the chain could not be read: the same (unknown, never the stored numbers)
+    seedOpen();
+    prevMock.prev = null;
+    await act(async () => { await result.current.closePosition(100, { skipSweep: true }); });
+    expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBeNull();
   });
 
   it("r10 #3817 MED-1: a market that charges a holding fee: effective price shows, NO money result and nothing in the ledger", async () => {

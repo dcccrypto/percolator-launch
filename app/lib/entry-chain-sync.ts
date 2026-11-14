@@ -1,9 +1,11 @@
 /**
  * r10 owner decision 6: puts a chain-derived Entry (lib/entry-chain.ts) into the entry cache every surface already reads, so no surface changes.
  *
- * When it runs: only for an open position this device has NO CURRENT entry for (no record, a record for another size, a back-solved estimate):
- * a record this device just wrote is the same numbers by construction and costs no RPC. Which source wins: a chain-derived entry replaces the
- * device record; when the chain history cannot be read completely the device cache is left exactly as it was (nothing is written, nothing guessed).
+ * When it runs: for every open position (no record, a record for another size, a back-solved estimate, and a current record too). A record of
+ * the same size is not proof (Council r10 round 2 MED: a same-size close + reopen on another device): a record this device wrote stands only
+ * while its newest fill (`lastSig`) is the position's newest change on chain, and is then re-checked like a chain record (one
+ * getSignaturesForAddress while nothing changed). Which source wins: a chain-derived entry replaces any record the chain does not confirm; when
+ * the chain history cannot be read completely the device cache is left exactly as it was (nothing is written, nothing guessed).
  *
  * Bounds (devnet RPC is shared): one rebuild at a time per page (a module-level queue), the walk's own bounds (lib/entry-chain.ts), paced at
  * about `PACE_TX_PER_S` transactions a second, and a cooldown per portfolio and size: a completed rebuild is not repeated for that size; an unreadable / incomplete one waits
@@ -11,36 +13,50 @@
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
-import { bookFromDeltas, entryFromChain, loadDeltas, storeDeltas, type ChainEntryResult, type ChainEntryVerdict, type ChainResume, type NoBusyCap, type StoredDelta } from "@/lib/entry-chain";
+import { bookFromDeltas, entryFromChain, loadDeltas, storeDeltas, walletChangeCheck, type ChainEntryResult, type ChainEntryVerdict, type ChainResume, type NoBusyCap, type StoredDelta } from "@/lib/entry-chain";
 import { loadBook, saveBook } from "@/lib/trade-book";
 import { resolveTradeFeeBps } from "@/lib/limits/trade-fee-resolve";
-import { clearEntryPrice, clearEntryUnknownMark, entryRecordCurrent, getEntryLeverage, getEntryUnknownMark, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice } from "@/lib/entry-price";
+import { clearEntryPrice, clearEntryUnknownMark, entryRecordCurrent, getEntryLeverage, getEntryUnknownMark, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice, type SavedEntry } from "@/lib/entry-price";
 import { readEffectivePositionQ } from "@/lib/position-change";
 import { __resetChainSyncHoldsForTests, chainSyncHeld, holdChainSync } from "@/lib/entry-chain-hold";
 export { chainSyncHeld, holdChainSync };
 import { growthRecordPresence } from "@/lib/v21/growth-market";
+import { ENTRY_CHAIN_KEY as KEY } from "@/lib/entry-chain-prev";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+export { prevChangeBeforeFill, storedWalkHead } from "@/lib/entry-chain-prev";
 
 export const COOLDOWN_MS = 10 * 60 * 1000;
 /** How often a chain-rebuilt record is re-checked (one `getSignaturesForAddress(limit 1)`): a newer signature may be a close + reopen at the same size. */
 export const VERIFY_MS = 60 * 1000;
-const KEY = (portfolio: string) => `perc:entrychain:v1:${portfolio}`;
 /** About 10 transactions a second: half the app's RPC proxy budget per browser (200 per 10 s), so the page's own reads keep working. */
 export const PACE_TX_PER_S = 10;
+/**
+ * Council r10 round 2 review: a walk that ran out of budget ("incomplete") cannot finish later (the history only grows), so it is repeated at most
+ * hourly; in between, a device record is checked each minute against the wallet's own transactions (lib/entry-chain.ts walletChangeCheck).
+ */
+export const INCOMPLETE_WALK_MS = 60 * 60 * 1000;
 
 /**
  * Council r10 recheck D1: the trade book rebuilt from the walk (fills + the opening memo's funding base) is stored where every close surface
- * and the close toast already read it, unless this device holds a book for the same size (its own, made from the same fills). A book of the
- * same size with no funding base gets the chain's base.
+ * and the close toast already read it. This device's own book is kept only when its newest fill is the position's newest change on chain
+ * (Council r10 round 2 MED: matching by size alone kept the OLD position's book after a same-size close + reopen on another device). A kept
+ * book with no funding base gets the chain's base. A book the chain does not vouch for is replaced by the chain's, or removed when the chain
+ * cannot rebuild one (the result is then unknown, never the old numbers).
  */
 export function storeChainBook(t: Pick<SyncTarget, "wallet" | "slab" | "portfolio" | "qNow">, r: Pick<ChainEntryResult, "positionDeltas" | "startQ">): boolean {
-  if (!r.positionDeltas || r.startQ === undefined) return false;
+  if (!r.positionDeltas || r.positionDeltas.length === 0 || r.startQ === undefined) return false;
+  const newest = r.positionDeltas[r.positionDeltas.length - 1].sig;
   const book = bookFromDeltas(r.positionDeltas, r.startQ, t.qNow);
-  if (!book) return false;
   const pk = t.portfolio.toBase58();
   const own = loadBook(t.wallet, t.slab, pk);
-  if (own && own.q === t.qNow) {
-    if (own.fundingBase !== null || book.fundingBase === null) return false;
+  if (own && own.q === t.qNow && own.lastSig === newest) {
+    if (own.fundingBase !== null || !book || book.fundingBase === null) return false;
     saveBook(t.wallet, t.slab, pk, { ...own, fundingBase: book.fundingBase });
+    return true;
+  }
+  if (!book) {
+    if (!own) return false;
+    saveBook(t.wallet, t.slab, pk, null);
     return true;
   }
   saveBook(t.wallet, t.slab, pk, book);
@@ -55,6 +71,12 @@ interface Attempt {
   topSig?: string;
   /** Council r10 recheck D6: the walk as it stood at `walkTop` (the current position's changes, oldest first), for an incremental rebuild. */
   walk?: { top: string; q: string; startQ: string; deltas: StoredDelta[] };
+  /** When the last full walk ended "incomplete" (it read its whole budget): until INCOMPLETE_WALK_MS later only the cheap memo check runs. */
+  walkTs?: number;
+  /** The wallet's newest signature when the record was last checked against the wallet's own trades: unchanged = nothing new to read. */
+  walletTop?: string;
+  /** An unreadable walk left this device's own record unchecked (the wallet check failed too): the wallet check alone is repeated each minute. */
+  ownOpen?: boolean;
 }
 
 function resumeOf(a: Attempt | null): ChainResume | null {
@@ -95,6 +117,8 @@ export function rebuildDue(prior: Attempt | null, qNow: bigint, now: number): bo
   if (prior.verdict === "no-position") return false;
   // A chain record is re-verified against the portfolio's newest signature, not trusted by size alone (N3).
   if (prior.verdict === "chain") return now - prior.ts >= VERIFY_MS;
+  if (prior.verdict === "incomplete" && prior.walkTs !== undefined) return now - prior.ts >= VERIFY_MS;
+  if (prior.verdict === "unreadable" && prior.ownOpen) return now - prior.ts >= VERIFY_MS;
   return now - prior.ts >= COOLDOWN_MS;
 }
 
@@ -204,9 +228,29 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
       return;
     }
   }
+  // The device record as it stood before the read: one that differs afterwards was written by this device meanwhile, and stands.
+  const atStart = getSavedEntry(t.slab, t.idx, t.wallet);
+  if (prior && prior.verdict === "incomplete" && prior.q === t.qNow.toString() && prior.walkTs !== undefined && now() - prior.walkTs < INCOMPLETE_WALK_MS) {
+    // Only the wallet check, and only when the wallet signed something since the last one (one getSignaturesForAddress otherwise).
+    const top = ownRecordSig(t, atStart) ? await walletTopSig(connection, t.wallet) : null;
+    let settled = top !== null && top === prior.walletTop;
+    if (ownRecordSig(t, atStart) && !settled) settled = await scanOwn(connection, t, atStart, now);
+    // The wallet's top is remembered only once a check settled at it: a failed check is repeated next minute.
+    const { walletTop: _drop, ...rest } = prior;
+    writeAttempt(pk, { ...rest, ts: now(), ...(top && settled ? { walletTop: top } : {}) });
+    return;
+  }
+  if (prior && prior.verdict === "unreadable" && prior.ownOpen && prior.q === t.qNow.toString() && prior.walkTs !== undefined && now() - prior.walkTs < COOLDOWN_MS) {
+    // Live devnet: an unreadable walk (RPC 429s) must not leave an unchecked device record shown for the whole cooldown. Until the next full
+    // walk, only the wallet check runs, each minute, until it settles.
+    const settled = !ownRecordSig(t, atStart) || (await scanOwn(connection, t, atStart, now));
+    writeAttempt(pk, { ...prior, ts: now(), ownOpen: !settled });
+    return;
+  }
   const facts = await marketFacts(connection, t.slab, t.assetIndex ?? 0);
   if (facts === null) {
-    writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now(), ...(prior?.walk ? { walk: prior.walk } : {}) });
+    const settled = !ownRecordSig(t, atStart) || (await scanOwn(connection, t, atStart, now));
+    writeAttempt(pk, { q: t.qNow.toString(), verdict: "unreadable", ts: now(), walkTs: now(), ...(settled ? {} : { ownOpen: true }), ...(prior?.walk ? { walk: prior.walk } : {}) });
     return;
   }
   // The walk is over the PORTFOLIO's own signature list only. (A wallet-first walk was tried and removed: a keeper-signed REDUCE is not on the
@@ -218,10 +262,9 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   });
   // The walk reached the position's start: keep it for the next (incremental) rebuild, and rebuild the trade book from it.
   const walk = r.positionDeltas && r.topSig && r.startQ !== undefined ? { top: r.topSig, q: t.qNow.toString(), startQ: r.startQ.toString(), deltas: storeDeltas(r.positionDeltas) } : undefined;
+  // A trade landing on this device while the chain was read writes its own book and Entry: nothing from this walk is stored over them.
+  if (chainSyncHeld(t.slab, now())) return;
   if (r.verdict === "chain" || r.verdict === "unexplained") storeChainBook(t, r);
-  // An "unknown" marker stands for as long as the position it was written for does. The walk can tell: when that fill is not part of the current
-  // position any more (closed and reopened elsewhere, even at the same size), the marker is retired and the rebuild goes on. Otherwise nothing is
-  // ever saved over it.
   const mark = getEntryUnknownMark(t.slab, t.idx, t.wallet, t.qNow);
   if (mark) {
     const readToStart = (r.verdict === "chain" || r.verdict === "unexplained") && r.positionSigs !== undefined;
@@ -233,11 +276,25 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   }
   let verdict = r.verdict;
   const stale = getSavedEntry(t.slab, t.idx, t.wallet);
+  const readToStart = (r.verdict === "chain" || r.verdict === "unexplained") && r.positionSigs !== undefined && r.positionSigs.length > 0;
+  // Council r10 round 2 MED: a record this device wrote is the position's only while its newest fill is still the position's newest change on
+  // chain. Size alone cannot tell (a same-size close + reopen, or an add + reduce, on another device).
+  const own = stale && !stale.chainSig && entryRecordCurrent(stale, t.qNow) ? stale : null;
+  if (own && readToStart && own.lastSig !== null && own.lastSig === r.positionSigs?.[0]) {
+    // Confirmed: it stands (it is this device's own, priced from the quote it signed), and is re-checked like a chain record.
+    writeAttempt(pk, { q: t.qNow.toString(), verdict: "chain", ts: now(), ...(r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : {}) });
+    return;
+  }
+  // Written while the chain was read: it stands; the next check looks again.
+  if (own && !sameRecord(own, atStart)) return;
+  // Not confirmed by a walk that read to the start: an older record without a signature is replaced only by an exact chain Entry; one whose
+  // newest fill is not the position's newest change is replaced, or removed when the chain cannot price it.
+  const ownStale = own !== null && readToStart && own.lastSig !== null;
   if (r.verdict === "chain" && r.entry) {
     // The ticket may have written (or marked unknown) while the chain was read: whatever it wrote stands, the chain never overwrites it. A record
-    // the chain itself wrote earlier (chainSig) is the one thing it may replace.
+    // the chain itself wrote earlier (chainSig), or one the chain shows is out of date, is what it may replace.
     const meanwhile = getSavedEntry(t.slab, t.idx, t.wallet);
-    if (isEntryMarkedUnknown(t.slab, t.idx, t.wallet, t.qNow) || chainSyncHeld(t.slab, now()) || (meanwhile && entryRecordCurrent(meanwhile, t.qNow) && !meanwhile.chainSig)) {
+    if (isEntryMarkedUnknown(t.slab, t.idx, t.wallet, t.qNow) || chainSyncHeld(t.slab, now()) || !sameRecord(meanwhile, atStart)) {
       return; // no attempt recorded: nothing was learned that matters, and nothing was written
     }
     // A trade landing during a long read changes the size: this result is for the OLD size and is dropped.
@@ -249,15 +306,75 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
         bookedPriceE6: r.entry.bookedPriceE6,
         busyFeeAtoms: r.entry.busyFeeAtoms,
         ...(r.topSig ? { chainSig: r.topSig } : {}),
+        ...(r.positionSigs?.[0] ? { lastSig: r.positionSigs[0] } : {}),
       });
     } else {
       verdict = "unexplained"; // read fully but a fill's price cannot be split from its fee: the cache stays as it was
     }
   }
   // A record the chain wrote earlier that the chain can no longer vouch for (newer signature, and now unknown / unexplained / mismatched) is
-  // removed rather than shown as exact. An unreadable chain proves nothing, so it stays.
+  // removed rather than shown as exact. An unreadable chain proves nothing, so it stays. The same for a device record the chain shows is out
+  // of date and cannot replace.
   if (verdict !== "chain" && verdict !== "unreadable" && stale?.chainSig) clearEntryPrice(t.slab, t.idx, t.wallet);
-  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
+  else if (verdict !== "chain" && ownStale) clearEntryPrice(t.slab, t.idx, t.wallet);
+  // The walk did not reach the position's start (a long hold, an unreadable or unexplainable transaction): the wallet's own transactions since
+  // this device's fill still show any trade that changed the position, however long ago.
+  let walletTop = !readToStart && ownRecordSig(t, atStart) ? await walletTopSig(connection, t.wallet) : null;
+  const ownSettled = readToStart || (await scanOwn(connection, t, atStart, now));
+  if (!ownSettled) walletTop = null;
+  const ownOpen = verdict === "unreadable" && !ownSettled && ownRecordSig(t, getSavedEntry(t.slab, t.idx, t.wallet)) !== null;
+  writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "incomplete" || ownOpen ? { walkTs: now() } : {}), ...(ownOpen ? { ownOpen } : {}), ...(walletTop ? { walletTop } : {}), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
+}
+
+/**
+ * Council r10 round 2 review: when the walk cannot reach the position's start, a device record (Entry, or the trade book) is checked against
+ * the WALLET's own transactions since its newest fill (lib/entry-chain.ts walletChangeCheck): every trade from any client is wallet-signed.
+ * One that changed the position means the record describes an earlier one; a Position NFT / ownership move in between means it cannot be
+ * vouched for. Either way it is removed (unknown), never shown. Nothing is removed when it cannot be told, or when a trade on this device is in
+ * flight / was written meanwhile. Returns true when the check settled (so the wallet's top may be remembered), false to look again.
+ */
+/** The newest fill of this device's own record for the position (its Entry, else its trade book), or null when it has none to check. */
+function ownRecordSig(t: SyncTarget, atStart: SavedEntry | null): string | null {
+  // Council r3 Risk: an Entry the chain wrote earlier (chainSig) is checked the same way: it names its newest fill too.
+  const own = atStart && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
+  const book = loadBook(t.wallet, t.slab, t.portfolio.toBase58());
+  return own?.lastSig ?? (book && book.q === t.qNow ? book.lastSig ?? null : null);
+}
+
+async function scanOwn(connection: Connection, t: SyncTarget, atStart: SavedEntry | null, now: () => number): Promise<boolean> {
+  const pk = t.portfolio.toBase58();
+  const own = atStart && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
+  const book = loadBook(t.wallet, t.slab, pk);
+  const ownBook = book && book.q === t.qNow ? book : null;
+  const sig = ownRecordSig(t, atStart);
+  if (!sig) return true;
+  let wallet: PublicKey;
+  try {
+    wallet = new PublicKey(t.wallet);
+  } catch {
+    return false;
+  }
+  const m = await walletChangeCheck(connection, t.wrapper, { wallet, market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, recordSig: sig, paceMs: 1000 / PACE_TX_PER_S * 10, nftProgram: PERCOLATOR_NFT_PROGRAM_ID });
+  if (m.kind === "current") return true;
+  if (m.kind !== "changed" && m.kind !== "foreign") return false; // could not tell: checked again next minute
+  if (chainSyncHeld(t.slab, now()) || !sameRecord(getSavedEntry(t.slab, t.idx, t.wallet), atStart)) return false;
+  if (own) clearEntryPrice(t.slab, t.idx, t.wallet);
+  if (ownBook && loadBook(t.wallet, t.slab, pk)?.lastSig === ownBook.lastSig) saveBook(t.wallet, t.slab, pk, null);
+  return true;
+}
+
+async function walletTopSig(connection: Pick<Connection, "getSignaturesForAddress">, wallet: string): Promise<string | null> {
+  try {
+    const r = await connection.getSignaturesForAddress(new PublicKey(wallet), { limit: 1 }, "confirmed");
+    return r[0]?.signature ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function sameRecord(a: SavedEntry | null, b: SavedEntry | null): boolean {
+  if (!a || !b) return a === b;
+  return a.savedAt === b.savedAt && a.entryPriceE6 === b.entryPriceE6 && a.sizeQ === b.sizeQ && a.lastSig === b.lastSig && a.chainSig === b.chainSig;
 }
 
 export function __resetEntryChainSyncForTests(): void {
@@ -288,8 +405,8 @@ export interface SyncCandidate {
 export function shouldSyncPosition(p: SyncCandidate, wallet: string, now: number = Date.now()): boolean {
   if ((p.account?.positionSize ?? 0n) === 0n || !p.adlKnown || p.effectiveSize === 0n || p.nftWrapped || !p.portfolioPk) return false;
   if (p.entryPriceSource === "server") return false;
-  // A device-written entry is current by construction. A chain-rebuilt one is re-verified (newer signature = maybe a same-size reopen).
-  if (p.entryPriceSource === "cache" && !getSavedEntry(p.slabAddress, p.idx, wallet)?.chainSig) return false;
+  // Every cached entry is re-checked against the chain, the device's own included (Council r10 round 2 MED: a same-size close + reopen on
+  // another device leaves the size equal). A check whose top signature is unchanged costs one getSignaturesForAddress (rebuildDue / run).
   // A marker with a fill signature is probed by the walk (it may belong to a position that is gone); one without stands.
   const mark = getEntryUnknownMark(p.slabAddress, p.idx, wallet, p.effectiveSize);
   if ((mark !== null && mark.sig === null) || chainSyncHeld(p.slabAddress, now)) return false;

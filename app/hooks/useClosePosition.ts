@@ -45,12 +45,13 @@ import { readSweepableCapital, SWEEP_COPY } from "@/lib/close-sweep";
 import { useOptionalToast } from "@/hooks/useToast";
 import { formatTokenAmount } from "@/lib/format";
 import { closeLimitFromEngine } from "@/lib/close-limit";
-import { clearEntryPrice, keepEntryAfterReduce } from "@/lib/entry-price";
+import { clearEntryPrice, getSavedEntry, keepEntryAfterReduce } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
 import { holdChainSync, setChainSyncHold } from "@/lib/entry-chain-hold";
-import { recordFill } from "@/lib/trade-book";
+import { prevChangeBeforeFill } from "@/lib/entry-chain-prev";
+import { loadBook, recordFill } from "@/lib/trade-book";
 import { readFundingSample } from "@/lib/funding-flow";
 import { formatLotPriceE6 } from "@/lib/v22/lot";
 import { closeResultText, recordRealized } from "@/lib/realized-pnl";
@@ -203,19 +204,23 @@ async function measureCloseResult(o: {
   const work = (async (): Promise<{ effectiveE6: bigint | null; result: bigint | null }> => {
     const fill = await readExecFill(o.connection, o.sig, o.programId, { market: new PublicKey(o.slabAddress), taker: o.taker ?? null }, undefined, 3).catch(() => null);
     if (!fill) return { effectiveE6: null, result: null };
+    // Council r10 round 2 MED: the stored book and Entry count only if their newest fill is the position's newest change before this close
+    // on chain. A same-size close + reopen on another device keeps the size, so size alone would hand the OLD trade's numbers to this result.
+    const recordSig = loadBook(o.wallet, o.slabAddress, fill.taker.toBase58())?.lastSig ?? (o.entryIdx != null ? getSavedEntry(o.slabAddress, o.entryIdx, o.wallet)?.lastSig : null) ?? null;
+    const prev = await prevChangeBeforeFill(o.connection, o.programId, { market: new PublicKey(o.slabAddress), portfolio: fill.taker, sig: o.sig, recordSig, wallet: new PublicKey(o.wallet) });
     // Council r10 recheck D6: a partial close keeps the Entry of what is left (a reduce never moves the average). Without this the saved
     // record stayed at the old size and the rest of the position read "unknown entry" on the device that closed it.
-    if (o.entryIdx != null) keepEntryAfterReduce(o.slabAddress, o.entryIdx, o.wallet, o.onChainQBefore, o.onChainQBefore + fill.executedQ);
+    if (o.entryIdx != null) keepEntryAfterReduce(o.slabAddress, o.entryIdx, o.wallet, o.onChainQBefore, o.onChainQBefore + fill.executedQ, o.sig, prev);
     // r10: the funding counters at the fill's own slot, so the result includes the funding the chain moved on this position.
     const funding = fill.slot !== undefined ? await readFundingSample(o.connection, fill.taker, fill.slot) : null;
-    const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms, funding }, o.onChainQBefore);
+    const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms, funding, sig: o.sig }, o.onChainQBefore, prev);
     if (result !== null) recordRealized(o.wallet, o.slabAddress, result);
     // r10 (#3817 MED-1): holding rent has no counter, so on a market that may charge it the result is unknown (recordRealized skips it too).
     return { effectiveE6: effectivePriceE6(fill, o.baseFeeBps), result: holdingFeeMayApply(o.slabAddress) ? null : result };
   })().catch(() => ({ effectiveE6: null, result: null }));
   let timer: ReturnType<typeof setTimeout> | undefined;
   const budget = new Promise<{ effectiveE6: null; result: null }>((resolve) => {
-    timer = setTimeout(() => resolve({ effectiveE6: null, result: null }), o.budgetMs ?? 4000);
+    timer = setTimeout(() => resolve({ effectiveE6: null, result: null }), o.budgetMs ?? 6000);
   });
   try {
     return await Promise.race([work, budget]);

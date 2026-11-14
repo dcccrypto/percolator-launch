@@ -26,12 +26,12 @@
  * the walk must not spend its budget on them:
  *   - a transaction that does not name the wrapper program among its accounts cannot have touched the position and is skipped unread for
  *     events (a third party cannot push the walk to "unknown" with a truncated log in a transaction that never ran the wrapper);
- *   - `maxTx` (default 60) counts only transactions that CHANGED this position (a fill or a REDUCE); `maxRead` (default 2,000, about 16 hours
- *     of cranks at the busiest rate seen) bounds every transaction read, cranks included;
+ *   - `maxTx` (default 60) counts only transactions that CHANGED this position (a fill or a REDUCE); `maxRead` (default 2,000, about 11 hours
+ *     of cranks at one every ~20 s) bounds every transaction read, cranks included;
  *   - reads go in batches (`getTransactions`, one HTTP request) when the connection has it, paced by `paceMs` between batches;
  *   - `resume`: the position as an earlier walk rebuilt it at `topSig`. A later rebuild reads only the transactions newer than that and joins
  *     them on, so a position held for days costs only what changed since the last look.
- * A rebuild runs only for a position this device has no current entry for, at most once per cooldown per portfolio and size (memory + storage).
+ * A rebuild is due per portfolio and size (lib/entry-chain-sync.ts rebuildDue: re-checked each minute after a complete read, cooled down otherwise).
  *
  * Funding (Council r10 recheck D1). The opening fill of a position opened by this app carries the portfolio's funding counter in a memo
  * (lib/funding-memo.ts). The walk keeps it on that fill, so `bookFromDeltas` can rebuild the trade book behind the Trade result on any device:
@@ -356,7 +356,7 @@ export function bookFromDeltas(deltas: readonly ChainDelta[], startQ: bigint, qN
     const d = deltas[i];
     if (!d.fill) return null;
     const base = i === 0 && d.fundingBase != null ? { netPaid: d.fundingBase, legs: 1 } : null;
-    book = applyFill(book, { q: d.fill.executedQ, bookedPriceE6: d.fill.bookedPriceE6, feeAtoms: d.fill.feeAtoms, funding: base }).book;
+    book = applyFill(book, { q: d.fill.executedQ, bookedPriceE6: d.fill.bookedPriceE6, feeAtoms: d.fill.feeAtoms, funding: base, sig: d.sig }).book;
     if (i === 0 && book && d.fundingBase == null) book = { ...book, fundingBase: null };
   }
   return book && book.q === qNow ? book : null;
@@ -442,6 +442,170 @@ export async function entryFromChain(connection: Conn, wrapper: PublicKey, o: Ch
   } catch {
     return { verdict: "unreadable", entry: null, txRead, topSig, changesRead };
   }
+}
+
+/** What `prevChangeCheck` found. `not-listed`: `beforeSig` is not on the portfolio's list yet (a node that has not indexed it): worth a retry. */
+export type PrevChange = { kind: "sig"; sig: string } | { kind: "not-listed" } | { kind: "unknown" };
+
+/**
+ * Council r10 round 2 MED: the signature of the newest transaction BEFORE `beforeSig` that changed this position (a fill or a REDUCE), read
+ * from the portfolio's own list, skipping keeper cranks and anything that never ran the wrapper. The trade book and a device-written Entry
+ * describe the position only while their newest fill is that change: a same-size close + reopen (or an add + reduce) on another device keeps
+ * the size but not the history.
+ *
+ * `stopAt`: the newest fill the caller's record includes. Reaching it with no change in between returns it (the record is current) without
+ * reading further. `known`: an earlier walk's top signature and the newest change it found; reaching `known.top` with no change in between
+ * returns `known.newest`. `unknown` when it cannot be told (an unreadable transaction, `maxRead` reached, the list ended); reads go in groups
+ * of 10, `paceMs` apart.
+ */
+export async function prevChangeCheck(
+  connection: Conn,
+  wrapper: PublicKey,
+  o: { market: PublicKey; portfolio: PublicKey; assetIndex?: number; beforeSig: string; stopAt?: string | null; known?: { top: string; newest: string } | null; maxRead?: number; pageSize?: number; paceMs?: number },
+): Promise<PrevChange> {
+  const assetIndex = o.assetIndex ?? 0;
+  const maxRead = o.maxRead ?? 100;
+  const pageSize = o.pageSize ?? 50;
+  const unknown: PrevChange = { kind: "unknown" };
+  let txRead = 0;
+  let before: string | undefined;
+  let found = false; // `beforeSig` seen: everything after it in the list is older
+  try {
+    for (;;) {
+      const page = await connection.getSignaturesForAddress(o.portfolio, { limit: pageSize, ...(before ? { before } : {}) }, "confirmed");
+      if (page.length === 0) return found ? unknown : { kind: "not-listed" };
+      let list = page;
+      if (!found) {
+        // Listed newest first from the top (a `before` the node has not indexed yet is not reliable): it must be on the first page.
+        const at = page.findIndex((s) => s.signature === o.beforeSig);
+        if (at < 0) return { kind: "not-listed" };
+        found = true;
+        list = page.slice(at + 1);
+      }
+      // Everything older than the first stop seen is already accounted for.
+      const stopAt = list.findIndex((s) => s.signature === o.stopAt || s.signature === o.known?.top);
+      const head = stopAt >= 0 ? list.slice(0, stopAt) : list;
+      const sigs = head.filter((s) => s.err === null).map((s) => s.signature);
+      for (let i = 0; i < sigs.length; i += 10) {
+        if (txRead >= maxRead) return unknown;
+        if (i > 0 && o.paceMs) await new Promise((r) => setTimeout(r, o.paceMs));
+        const group = sigs.slice(i, i + 10).slice(0, maxRead - txRead);
+        const txs = await fetchTxs(connection, group, 10);
+        txRead += group.length;
+        for (let j = 0; j < group.length; j++) {
+          const tx = txs[j];
+          if (!tx?.meta) return unknown;
+          if (tx.meta.err !== null || !txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
+          const ds = deltasFromLogs(group[j], tx.meta.logMessages, true, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex });
+          if (ds === null) return unknown;
+          if (ds === "irreconcilable" || ds.length > 0) return { kind: "sig", sig: group[j] };
+        }
+      }
+      if (stopAt >= 0) {
+        const hit = list[stopAt].signature;
+        if (o.stopAt && hit === o.stopAt) return { kind: "sig", sig: hit };
+        if (o.known && hit === o.known.top) return { kind: "sig", sig: o.known.newest };
+      }
+      if (page.length < pageSize) return unknown;
+      before = page[page.length - 1].signature;
+    }
+  } catch {
+    return unknown;
+  }
+}
+
+/** `prevChangeCheck` as a signature, or null when it could not be told. */
+export async function prevChangeSig(connection: Conn, wrapper: PublicKey, o: Parameters<typeof prevChangeCheck>[2]): Promise<string | null> {
+  const r = await prevChangeCheck(connection, wrapper, o);
+  return r.kind === "sig" ? r.sig : null;
+}
+
+/**
+ * Council r10 round 2 review: the check for when the portfolio walk cannot reach back far enough (a long hold: keeper cranks fill the
+ * portfolio's own list). Every trade on a portfolio, from any client, is signed by its owner wallet and keeper cranks are not, so the WALLET's
+ * signature list since the record's newest fill holds every trade that could have changed the position without changing its size (a
+ * close + reopen, a flip and back, an add + reduce). Only those are read. A keeper REDUCE (ADL, liquidation) is not wallet-signed but changes
+ * the size (the record then no longer matches at all) unless a wallet trade evened it out, and that trade is in this list.
+ *
+ * Lists `wallet`'s signatures from the top (or from just below `fromSig`, which must be on the first page) down to `recordSig` or the first
+ * one older than its slot. "current": no transaction in between changed this position. "changed": one did (`sig`). "not-listed": `fromSig`
+ * is not listed yet. "unknown": the record's slot or a transaction could not be read, or more than `maxRead` / `maxPages` were needed.
+ *
+ * The one way another wallet can trade this portfolio is the Position NFT: its holder trades the escrowed position, and the NFT can come back
+ * and be burned (wrapper UnwrapEscrowedPortfolio, tag 82). So any wallet transaction in the window that names the NFT program (`nftProgram`)
+ * or carries a wrapper ownership instruction (tag 72 transfer, tag 82 unwrap) gives "foreign": the history in between may not be the wallet's,
+ * so the record cannot be vouched for (a money result is unknown; a display record is removed).
+ */
+export async function walletChangeCheck(
+  connection: Conn & Pick<Connection, "getSignatureStatuses">,
+  wrapper: PublicKey,
+  o: { wallet: PublicKey; market: PublicKey; portfolio: PublicKey; assetIndex?: number; recordSig: string; fromSig?: string | null; maxPages?: number; maxRead?: number; paceMs?: number; nftProgram?: PublicKey | null },
+): Promise<{ kind: "current" } | { kind: "changed"; sig: string } | { kind: "foreign"; sig: string } | { kind: "not-listed" } | { kind: "unknown" }> {
+  const assetIndex = o.assetIndex ?? 0;
+  const maxPages = o.maxPages ?? 3;
+  const maxRead = o.maxRead ?? 100;
+  const unknown = { kind: "unknown" } as const;
+  try {
+    const st = (await connection.getSignatureStatuses([o.recordSig], { searchTransactionHistory: true })).value[0];
+    if (!st || typeof st.slot !== "number") return unknown;
+    const recordSlot = st.slot;
+    const toRead: string[] = [];
+    let started = !o.fromSig;
+    let before: string | undefined;
+    let reached = false;
+    for (let n = 0; n < maxPages && !reached; n++) {
+      const page = await connection.getSignaturesForAddress(o.wallet, { limit: 1000, ...(before ? { before } : {}) }, "confirmed");
+      if (page.length === 0) return unknown;
+      for (const s of page) {
+        if (!started) {
+          if (s.signature === o.fromSig) started = true;
+          continue;
+        }
+        if (s.signature === o.recordSig || s.slot < recordSlot) {
+          reached = true;
+          break;
+        }
+        if (s.err === null) toRead.push(s.signature);
+      }
+      if (!started) return n === 0 ? { kind: "not-listed" } : unknown;
+      if (!reached) {
+        if (page.length < 1000) return unknown;
+        before = page[page.length - 1].signature;
+      }
+    }
+    if (!reached || toRead.length > maxRead) return unknown;
+    for (let i = 0; i < toRead.length; i += 10) {
+      if (i > 0 && o.paceMs) await new Promise((r) => setTimeout(r, o.paceMs));
+      const group = toRead.slice(i, i + 10);
+      const txs = await fetchTxs(connection, group, 10);
+      for (let j = 0; j < group.length; j++) {
+        const tx = txs[j];
+        if (!tx?.meta) return unknown;
+        if (tx.meta.err !== null) continue;
+        if (o.nftProgram && txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], o.nftProgram)) return { kind: "foreign", sig: group[j] };
+        if (!txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
+        if (wrapperTagIn(tx.transaction?.message as Parameters<typeof wrapperTagIn>[0], wrapper, OWNERSHIP_TAGS)) return { kind: "foreign", sig: group[j] };
+        const ds = deltasFromLogs(group[j], tx.meta.logMessages, true, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex });
+        if (ds === null) return unknown;
+        if (ds === "irreconcilable" || ds.length > 0) return { kind: "changed", sig: group[j] };
+      }
+    }
+    return { kind: "current" };
+  } catch {
+    return unknown;
+  }
+}
+
+/** Wrapper instructions that move a portfolio's ownership: TransferPortfolioOwnership (72), UnwrapEscrowedPortfolio (82). */
+const OWNERSHIP_TAGS = new Set([72, 82]);
+
+/** True when a top-level instruction of the message calls `wrapper` with one of `tags` (first data byte). Unknown shape: true (cannot rule it out). */
+function wrapperTagIn(message: { staticAccountKeys?: readonly PublicKey[]; accountKeys?: readonly PublicKey[]; compiledInstructions?: readonly { programIdIndex: number; data: Uint8Array }[]; instructions?: readonly { programIdIndex: number; data: string }[] } | undefined, wrapper: PublicKey, tags: Set<number>): boolean {
+  const keys = message?.staticAccountKeys ?? message?.accountKeys;
+  if (!keys) return true;
+  const ixs = message?.compiledInstructions;
+  if (!ixs) return message?.instructions ? true : false;
+  return ixs.some((ix) => keys[ix.programIdIndex]?.equals?.(wrapper) && ix.data.length > 0 && tags.has(ix.data[0]));
 }
 
 /** True when undoing a change of `deltaQ` leaves `qBefore` on the OTHER side of flat from where the change ended: a flip, whose opening half starts the position. */

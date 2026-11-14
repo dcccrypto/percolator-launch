@@ -28,6 +28,11 @@ export interface Book {
   pnl: bigint;
   /** The portfolio's net funding counter (paid - received, atoms) when this trade opened; null = it could not be read (result unknown). */
   fundingBase: bigint | null;
+  /**
+   * The signature of the newest fill this book includes (null = a book saved before it carried one). Council r10 round 2 MED: a book is only
+   * the current position's while no other change landed after that fill. Size alone cannot tell (a same-size close + reopen elsewhere).
+   */
+  lastSig?: string | null;
 }
 
 export interface FillIn {
@@ -43,6 +48,8 @@ export interface FillIn {
    * device rebuilds from chain. Used only for an open from flat; wins over `funding` there.
    */
   fundingBefore?: bigint | null;
+  /** The fill's transaction signature: becomes the book's `lastSig`. */
+  sig?: string | null;
 }
 
 const abs = (n: bigint): bigint => (n < 0n ? -n : n);
@@ -60,12 +67,13 @@ function fundingAfter(f: FillIn, remaining: bigint): bigint | null {
  */
 export function applyFill(book: Book | null, f: FillIn): { book: Book | null; closedResult: bigint | null; closedFunding: bigint | null } {
   if (f.q === 0n) return { book, closedResult: null, closedFunding: null };
-  if (!book || book.q === 0n) return { book: { q: f.q, avgE6: f.bookedPriceE6, fees: f.feeAtoms, pnl: 0n, fundingBase: f.fundingBefore ?? fundingAfter(f, f.q) }, closedResult: null, closedFunding: null };
+  const ls = f.sig ? { lastSig: f.sig } : {};
+  if (!book || book.q === 0n) return { book: { q: f.q, avgE6: f.bookedPriceE6, fees: f.feeAtoms, pnl: 0n, fundingBase: f.fundingBefore ?? fundingAfter(f, f.q), ...ls }, closedResult: null, closedFunding: null };
   const sameSide = (book.q > 0n) === (f.q > 0n);
   if (sameSide) {
     const total = abs(book.q) + abs(f.q);
     const avg = (abs(book.q) * book.avgE6 + abs(f.q) * f.bookedPriceE6) / total;
-    return { book: { q: book.q + f.q, avgE6: avg, fees: book.fees + f.feeAtoms, pnl: book.pnl, fundingBase: book.fundingBase }, closedResult: null, closedFunding: null };
+    return { book: { q: book.q + f.q, avgE6: avg, fees: book.fees + f.feeAtoms, pnl: book.pnl, fundingBase: book.fundingBase, ...ls }, closedResult: null, closedFunding: null };
   }
   const closeQ = abs(f.q) < abs(book.q) ? abs(f.q) : abs(book.q);
   const dir = book.q > 0n ? 1n : -1n;
@@ -74,13 +82,13 @@ export function applyFill(book: Book | null, f: FillIn): { book: Book | null; cl
   const feeClosing = (f.feeAtoms * closeQ) / abs(f.q);
   const fees = book.fees + feeClosing;
   const remaining = book.q + f.q;
-  if (remaining !== 0n && (remaining > 0n) === (book.q > 0n)) return { book: { q: remaining, avgE6: book.avgE6, fees, pnl, fundingBase: book.fundingBase }, closedResult: null, closedFunding: null };
+  if (remaining !== 0n && (remaining > 0n) === (book.q > 0n)) return { book: { q: remaining, avgE6: book.avgE6, fees, pnl, fundingBase: book.fundingBase, ...ls }, closedResult: null, closedFunding: null };
   // The trade ends here (flat, or through to the other side): its funding is the counter now minus the counter at its open.
   const end = fundingAfter(f, remaining);
   const funding = end !== null && book.fundingBase !== null ? end - book.fundingBase : null;
   const closedResult = funding === null ? null : pnl - fees - funding;
   if (remaining === 0n) return { book: null, closedResult, closedFunding: funding };
-  return { book: { q: remaining, avgE6: f.bookedPriceE6, fees: f.feeAtoms - feeClosing, pnl: 0n, fundingBase: end }, closedResult, closedFunding: funding };
+  return { book: { q: remaining, avgE6: f.bookedPriceE6, fees: f.feeAtoms - feeClosing, pnl: 0n, fundingBase: end, ...ls }, closedResult, closedFunding: funding };
 }
 
 /** The book is only trusted while it matches the chain: a different size (ADL, another device) means the history is incomplete. */
@@ -108,7 +116,7 @@ export function loadBook(wallet: string, slab: string, portfolio: string): Book 
     const ok = (v: unknown): v is string => typeof v === "string" && /^-?\d+$/.test(v);
     if (!ok(j.q) || !ok(j.avgE6) || !ok(j.fees) || !ok(j.pnl)) return null;
     // A book saved before r10 has no funding base: its funding is unknown, so its result will be too (never one without funding).
-    return { q: BigInt(j.q), avgE6: BigInt(j.avgE6), fees: BigInt(j.fees), pnl: BigInt(j.pnl), fundingBase: ok(j.fundingBase) ? BigInt(j.fundingBase) : null };
+    return { q: BigInt(j.q), avgE6: BigInt(j.avgE6), fees: BigInt(j.fees), pnl: BigInt(j.pnl), fundingBase: ok(j.fundingBase) ? BigInt(j.fundingBase) : null, ...(typeof j.lastSig === "string" && j.lastSig ? { lastSig: j.lastSig } : {}) };
   } catch {
     return null;
   }
@@ -119,7 +127,7 @@ export function saveBook(wallet: string, slab: string, portfolio: string, book: 
     const st = store();
     if (!st) return;
     if (!book) st.removeItem(KEY(wallet, slab, portfolio));
-    else st.setItem(KEY(wallet, slab, portfolio), JSON.stringify({ q: book.q.toString(), avgE6: book.avgE6.toString(), fees: book.fees.toString(), pnl: book.pnl.toString(), fundingBase: book.fundingBase === null ? null : book.fundingBase.toString() }));
+    else st.setItem(KEY(wallet, slab, portfolio), JSON.stringify({ q: book.q.toString(), avgE6: book.avgE6.toString(), fees: book.fees.toString(), pnl: book.pnl.toString(), fundingBase: book.fundingBase === null ? null : book.fundingBase.toString(), ...(book.lastSig ? { lastSig: book.lastSig } : {}) }));
   } catch {
     /* storage unavailable: no result is claimed later (the book is simply absent) */
   }
@@ -128,9 +136,15 @@ export function saveBook(wallet: string, slab: string, portfolio: string, book: 
 /**
  * Applies a landed fill to the stored book and returns the finished trade's result (null = no finished trade, or its start was not
  * seen). `onChainQBefore` is the position (signed, effective) the chain had BEFORE this fill: the book must match it.
+ *
+ * `prevChange` (Council r10 round 2 MED): the signature of the newest change to this position on chain before this fill
+ * (lib/entry-chain.ts prevChangeSig), or null when it could not be read. When given, the book counts only if that change is the book's own
+ * newest fill: a same-size close + reopen (or an add + reduce) on another device leaves the size equal but the book stale. Not given
+ * (undefined): size only, as before.
  */
-export function recordFill(wallet: string, slab: string, portfolio: string, f: FillIn, onChainQBefore: bigint): bigint | null {
-  const trusted = reconcile(loadBook(wallet, slab, portfolio), onChainQBefore);
+export function recordFill(wallet: string, slab: string, portfolio: string, f: FillIn, onChainQBefore: bigint, prevChange?: string | null): bigint | null {
+  let trusted = reconcile(loadBook(wallet, slab, portfolio), onChainQBefore);
+  if (trusted && prevChange !== undefined && (!trusted.lastSig || trusted.lastSig !== prevChange)) trusted = null;
   // Flat before and the fill opens: a fresh book (its whole life is seen). Anything else without a matching book: history unknown.
   if (!trusted && onChainQBefore !== 0n) {
     saveBook(wallet, slab, portfolio, null);

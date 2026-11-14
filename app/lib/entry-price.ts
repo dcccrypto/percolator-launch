@@ -44,6 +44,11 @@ interface EntryRecord {
    * newer signature makes the record unverified (a same-size close + reopen elsewhere), so it is re-checked, never trusted by size alone.
    */
   chainSig?: string;
+  /**
+   * Council r10 round 2 MED: the signature of the newest change (fill) this record includes. The chain check (lib/entry-chain-sync.ts) keeps a
+   * record this device wrote only while that is still the position's newest change on chain; a same-size close + reopen elsewhere is not.
+   */
+  lastSig?: string;
   timestamp: number;
 }
 
@@ -80,7 +85,7 @@ export function saveEntryPrice(
   leverage?: number,
   wallet?: string,
   sizeQ?: bigint,
-  opts?: { bookedPriceE6?: bigint; pending?: boolean; busyFeeAtoms?: bigint | null; chainSig?: string },
+  opts?: { bookedPriceE6?: bigint; pending?: boolean; busyFeeAtoms?: bigint | null; chainSig?: string; lastSig?: string | null },
 ): void {
   try {
     const record: EntryRecord = {
@@ -88,6 +93,7 @@ export function saveEntryPrice(
       ...(opts?.bookedPriceE6 != null && opts.bookedPriceE6 > 0n && opts.bookedPriceE6 !== entryPriceE6 ? { bookedPriceE6: opts.bookedPriceE6.toString() } : {}),
       ...(opts?.busyFeeAtoms != null && opts.busyFeeAtoms >= 0n ? { busyFeeAtoms: opts.busyFeeAtoms.toString() } : {}),
       ...(opts?.chainSig ? { chainSig: opts.chainSig } : {}),
+      ...(opts?.lastSig ? { lastSig: opts.lastSig } : {}),
       ...(opts?.pending && (sizeQ == null || sizeQ === 0n) ? { pending: true } : {}),
       ...(leverage != null && Number.isFinite(leverage) && leverage > 0 ? { leverage } : {}),
       ...(sizeQ != null && sizeQ !== 0n ? { sizeQ: sizeQ.toString() } : {}),
@@ -224,6 +230,10 @@ export interface SavedEntry {
   busyFeeAtoms: bigint | null;
   /** r10: the portfolio signature a chain-rebuilt record was read at (null = a record this device wrote itself). */
   chainSig: string | null;
+  /** The newest change this record includes (see EntryRecord.lastSig); null = not recorded (an older save). */
+  lastSig: string | null;
+  /** When the record was saved (ms). */
+  savedAt: number;
   /** A fresh size-less save from the fill that has not been measured yet (see EntryRecord.pending). Always false once the window has passed. */
   pending: boolean;
 }
@@ -275,7 +285,7 @@ export function getSavedEntry(slab: string, accountIdx: number, wallet?: string)
     }
     const sized = sizeQ !== null && sizeQ !== 0n;
     const fresh = typeof record.timestamp === "number" && Date.now() - record.timestamp >= 0 && Date.now() - record.timestamp < PENDING_ENTRY_WINDOW_MS;
-    return { entryPriceE6, leverage, sizeQ: sized ? sizeQ : null, bookedPriceE6, busyFeeAtoms, chainSig: typeof record.chainSig === "string" ? record.chainSig : null, pending: !sized && record.pending === true && fresh };
+    return { entryPriceE6, leverage, sizeQ: sized ? sizeQ : null, bookedPriceE6, busyFeeAtoms, chainSig: typeof record.chainSig === "string" ? record.chainSig : null, lastSig: typeof record.lastSig === "string" && record.lastSig ? record.lastSig : null, savedAt: typeof record.timestamp === "number" ? record.timestamp : 0, pending: !sized && record.pending === true && fresh };
   } catch {
     return null;
   }
@@ -392,16 +402,21 @@ export function clearEntryPrice(slab: string, accountIdx: number, wallet?: strin
  * size the chain held right before the fill, and the fill is a pure reduce (same side, smaller, not flat). The busy-side fee share scales with the
  * size left (busyFeeAfterTrade). A position carrying the explicit "unknown" marker is left alone. Returns true when it saved.
  */
-export function keepEntryAfterReduce(slab: string, accountIdx: number, wallet: string | undefined, beforeQ: bigint, afterQ: bigint): boolean {
+export function keepEntryAfterReduce(slab: string, accountIdx: number, wallet: string | undefined, beforeQ: bigint, afterQ: bigint, sig?: string | null, prevChange?: string | null): boolean {
   if (beforeQ === 0n || afterQ === 0n || (beforeQ > 0n) !== (afterQ > 0n) || absQ(afterQ) >= absQ(beforeQ)) return false;
   if (isEntryMarkedUnknown(slab, accountIdx, wallet, beforeQ)) return false;
   const saved = getSavedEntry(slab, accountIdx, wallet);
   if (!saved || saved.sizeQ === null || saved.sizeQ !== beforeQ) return false;
+  // Council r10 round 2 MED: when the chain's newest change before this reduce is known, the record must be the one that includes it (a
+  // same-size close + reopen elsewhere keeps the size, not the Entry). Not kept otherwise: the chain rebuild fills it in.
+  if (prevChange !== undefined && (saved.lastSig === null || saved.lastSig !== prevChange)) return false;
   const busy = busyFeeAfterTrade({ beforeQ, afterQ, saved: { entryPriceE6: saved.entryPriceE6, sizeQ: beforeQ, busyFeeAtoms: saved.busyFeeAtoms }, fillBusyFeeAtoms: null });
   saveEntryPrice(slab, accountIdx, saved.entryPriceE6, saved.leverage ?? undefined, wallet, afterQ, {
     bookedPriceE6: saved.bookedPriceE6,
     busyFeeAtoms: busy,
     ...(saved.chainSig ? { chainSig: saved.chainSig } : {}),
+    // The reduce is now the newest change the record includes. Without its signature the record cannot be checked against the chain any more.
+    ...(sig ? { lastSig: sig } : {}),
   });
   return true;
 }
