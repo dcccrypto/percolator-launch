@@ -369,6 +369,29 @@ describe("Council round 2 review: beyond the walk's reach", () => {
     }
   });
 
+  it("Council r3 Risk R1b: an Entry device 1 rebuilt from chain (it never traded), a same-size reopen elsewhere, every portfolio walk unreadable: the wallet check removes that Entry too", async () => {
+    vi.useFakeTimers();
+    const c = conn as unknown as { getTransactions: ReturnType<typeof vi.fn> };
+    try {
+      order = ["k2", "k1", "k0", "open1"];
+      expect(await drive(syncChainEntry(conn, target, () => 10_000_000))).toBe("chain");
+      expect(getSavedEntry(SLAB, 0, WALLET)?.chainSig).toBeTruthy();
+      order = ["k5", "k4", "open2", "k3", "close1", "k2", "k1", "k0", "open1"];
+      // the walk reads the portfolio's newest txs (cranks) first and fails; the wallet's own list has no cranks and reads fine
+      c.getTransactions.mockImplementation(async (s: string[]) => {
+        if (s.some((x) => x.startsWith("k"))) throw new Error("429");
+        return s.map(one);
+      });
+      for (let m = 1; m <= 2; m++) await drive(syncChainEntry(conn, target, () => 10_000_000 + m * VERIFY_MS + m));
+      expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull(); // not P1's 80.184 for the 10-minute cooldown
+      expect(loadBookByWallet(WALLET, SLAB)).toBeNull();
+    } finally {
+      c.getTransactions.mockReset();
+      c.getTransactions.mockImplementation(async (s: string[]) => s.map(one));
+      vi.useRealTimers();
+    }
+  });
+
   it("the check stops at the record's own fill; it is retried only while the fill is not listed yet, not after its read limit", async () => {
     txs.close1x = fillTx(-Q, P1);
     order = ["close1x", "k1", "k0", "open1"];

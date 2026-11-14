@@ -335,14 +335,15 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
  */
 /** The newest fill of this device's own record for the position (its Entry, else its trade book), or null when it has none to check. */
 function ownRecordSig(t: SyncTarget, atStart: SavedEntry | null): string | null {
-  const own = atStart && !atStart.chainSig && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
+  // Council r3 Risk: an Entry the chain wrote earlier (chainSig) is checked the same way: it names its newest fill too.
+  const own = atStart && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
   const book = loadBook(t.wallet, t.slab, t.portfolio.toBase58());
   return own?.lastSig ?? (book && book.q === t.qNow ? book.lastSig ?? null : null);
 }
 
 async function scanOwn(connection: Connection, t: SyncTarget, atStart: SavedEntry | null, now: () => number): Promise<boolean> {
   const pk = t.portfolio.toBase58();
-  const own = atStart && !atStart.chainSig && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
+  const own = atStart && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
   const book = loadBook(t.wallet, t.slab, pk);
   const ownBook = book && book.q === t.qNow ? book : null;
   const sig = ownRecordSig(t, atStart);
