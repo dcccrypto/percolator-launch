@@ -57,7 +57,12 @@ export type ErrorCode = keyof typeof ERROR_CATALOG;
 
 export interface OnchainError {
   code: number;
+  /** The wrapper's name for the code; null for any other program's code (a number alone does not say whose table it is from). */
   name: string | null;
+  /** Program that returned the code (the innermost failing program); null when it could not be determined. */
+  program?: string | null;
+  /** Index of the failing top-level instruction. */
+  instructionIndex?: number;
 }
 
 /** An error the handler wrapper turns into the envelope. */

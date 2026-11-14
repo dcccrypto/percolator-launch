@@ -38,9 +38,18 @@ const m = vi.hoisted(() => ({
   position: 0n,
   sigStatus: null as null | { slot: number; confirmations: number | null; err: unknown; confirmationStatus?: string },
   blockHeight: 100,
+  lamports: 1_000_000_000,
+  landed: null as null | { meta: { logMessages: string[] }; transaction: { message: { staticAccountKeys: PublicKey[]; compiledInstructions: Array<{ programIdIndex: number }> } } },
 }));
 
-vi.mock("@/lib/programAllowlist", () => ({ assertKnownProgram: () => undefined }));
+// The wrapper whose error table names a Custom(n): only a code this program returned is named (lib/bot-api/onchain.ts).
+vi.mock("@/lib/config", async (orig) => ({
+  ...(await orig<typeof import("@/lib/config")>()),
+  getMarketDiscoveryProgramIds: () => ["5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe"],
+  getAllProgramIds: () => ["5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe"],
+}));
+const WRAPPER_FAILED = (hex: string) => `Program ${fx.owner} failed: custom program error: 0x${hex}`;
+vi.mock("@/lib/programAllowlist", () => ({ assertKnownProgram: () => undefined, isKnownProgram: () => true }));
 vi.mock("@/lib/owner-portfolio", () => ({ findOwnerPortfolio: vi.fn(async () => (m.portfolioFound ? PORTFOLIO : null)) }));
 vi.mock("@/lib/v18-wire", async (orig) => ({ ...(await orig<typeof import("@/lib/v18-wire")>()), fetchPortfolioIdentity: vi.fn(async () => ({ portfolioId: 7n, positionEpoch: 1n, matcherSequence: 3n })) }));
 vi.mock("@/lib/v22/layout", async (orig) => ({ ...(await orig<typeof import("@/lib/v22/layout")>()), parsePortfolio: () => m.pf }));
@@ -124,6 +133,8 @@ vi.mock("@/lib/server-rpc", () => ({
     },
     getLatestBlockhash: async () => ({ blockhash: BH, lastValidBlockHeight: 5151 }),
     getMinimumBalanceForRentExemption: async () => 9_999_999,
+    getBalance: async () => m.lamports,
+    getTransaction: async () => m.landed,
     getSignatureStatuses: async () => ({ context: { slot: 1 }, value: [m.sigStatus] }),
     getBlockHeight: async () => m.blockHeight,
   }),
@@ -158,7 +169,7 @@ beforeEach(async () => {
   Object.assign(m, {
     pre: { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n, reducing: false }, guards: 0, guardThrow: null,
     buildCalls: 0, buildThrow: null, resubmit: false, finalSims: [], simTxs: [], gate: { err: null, logs: [] }, portfolioFound: true,
-    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100,
+    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null,
   });
 });
 afterEach(() => {
@@ -236,19 +247,38 @@ describe("POST /api/v1/orders", () => {
     expect(w.details).toMatchObject({ next: "POST /api/v1/deposits" });
   });
   it("a failed final simulation is refused with the decoded on-chain code; BlockhashNotFound is retryable", async () => {
-    m.finalSims = [{ err: { InstructionError: [3, { Custom: 49 }] }, logs: ["Program log: margin"] }];
+    m.finalSims = [{ err: { InstructionError: [3, { Custom: 49 }] }, logs: ["Program log: margin", WRAPPER_FAILED("31")] }];
     const r = await post(orders, "/api/v1/orders", order());
     expect(r.status).toBe(422);
-    expect((await r.json()).error).toMatchObject({ code: "insufficient_margin", onchain: { code: 49, name: "EngineInsufficientInitialMargin" }, logs: ["Program log: margin"] });
+    expect((await r.json()).error).toMatchObject({ code: "insufficient_margin", onchain: { code: 49, name: "EngineInsufficientInitialMargin" }, logs: ["Program log: margin", WRAPPER_FAILED("31")] });
     m.finalSims = [{ err: "BlockhashNotFound" }];
     const b = await post(orders, "/api/v1/orders", order());
     expect(b.status).toBe(503);
     expect((await b.json()).error).toMatchObject({ code: "rpc_unavailable", retryable: true });
   });
+  it("first-timer-4: a Custom(n) from another program is not named from the wrapper's table", async () => {
+    // The System program's own "insufficient lamports" is Custom(1) (the wrapper's table: InvalidVersion); 27 from the matcher is not OracleStale.
+    const sys = "11111111111111111111111111111111";
+    m.finalSims = [{ err: { InstructionError: [4, { Custom: 1 }] }, logs: [`Program ${sys} invoke [1]`, "Program log: Transfer: insufficient lamports 49990000, need 54533800", `Program ${sys} failed: custom program error: 0x1`] }];
+    const r = await post(orders, "/api/v1/orders", order());
+    const e = (await r.json()).error;
+    expect(r.status).toBe(422);
+    expect(e).toMatchObject({ code: "simulation_failed", retryable: false, onchain: { code: 1, name: null, program: sys, instructionIndex: 4 } });
+    expect(e.message).toContain("System program");
+    expect(e.message).toContain("insufficient lamports 49990000, need 54533800");
+    expect(e.message).not.toContain("InvalidVersion");
+    const matcher = Keypair.generate().publicKey.toBase58();
+    m.finalSims = [{ err: { InstructionError: [4, { Custom: 27 }] }, logs: [`Program ${matcher} failed: custom program error: 0x1b`, `Program ${fx.owner} failed: custom program error: 0x1b`] }];
+    const x = (await (await post(orders, "/api/v1/orders", order())).json()).error;
+    expect(x).toMatchObject({ code: "simulation_failed", onchain: { code: 27, name: null, program: matcher } });
+    // no log and no instruction list: unattributed, so unnamed
+    m.buildThrow = new TradeBuildRefusal("simulation_failed", 'Transaction simulation failed: {"InstructionError":[3,{"Custom":27}]}', 422, []);
+    expect((await (await post(orders, "/api/v1/orders", order())).json()).error).toMatchObject({ code: "simulation_failed", onchain: { code: 27, name: null, program: null } });
+  });
   it("builder refusals keep their meaning", async () => {
     m.buildThrow = new TradeBuildRefusal("fee_raise_required", "the market now needs a 160 bps fee cap", 409);
     expect((await (await post(orders, "/api/v1/orders", order())).json()).error.code).toBe("fee_raise_required");
-    m.buildThrow = new TradeBuildRefusal("simulation_failed", 'Transaction simulation failed: {"InstructionError":[3,{"Custom":27}]}', 422, ["l1"]);
+    m.buildThrow = new TradeBuildRefusal("simulation_failed", 'Transaction simulation failed: {"InstructionError":[3,{"Custom":27}]}', 422, ["l1", WRAPPER_FAILED("1b")]);
     expect((await (await post(orders, "/api/v1/orders", order())).json()).error).toMatchObject({ code: "market_stale", onchain: { code: 27, name: "OracleStale" } });
     m.buildThrow = new TradeBuildRefusal("no_portfolio", "owner has no portfolio", 409);
     expect((await (await post(orders, "/api/v1/orders", order())).json()).error.code).toBe("no_portfolio");
@@ -355,11 +385,26 @@ describe("POST /api/v1/deposits and /api/v1/withdrawals", () => {
     expect(b.summary).toMatchObject({ created: true, portfolio: fresh.toBase58() });
     expect(b.transactions[0].signers).toEqual([OWNER.toBase58(), fresh.toBase58()]);
   });
+  it("first-timer-4: create-and-deposit refuses up front, with the lamports, when the wallet cannot pay the account's rent", async () => {
+    m.portfolioFound = false;
+    const fresh = Keypair.generate().publicKey;
+    m.fresh = fresh.toBase58();
+    // rent 9,999,999 + 2 signatures 10,000 + priority 1000 microLamports x 600k CU = 600 + the 890,880 the wallet must keep
+    const need = 9_999_999 + 10_000 + 600 + 890_880;
+    m.lamports = need - 1;
+    const r = await post(deposits, "/api/v1/deposits", dep({ newPortfolio: fresh.toBase58() }));
+    const e = (await r.json()).error;
+    expect([r.status, e.code, e.retryable]).toEqual([422, "insufficient_funds", false]);
+    expect(e.details).toMatchObject({ needLamports: need, haveLamports: need - 1, rentLamports: 9_999_999 });
+    expect(m.simTxs).toHaveLength(0); // nothing was simulated
+    m.lamports = need;
+    expect((await post(deposits, "/api/v1/deposits", dep({ newPortfolio: fresh.toBase58() }))).status).toBe(200);
+  });
   it("refuses more than the wallet holds, and a gate simulation failure with its code", async () => {
     m.ataBalance = 1n;
     expect((await (await post(deposits, "/api/v1/deposits", dep())).json()).error.code).toBe("insufficient_funds");
     m.ataBalance = 100_000_000n;
-    m.gate = { err: { InstructionError: [3, { Custom: 27 }] }, logs: [] };
+    m.gate = { err: { InstructionError: [3, { Custom: 27 }] }, logs: [WRAPPER_FAILED("1b")] };
     expect((await (await post(deposits, "/api/v1/deposits", dep())).json()).error.code).toBe("market_stale");
   });
   it("withdraw: refused with an open position or above capital; otherwise one tx with an idempotent ATA create", async () => {
@@ -395,7 +440,15 @@ describe("GET /api/v1/tx/{signature}", () => {
     m.sigStatus = { slot: 9, confirmations: null, err: null, confirmationStatus: "finalized" };
     expect(await (await get(s)).json()).toMatchObject({ status: "finalized", slot: 9 });
     m.sigStatus = { slot: 9, confirmations: 1, err: { InstructionError: [3, { Custom: 49 }] }, confirmationStatus: "confirmed" };
-    expect(await (await get(s)).json()).toMatchObject({ status: "failed", err: { onchain: { code: 49, name: "EngineInsufficientInitialMargin" } } });
+    // the landed transaction's logs say which program returned the code: the wrapper -> named
+    m.landed = { meta: { logMessages: [WRAPPER_FAILED("31")] }, transaction: { message: { staticAccountKeys: [], compiledInstructions: [] } } };
+    expect(await (await get(s)).json()).toMatchObject({ status: "failed", err: { onchain: { code: 49, name: "EngineInsufficientInitialMargin", program: fx.owner } } });
+    // the System program returned it: the same number is NOT the wrapper's error, so it stays unnamed
+    m.landed = { meta: { logMessages: ["Program 11111111111111111111111111111111 failed: custom program error: 0x31"] }, transaction: { message: { staticAccountKeys: [], compiledInstructions: [] } } };
+    expect((await (await get(s)).json()).err.onchain).toMatchObject({ code: 49, name: null, program: "11111111111111111111111111111111" });
+    // the transaction cannot be read: unattributed, never named from the wrapper's table
+    m.landed = null;
+    expect((await (await get(s)).json()).err.onchain).toMatchObject({ code: 49, name: null, program: null });
   });
   it("refuses a malformed signature or height", async () => {
     expect((await get("notasig")).status).toBe(400);

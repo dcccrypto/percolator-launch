@@ -8,7 +8,8 @@
  */
 import bs58 from "bs58";
 import type { Connection } from "@solana/web3.js";
-import { ApiError, customCodeOf, onchainErrorName } from "@/lib/bot-api/errors";
+import { ApiError } from "@/lib/bot-api/errors";
+import { attributeFailure, instructionFailureOf } from "@/lib/bot-api/onchain";
 
 export type TxState = "pending" | "processed" | "confirmed" | "finalized" | "failed" | "expired" | "unknown";
 
@@ -42,13 +43,35 @@ export async function txStatus(connection: Connection, signature: string, lastVa
     return { signature, status: state, slot: null, confirmations: null, err: null, blockHeight, lastValidBlockHeight, observedAt };
   }
   if (st.err) {
-    const code = customCodeOf(st.err);
+    // The status carries only the error; the program that returned a Custom(n) is read from the landed transaction (its logs, else
+    // the program of the failing instruction). One extra read, only for a failed transaction; if it fails the code is reported unnamed.
+    let onchain: ReturnType<typeof attributeFailure> | null = null;
+    if (instructionFailureOf(st.err).custom !== null) {
+      let logs: string[] = [];
+      let programAt: ((i: number) => string | null) | undefined;
+      try {
+        meta.rpcCalls++;
+        const tx = await connection.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+        logs = tx?.meta?.logMessages ?? [];
+        const msg = tx?.transaction.message;
+        if (msg) {
+          const keys = msg.staticAccountKeys;
+          programAt = (i) => {
+            const ix = msg.compiledInstructions[i];
+            return ix ? keys[ix.programIdIndex]?.toBase58() ?? null : null;
+          };
+        }
+      } catch {
+        /* unattributed */
+      }
+      onchain = attributeFailure(st.err, logs, programAt);
+    }
     return {
       signature,
       status: "failed" as TxState,
       slot: st.slot,
       confirmations: st.confirmations ?? null,
-      err: { raw: st.err, onchain: code === null ? null : { code, name: onchainErrorName(code) } },
+      err: { raw: st.err, onchain: onchain ? onchain.onchain : null },
       blockHeight,
       lastValidBlockHeight,
       observedAt,
