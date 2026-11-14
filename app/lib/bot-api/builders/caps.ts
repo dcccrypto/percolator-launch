@@ -7,7 +7,7 @@
  *   limit      an explicit limitPriceE6 may not sit more than 1000 bps on the adverse side of the effective price
  *   notional   |size| x effective price <= min(caller maxNotionalUsd, BOT_API_MAX_NOTIONAL_USD, default 5000), PER ORDER (not per position)
  *   leverage   after the order: notional / conservative equity <= min(caller maxLeverage, market max, BOT_API_MAX_LEVERAGE, default 10)
- *              (builders/equity.ts: capital less the open leg's unrealized loss and negative fee credits; the same equity
+ *              (builders/equity.ts: capital less the open legs' unrealized loss, stored AND pending K/F, and negative fee credits; the same equity
  *              GET /v1/account reports leverage on)
  *   reduceOnly refuse unless the order shrinks the position without flipping it
  *   size       |size| <= the market's per-side maximum (checkOpenMarketGuards), and the oracle must be fresh
@@ -117,8 +117,9 @@ export function checkOrderCaps(caps: OrderCaps, p: TradePreflight): { notionalUs
   const afterNotional = (abs(before + p.size) * px) / 1_000_000n;
   const risk = p.portfolioData ? decodePortfolioRisk(p.portfolioData) : null;
   if (!risk || !p.portfolioData) throw new ApiError("market_unreadable", "the trading account is unreadable, so leverage cannot be checked");
-  // Value-side PnL of the open leg at the effective price (the stored pnl is only the settled part): an under-water
-  // position must lower the equity the cap divides by.
+  // The account's PnL at the effective price: stored pnl + the K/F each open leg has accrued since its snapshot (the engine's
+  // settle arithmetic, reads/pending-pnl.ts). An under-water position, settled or not, lowers the equity the cap divides by.
+  // 0 is a valid stored pnl; only a leg whose pending cannot be computed (older ADL epoch, stale leg) is unreadable.
   const leg = openLegsValuePnl(p.marketData, p.portfolioData);
   if (leg.kind === "unreadable") throw new ApiError("market_unreadable", "the open position cannot be valued, so leverage cannot be checked");
   const equity = conservativeEquity(risk.capital, leg.kind === "open" ? leg.valuePnl : risk.pnl, risk.feeCredits);

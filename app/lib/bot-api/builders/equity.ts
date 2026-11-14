@@ -1,7 +1,7 @@
 /**
  * The ONE equity the API uses for leverage, in collateral atoms: capital + min(0, pnl) + min(0, fee credits), where pnl is
- * the account's value-side PnL at the engine's effective price (the open leg's unrealized result, settled pnl included;
- * a flat account holds its settled pnl). Gains are ignored on purpose: unrealized profit is not margin until it is
+ * the account's PnL at the engine's effective price: the stored pnl plus the K/F the open legs have accrued since their
+ * snapshots (reads/pending-pnl.ts; a flat account holds its stored pnl). Not counted: holding rent and the social-loss share. Gains are ignored on purpose: unrealized profit is not margin until it is
  * settled and released, so a cap or a leverage figure must not lean on it.
  *
  *   leverage = |position notional at the effective price| / this equity

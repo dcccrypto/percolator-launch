@@ -22,7 +22,8 @@ import { isLpPortfolio } from "@/lib/lpPortfolio";
 import { decodePortfolioRisk } from "@/lib/limits/decode";
 import { computePositionPnl } from "@/lib/position-pnl";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
-import { riskLegFields } from "@/lib/risk-entry";
+import { riskLegFields, parseAssetSettleState } from "@/lib/risk-entry";
+import { pendingKfPnl } from "./pending-pnl";
 import { parseAssetAdlFactors, adlSideFactor, adlRemainingBps } from "@/lib/v17-adl";
 import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
@@ -115,14 +116,14 @@ export function liqPriceWithMmFloor(proportional: bigint | null, entryE6: bigint
 }
 
 /** computePositionPnl for one leg, with the inputs both the account view and the order caps use. */
-function legPnl(pf: PortfolioParsed, leg: PortfolioParsed["legs"][number], adl: ReturnType<typeof parseAssetAdlFactors> | null, mark: bigint, imBps: bigint, mmBps: bigint) {
+function legPnl(pf: PortfolioParsed, leg: PortfolioParsed["legs"][number], adl: ReturnType<typeof parseAssetAdlFactors> | null, mark: bigint, imBps: bigint, mmBps: bigint, pnl: bigint = pf.pnl) {
   return computePositionPnl({
     basisQ: leg.basisPosQ,
     aBasis: leg.aBasis,
     epochSnap: leg.epochSnap,
     adlFactors: adl,
     markE6: mark,
-    onChainPnl: pf.pnl,
+    onChainPnl: pnl,
     initialMarginBps: imBps,
     maintenanceMarginBps: mmBps,
     capital: pf.capital,
@@ -131,9 +132,10 @@ function legPnl(pf: PortfolioParsed, leg: PortfolioParsed["legs"][number], adl: 
 }
 
 /**
- * The account's value-side PnL at the engine's effective price (what `capital + pnl` is worth), for the order caps
- * (builders/caps.ts): `flat` = no open leg (the settled pnl is the figure), `open` = the sum over the open legs,
- * `unreadable` = a leg whose value cannot be computed (never guessed).
+ * The account's PnL at the engine's effective price, for the order caps (builders/caps.ts) and GET /v1/account:
+ * the stored `pnl` PLUS what each open leg has accrued in K and F since its snapshot (pending-pnl.ts, the engine's own
+ * settlement arithmetic). `flat` = no open leg (the stored pnl is the figure; 0 is a valid pnl), `open` = pnl + the legs'
+ * pending, `unreadable` = a leg whose pending cannot be computed (never guessed).
  */
 export function openLegsValuePnl(marketRaw: Uint8Array, portfolioData: Uint8Array): { kind: "flat" } | { kind: "open"; valuePnl: bigint } | { kind: "unreadable" } {
   let pf: PortfolioParsed;
@@ -144,19 +146,23 @@ export function openLegsValuePnl(marketRaw: Uint8Array, portfolioData: Uint8Arra
   }
   const legs = pf.legs.filter((l) => l.active);
   if (legs.length === 0) return { kind: "flat" };
-  const engine = decodeMarketEngineView(marketRaw, 0);
-  if (!engine) return { kind: "unreadable" };
-  const mark = sanitizePriceE6(engine.effectivePriceE6);
-  if (mark <= 0n) return { kind: "unreadable" };
-  const adl = parseAssetAdlFactors(marketRaw, 0);
+  const pending = accountPendingKf(marketRaw, legs);
+  if (pending === null) return { kind: "unreadable" };
+  return { kind: "open", valuePnl: pf.pnl + pending.total };
+}
+
+/** The pending K/F PnL of each open leg and their sum; null when any leg's cannot be computed. */
+export function accountPendingKf(marketRaw: Uint8Array, legs: readonly PortfolioParsed["legs"][number][]): { total: bigint; perLeg: bigint[] } | null {
   let total = 0n;
+  const perLeg: bigint[] = [];
   for (const leg of legs) {
-    const r = legPnl(pf, leg, adl, mark, engine.initialMarginBps, engine.maintenanceMarginBps);
-    const v = r.riskUnrealizedPnl ?? r.unrealizedPnl;
-    if (typeof v !== "bigint") return { kind: "unreadable" };
-    total += v;
+    const st = parseAssetSettleState(marketRaw, leg.assetIndex);
+    const p = pendingKfPnl(st, riskLegFields([leg]).riskLeg, leg.basisPosQ, leg.aBasis);
+    if (p === null) return null;
+    perLeg.push(p.net);
+    total += p.net;
   }
-  return { kind: "open", valuePnl: total };
+  return { total, perLeg };
 }
 
 
@@ -189,15 +195,20 @@ export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKe
   const mmBps = engine?.maintenanceMarginBps ?? 0n;
   const adl = mkt && detail ? parseAssetAdlFactors(mkt.raw, 0) : null;
 
-  const rows = pf.legs
-    .filter((l) => l.active)
-    .map((leg) => {
+  const activeLegs = pf.legs.filter((l) => l.active);
+  // What the open legs have accrued in K/F since their snapshots (null = cannot be computed: then the figures below fall back to the stored pnl and say so).
+  const pending = mkt && detail && engine ? accountPendingKf(mkt.raw, activeLegs) : null;
+  const single = activeLegs.length === 1;
+  const rows = activeLegs
+    .map((leg, i) => {
       const side = leg.side === 0 ? "long" : "short";
       if (!detail || !engine) {
         return { asset: leg.assetIndex, side, rawBasisQ: leg.basisPosQ, sizeQ: null, entryPriceE6: null, entrySource: null, entryIsEstimate: null, markPriceE6: null, unrealizedPnl: null, liqPriceE6: null, notional: null, marginCushion: null };
       }
       const aSide = adl ? adlSideFactor(adl, leg.side) : 0n;
-      const r = legPnl(pf, leg, adl, mark, imBps, mmBps);
+      // Entry, liquidation price and cushion back-solve from the pnl the position has at the effective price: stored + pending (one leg: `pnl` is that leg's).
+      const legPnlAtMark = single && pending ? pf.pnl + pending.total : pf.pnl;
+      const r = legPnl(pf, leg, adl, mark, imBps, mmBps, legPnlAtMark);
       // Raw basis is signed only by `side`; the effective (ADL-scaled) size is what exposure, notional and liquidation use.
       const eff = r.effectiveSize;
       const signedEff = eff === null ? null : leg.side === 0 ? abs(eff) : -abs(eff);
@@ -216,7 +227,9 @@ export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKe
         entrySource: r.entrySource,
         entryIsEstimate: r.entrySource !== "server" && r.entrySource !== "cache",
         markPriceE6: mark,
-        unrealizedPnl: r.riskUnrealizedPnl ?? r.unrealizedPnl,
+        // The leg's result at the effective price: its pending K/F, plus the stored pnl when it is the only leg (`pnl` is one
+        // number per portfolio, so with several legs it cannot be split; the account's `valuePnl` is exact either way).
+        unrealizedPnl: pending ? pending.perLeg[i] + (single ? pf.pnl : 0n) : null,
         liqPriceE6: ((): bigint | null => {
           const v = liqPriceWithMmFloor(r.liquidationPriceE6, r.riskEntry, pf.capital, signedEff ?? 0n, detail.risk.minNonzeroMaintenanceMarginReq ?? 0n);
           return v !== null && v > 0n ? v : null;
@@ -226,10 +239,10 @@ export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKe
         severity: cushion === null ? null : severityFromCushion(cushion),
       };
     });
-  const valuePnl = rows.reduce((s, x) => s + (typeof x.unrealizedPnl === "bigint" ? x.unrealizedPnl : 0n), 0n);
-  const flat = rows.length === 0;
+  // Stored pnl + every open leg's pending K/F: the account's PnL at the effective price (a flat account holds its stored pnl).
+  const valuePnl = pf.pnl + (pending ? pending.total : 0n);
   // The equity the order caps divide by (builders/equity.ts): capital less unrealized losses and negative fee credits.
-  const leverageEquity = conservativeEquity(pf.capital, flat ? pf.pnl : valuePnl, pf.feeCredits);
+  const leverageEquity = conservativeEquity(pf.capital, valuePnl, pf.feeCredits);
   const positions = rows.map((x) => ({
     ...x,
     leverage: typeof x.notional === "bigint" && leverageEquity > 0n ? Number((x.notional * 100n) / leverageEquity) / 100 : null,
@@ -245,8 +258,12 @@ export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKe
     pnl: pf.pnl,
     feeCredits: pf.feeCredits,
     leverageEquity,
-    // Account value at the mark: capital + the position's value-side PnL; a flat account holds its settled pnl.
-    equity: flat ? pf.capital + pf.pnl : pf.capital + valuePnl,
+    // K/F PnL accrued on the open legs since their snapshots and not yet settled into `pnl`; null = could not be computed.
+    pendingPnl: rows.length === 0 ? 0n : pending ? pending.total : null,
+    // Stored pnl + pendingPnl: the PnL at the engine's effective price.
+    valuePnl,
+    // Account value at the effective price: capital + valuePnl.
+    equity: pf.capital + valuePnl,
     certifiedEquity: risk ? risk.cert.certifiedEquity : null,
     margin: { initialMarginBps: engine ? imBps : null, maintenanceMarginBps: engine ? mmBps : null, maxLeverage: detail?.maxLeverage ?? null },
     positions,

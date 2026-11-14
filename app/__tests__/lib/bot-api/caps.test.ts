@@ -8,7 +8,7 @@ vi.mock("@/lib/limits/decode", async (orig) => ({
   decodePortfolioRisk: () => risk.v,
 }));
 vi.mock("@/lib/slab-max-leverage", () => ({ maxLeverageFromSlab: () => risk.maxLev }));
-// Value-side PnL of the open leg (reads/account.ts openLegsValuePnl): flat by default, set per test.
+// openLegsValuePnl stubbed flat for the pure cap arithmetic below; the real one runs in pending-pnl.test.ts.
 const leg = vi.hoisted(() => ({ v: { kind: "flat" } as { kind: "flat" } | { kind: "open"; valuePnl: bigint } | { kind: "unreadable" } }));
 vi.mock("@/lib/bot-api/reads/account", async (orig) => ({ ...(await orig<typeof import("@/lib/bot-api/reads/account")>()), openLegsValuePnl: () => leg.v }));
 
@@ -123,21 +123,8 @@ describe("checkOrderCaps", () => {
 });
 
 describe("council fixes", () => {
-  const open = (valuePnl: bigint) => {
-    leg.v = { kind: "open", valuePnl };
-  };
-  it("risk F2: an under-water open leg lowers the equity the leverage cap divides by", () => {
-    // capital 1,000 USD, settled pnl 0 (risk.pnl), but the open long is down 300 at the mark: equity 700.
-    // existing 1e9 (2,000 USD) + buy 1e9 = 4,000 USD -> 5.71x on 700, 4x on 1,000.
-    const c = caps({ explicitLimit: false, maxLeverage: 5 });
-    expect(code(() => checkOrderCaps(c, pf({ positionBeforeQ: 1_000_000_000n })))).toBe("ok"); // flat leg: settled pnl 0
-    open(-300_000_000n);
-    expect(code(() => checkOrderCaps(c, pf({ positionBeforeQ: 1_000_000_000n })))).toBe("leverage_cap_exceeded");
-    open(900_000_000n); // gains are not margin
-    expect(code(() => checkOrderCaps(c, pf({ positionBeforeQ: 1_000_000_000n })))).toBe("ok");
-    leg.v = { kind: "unreadable" };
-    expect(code(() => checkOrderCaps(c, pf({ positionBeforeQ: 1_000_000_000n })))).toBe("market_unreadable");
-  });
+  // risk F2 (an under-water open leg lowers the cap's equity) is tested on real portfolio + market bytes with K moved, unmocked:
+  // __tests__/lib/bot-api/pending-pnl.test.ts. The openLegsValuePnl stub above only keeps these arithmetic cases flat.
   it("risk F3: an unreadable position refuses every order, not only reduce-only ones", () => {
     expect(code(() => checkOrderCaps(caps(), pf({ positionBeforeQ: null })))).toBe("market_unreadable");
     expect(code(() => checkOrderCaps(caps({ explicitLimit: false, reduceOnly: true }), pf({ positionBeforeQ: null })))).toBe("market_unreadable");

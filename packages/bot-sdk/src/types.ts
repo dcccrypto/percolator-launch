@@ -185,9 +185,13 @@ export interface Portfolio {
   capital: string;
   pnl: string;
   feeCredits: string;
-  /** capital less the open position's unrealized loss and negative fee credits (gains not counted): the leverage denominator. */
+  /** K/F PnL the open legs accrued since their last settle, not yet in pnl; "0" when flat, null when it could not be computed. */
+  pendingPnl: string | null;
+  /** pnl + pendingPnl: the PnL at the engine's effective price. */
+  valuePnl: string;
+  /** capital less the unrealized loss (stored and pending) and negative fee credits (gains not counted): the leverage denominator. */
   leverageEquity: string;
-  /** Account value at the mark. */
+  /** Account value at the engine's effective price: capital + valuePnl. */
   equity: string;
   /** Equity in the account's last health certificate; lags and can differ a lot from equity. Do not use it for margin decisions. */
   certifiedEquity: string | null;
