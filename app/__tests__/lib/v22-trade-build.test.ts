@@ -59,7 +59,7 @@ vi.mock("@/lib/taker-crank", () => ({ planTakerCrank: vi.fn(async () => m.crankP
 vi.mock("@/lib/v22/trade-refresh-wire", () => ({
   planTradeRefresh: vi.fn(async (_c: unknown, i: { body: TransactionInstruction[] }) => ({
     path: "simple",
-    instructions: [...Array.from({ length: m.refreshPeers }, () => ({ programId: WRAPPER, keys: [], data: Buffer.from([5]) }) as unknown as TransactionInstruction), ...i.body],
+    instructions: [...Array.from({ length: m.refreshPeers }, () => ({ programId: WRAPPER, keys: [], data: Buffer.alloc(40, 5) }) as unknown as TransactionInstruction), ...i.body],
     cranks: Array.from({ length: m.refreshPeers }, () => ({ role: "peer", portfolio: PORTFOLIO })),
     rounds: 1,
   })),
@@ -250,6 +250,21 @@ describe("buildV22Trade", () => {
       expect(e.code).toBe("bad_portfolio");
     }
     spy.mockRestore();
+  });
+
+  it("an order too large for one packet is refused before it is simulated (no misleading rpc error)", async () => {
+    m.sims = [{ err: { InstructionError: [3, { Custom: 121 }] } }];
+    m.refreshPeers = 40;
+    const e = await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }));
+    expect(e.code).toBe("too_large");
+    expect(m.simCalls).toHaveLength(1); // only the first (normal-size) simulation ran
+  });
+
+  it("a refused simulation evicts the cached LP so the next build re-resolves it", async () => {
+    m.sims = [{ err: { InstructionError: [3, { Custom: 49 }] } }];
+    await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }));
+    await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n });
+    expect(vi.mocked(resolveLpTradeAccounts)).toHaveBeenCalledTimes(2);
   });
 
   it("121: adds the stale peers' refresh cranks in front and re-simulates", async () => {

@@ -142,6 +142,9 @@ async function cachedLp(connection: Connection, programId: PublicKey, market: Pu
   lpInflight.set(k, p);
   return p;
 }
+function evictLp(programId: PublicKey, market: PublicKey): void {
+  lpCache.delete(`${programId.toBase58()}|${market.toBase58()}`);
+}
 /** Test seam. */
 export function __clearTradeBuildCacheForTest(): void {
   lpCache.clear();
@@ -350,7 +353,23 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   // ── order body ────────────────────────────────────────────────────────────
   const memo = memoIfFits([...prefix, ...tradeIxs], openFundingMemoIx(await beforeFull), owner);
   const body = (t: TransactionInstruction[]) => [...(memo ? [memo] : []), ...prefix, ...t];
-  let instructions = body(tradeIxs);
+  // Checked BEFORE every simulation: an oversized list is refused by the RPC as a transport error, which would read as
+  // "rpc, try again" (review round 2, A). The memo goes first, as in the hook; still too large is a refusal.
+  // web3.js serializes a message into a packet-sized buffer, so a list far over the limit throws instead of measuring.
+  const fits = (ixs: TransactionInstruction[]): boolean => {
+    try {
+      return finalTxWireSize(ixs, owner) <= PACKET_DATA_SIZE;
+    } catch {
+      return false;
+    }
+  };
+  const fit = (ixs: TransactionInstruction[]): TransactionInstruction[] => {
+    if (fits(ixs)) return ixs;
+    const noMemo = memo ? ixs.filter((ix) => ix !== memo) : ixs;
+    if (noMemo.length < ixs.length && fits(noMemo)) return noMemo;
+    throw new TradeBuildRefusal("too_large", "the order with its required repairs does not fit one transaction; try again shortly", 503);
+  };
+  let instructions = fit(body(tradeIxs));
 
   let sim = await gate(connection, owner, instructions);
 
@@ -364,7 +383,7 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     checkFee(raised);
     feeBps = raised;
     tradeIxs = buildTradeIxs({ ...tradeParams, feeBps: raised });
-    instructions = body(tradeIxs);
+    instructions = fit(body(tradeIxs));
     repairs.push(`fee-cap-raised:${raised}`);
     sim = await gate(connection, owner, instructions);
   }
@@ -375,7 +394,7 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
       programId, market: slabPk, marketData: raw, cranker: owner, takerPortfolio: accountA, lpPortfolio: lp.accountB, body: instructions,
     }, { withPeers: true });
     if (plan.cranks.some((c) => c.role === "peer")) {
-      instructions = plan.instructions;
+      instructions = fit(plan.instructions);
       repairs.push(`peer-refresh:${plan.cranks.filter((c) => c.role === "peer").length}`);
       sim = await gate(connection, owner, instructions);
     }
@@ -387,25 +406,16 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
       { programId, market: slabPk, instructions, computeUnits: tradeCuCap(1), catchUp: { cranker: owner, portfolio: lp.accountB, oracleTail } },
       connectionSelfHealDeps(connection, slabPk, owner),
     );
-    if (heal.outcome === "repaired" && finalTxWireSize(heal.instructions, owner) <= PACKET_DATA_SIZE) {
+    if (heal.outcome === "repaired" && fits(heal.instructions)) {
       instructions = heal.instructions;
       repairs.push(...heal.repairs.map((r) => String((r as { kind?: string }).kind ?? "repair")));
       sim = await gate(connection, owner, instructions);
     }
   }
 
-  // Too large for one packet (peer cranks + memo): the memo goes first, as in the hook; still too large is a refusal.
-  if (!sim.err && finalTxWireSize(instructions, owner) > PACKET_DATA_SIZE) {
-    if (memo && instructions.includes(memo)) {
-      instructions = instructions.filter((ix) => ix !== memo);
-      sim = await gate(connection, owner, instructions);
-    }
-    if (!sim.err && finalTxWireSize(instructions, owner) > PACKET_DATA_SIZE) {
-      throw new TradeBuildRefusal("too_large", "the order with its required repairs does not fit one transaction; try again shortly", 503);
-    }
-  }
-
   if (sim.err) {
+    // The hook drops its cached trade accounts on any failure (a rotated matcher config); so does the server cache.
+    evictLp(programId, slabPk);
     const r = new SimulationRefusal(sim.err, sim.logs, sim.simulated);
     throw new TradeBuildRefusal("simulation_failed", r.message, 422, sim.logs.slice(-12));
   }
