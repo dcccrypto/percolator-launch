@@ -13,6 +13,8 @@ import { decodeMarket } from "@/lib/bot-api/reads/market";
 import { decodeFundingV22, FUNDING_DEN_E9, SLOTS_PER_8H } from "@/lib/v22/funding";
 
 export const dynamic = "force-dynamic";
+/** Above the 20 s handler deadline (RPC_DEADLINE_MS), so a hung RPC answers JSON rpc_unavailable, not a platform 504. */
+export const maxDuration = 30;
 
 export const GET = botRoute<{ market: string }>({ route: "/v1/markets/{market}/funding", scope: "read", weight: 1 }, async ({ params, meta }) => {
   const market = parsePubkey(params.market, "market");

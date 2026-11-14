@@ -36,7 +36,7 @@
  *                               Metaplex record); the caller is a wallet or explorer, never a browser holding our cookie. Public by
  *                               design, built from chain state, base58-validated. Flag off the path stays gated (and 404s anyway).
  *
- *   GET/POST /api/v1/*          the bot API (docs/ideas/bot-trading-rails.md), ONLY when BOT_API_ENABLED=1 on a v2.2 build.
+ *   GET/POST /api/v1/*          the bot API (docs/ideas/bot-trading-rails.md), ONLY when BOT_API_ENABLED=1 on a v2.2 build. PROVISIONAL: an open owner decision (doc section 8.1), not approved.
  *                               Callers are bots without our cookie; every route authenticates itself (API key, or an
  *                               anonymous read at a low per-IP budget) and builds only UNSIGNED transactions. Flag unset:
  *                               gated exactly as before.

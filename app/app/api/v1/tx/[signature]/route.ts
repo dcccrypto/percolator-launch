@@ -5,6 +5,8 @@ import { getBotConnection } from "@/lib/bot-api/rpc";
 import { txStatus } from "@/lib/bot-api/builders/status";
 
 export const dynamic = "force-dynamic";
+/** Above the 20 s handler deadline (RPC_DEADLINE_MS), so a hung RPC answers JSON rpc_unavailable, not a platform 504. */
+export const maxDuration = 30;
 
 export const GET = botRoute<{ signature: string }>({ route: "/v1/tx/{signature}", scope: "read", weight: 1 }, async ({ req, params, meta }) => {
   const q = req.nextUrl.searchParams.get("lastValidBlockHeight");

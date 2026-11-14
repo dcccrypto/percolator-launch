@@ -10,6 +10,8 @@ import { cancelIdempotent, validIdempotencyKey } from "@/lib/bot-api/idempotency
 import { onlyKeys } from "@/lib/bot-api/builders/common";
 
 export const dynamic = "force-dynamic";
+/** Above the 20 s handler deadline (RPC_DEADLINE_MS), so a hung RPC answers JSON rpc_unavailable, not a platform 504. */
+export const maxDuration = 30;
 
 export const POST = botRoute({ route: "/v1/orders/cancel", scope: "build", weight: 1, body: true }, async ({ body, principal }) => {
   onlyKeys(body, ["idempotencyKey"]);

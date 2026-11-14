@@ -9,8 +9,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getClientIp } from "@/lib/get-client-ip";
 import { ApiError, looksRateLimited, redactUrls } from "./errors";
 import { botApiDisabledReason, anonReadsAllowed, MAX_BODY_BYTES } from "./config";
-import { keyFromHeaders, verifyKey, type Principal, type Scope } from "./keys";
-import { checkLimit, peekLimit, noteAuthFailure, authLocked, clientBucket, type LimitResult } from "./limits";
+import { keyFromHeaders, parseKey, verifyKeyDetailed, type Principal, type Scope } from "./keys";
+import { checkLimit, peekLimit, noteAuthFailure, keyKnownMissing, rememberMissingKey, clientBucket, type LimitResult } from "./limits";
 import { beginIdempotent, finishIdempotent, bodyHash, validIdempotencyKey } from "./idempotency";
 import { record } from "./metrics";
 
@@ -32,11 +32,17 @@ export interface RouteSpec {
 /** A handler that has not answered by now is a failed upstream: retryable rpc_unavailable, not a hung function. */
 export const RPC_DEADLINE_MS = 20_000;
 
-/** The handler's own promise, or rpc_unavailable at the deadline (the timer is always cleared). */
-async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+/**
+ * The handler's own promise, or rpc_unavailable at the deadline (the timer is always cleared). At the deadline `abort` is
+ * fired so a handler that keeps running (it cannot be cancelled) can see the request already failed and drop what it holds.
+ */
+async function withDeadline<T>(p: Promise<T>, ms: number, abort?: AbortController): Promise<T> {
   let t: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, rej) => {
-    t = setTimeout(() => rej(new ApiError("rpc_unavailable", "the upstream RPC did not answer in time, try again")), ms);
+    t = setTimeout(() => {
+      abort?.abort();
+      rej(new ApiError("rpc_unavailable", "the upstream RPC did not answer in time, try again"));
+    }, ms);
   });
   try {
     return await Promise.race([p, timeout]);
@@ -57,6 +63,8 @@ export interface Ctx<P> {
   principal: Principal;
   params: P;
   body: Record<string, unknown>;
+  /** Aborted when the handler deadline fires (the request has already been answered with an error): drop anything you still hold. */
+  signal: AbortSignal;
   /** Handlers count what they spend; it goes in the log line. */
   meta: { rpcCalls: number; sims: number };
 }
@@ -90,12 +98,14 @@ function limitHeaders(l: LimitResult | null): Record<string, string> {
 async function authenticate(req: NextRequest, spec: RouteSpec, ip: string): Promise<Principal> {
   const raw = keyFromHeaders(req.headers);
   if (raw) {
-    const rec = await verifyKey(raw);
+    const keyId = parseKey(raw)?.id;
+    // A key id found missing a moment ago costs no store call at all (junk floods repeat ids); still a counted failure.
+    const cached = keyId !== undefined && keyKnownMissing(keyId);
+    const { rec, missingId } = cached ? { rec: null, missingId: null } : await verifyKeyDetailed(raw);
     if (rec) return { kind: "key", id: rec.id, scopes: rec.scopes, tier: rec.tier };
+    if (missingId) rememberMissingKey(missingId);
     if (ip !== "unknown") {
-      const locked = await authLocked(ip);
-      await noteAuthFailure(ip);
-      if (locked) throw new ApiError("rate_limited", "too many invalid API keys from this address", { headers: { "Retry-After": "60" } });
+      if (await noteAuthFailure(ip)) throw new ApiError("rate_limited", "too many invalid API keys from this address", { headers: { "Retry-After": "60" } });
     }
     throw new ApiError("unauthorized");
   }
@@ -148,7 +158,16 @@ export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: 
       if (!principal.scopes.includes(spec.scope)) throw new ApiError("forbidden_scope");
       limit = await checkLimit(principal, spec.weight, { build: spec.build });
       if (!limit.allowed) {
-        const msg = limit.reason === "global" ? "the API is at its shared capacity right now, retry shortly" : limit.reason === "build-share" ? "this caller has used its share of the build capacity for this window" : undefined;
+        const msg =
+          limit.reason === "global"
+            ? "the API is at its shared capacity right now, retry shortly"
+            : limit.reason === "build-share"
+              ? "this caller has used its share of the build capacity for this window"
+              : limit.reason === "read-share"
+                ? "this caller has used its share of the read capacity for this window"
+                : limit.reason === "anon-pool"
+                  ? "anonymous callers have used their shared read capacity for this window; use an API key or retry shortly"
+                  : undefined;
         throw new ApiError("rate_limited", msg, { headers: { "Retry-After": String(limit.resetSec) } });
       }
 
@@ -193,7 +212,8 @@ export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: 
       const params = ((await routeCtx?.params) ?? {}) as P;
       let out: HandlerResult;
       try {
-        out = await withDeadline(fn({ req, reqId, principal, params, body, meta }), spec.deadlineMs ?? RPC_DEADLINE_MS);
+        const deadline = new AbortController();
+        out = await withDeadline(fn({ req, reqId, principal, params, body, meta, signal: deadline.signal }), spec.deadlineMs ?? RPC_DEADLINE_MS, deadline);
       } catch (e) {
         if (idemKey && idem === "new") {
           const err = classify(e);

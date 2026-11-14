@@ -29,7 +29,8 @@ export interface RawMarket {
 export async function loadMarket(connection: ReadConnection, meta: { rpcCalls: number }, market: PublicKey): Promise<RawMarket> {
   const res = await rpc(meta, () => connection.getAccountInfoAndContext(market, "confirmed"));
   if (!res.value) throw new ApiError("market_not_found");
-  if (!isKnownProgram(res.value.owner)) throw new ApiError("market_unsupported", "not owned by an allowlisted Percolator wrapper");
+  // An address that is not a Percolator market (a wallet, a token account, a program) is simply not a market here: market_not_found.
+  if (!isKnownProgram(res.value.owner)) throw new ApiError("market_not_found", "no Percolator market at this address (the account is not owned by a Percolator wrapper)");
   return { market, programId: res.value.owner, raw: new Uint8Array(res.value.data), slot: res.context.slot };
 }
 

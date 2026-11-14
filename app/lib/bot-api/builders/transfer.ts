@@ -23,7 +23,7 @@ import {
   parseWrapperConfigV17,
   V17_HEADER_LEN,
 } from "@percolatorct/sdk";
-import { ApiError, customCodeOf } from "@/lib/bot-api/errors";
+import { ApiError } from "@/lib/bot-api/errors";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { getMaintenanceConfig } from "@/lib/maintenance";
 import { isWrapperAccount, parsePortfolio, portfolioAccountLen } from "@/lib/v22/layout";
@@ -62,7 +62,7 @@ async function readMarket(connection: Connection, market: PublicKey, owner: Publ
   try {
     assertKnownProgram(info.owner);
   } catch {
-    throw new ApiError("market_unsupported", "market is not owned by a known Percolator wrapper");
+    throw new ApiError("market_not_found", "no Percolator market at this address (the account is not owned by a Percolator wrapper)");
   }
   const raw = new Uint8Array(info.data);
   if (!isWrapperAccount(raw)) throw new ApiError("market_unsupported", "not a v2.2 market account");
@@ -85,7 +85,7 @@ async function sizeAndFinalize(connection: Connection, owner: PublicKey, ixs: Tr
   meta.sims++;
   const g = await simulateForGate(connection, owner, ixs);
   if (g.rpcFailed) throw new ApiError("rpc_unavailable", "simulation RPC failed, try again");
-  if (g.err) throw simulationError(customCodeOf(g.err), g.logs);
+  if (g.err) throw simulationError(g.err, g.logs, (i) => g.simulated[i]?.programId.toBase58());
   meta.rpcCalls += 2;
   const [{ blockhash, lastValidBlockHeight }, priorityFee] = await Promise.all([connection.getLatestBlockhash("confirmed"), getPriorityFee(connection)]);
   const limit = signedComputeUnitLimit(g.consumed, { cap: cuCap });
@@ -100,6 +100,16 @@ async function tokenBalance(connection: Connection, ata: PublicKey, meta: Meta):
   // SPL token account amount: u64 LE at offset 64. DataView, not Buffer BigInt (browser-buffer-bigint-guard).
   const d = new Uint8Array(info.data);
   return new DataView(d.buffer, d.byteOffset, d.byteLength).getBigUint64(64, true);
+}
+
+/** Rent-exempt minimum of a 0-byte system account: the owner may not be left holding less than this (unless it empties to 0). */
+export const SYSTEM_MIN_BALANCE = 890_880;
+/**
+ * SOL the owner needs to create a trading account: the portfolio account's rent, the two signatures (owner + the new account,
+ * 5,000 lamports each), the priority fee on the compute limit, and the minimum the owner's own account must keep.
+ */
+export function firstDepositLamports(rentLamports: number, priorityMicroLamports: number, computeUnits: number): number {
+  return rentLamports + 2 * 5_000 + Math.ceil((priorityMicroLamports * computeUnits) / 1_000_000) + SYSTEM_MIN_BALANCE;
 }
 
 const DEPOSIT_FIELDS = ["owner", "market", "amount", "portfolio", "newPortfolio", "expiresAfter"] as const;
@@ -149,6 +159,18 @@ export async function buildDeposit(connection: Connection, b: Record<string, unk
     const next = readNextPortfolioId(m.raw);
     if (next === null) throw new ApiError("market_unreadable");
     const rent = await connection.getMinimumBalanceForRentExemption(portfolioAccountLen());
+    // The owner pays the new account's rent (and the fees) in SOL. Without enough, the simulation fails inside the System program.
+    const priorityFee = await getPriorityFee(connection);
+    const needLamports = firstDepositLamports(rent, priorityFee, 600_000);
+    meta.rpcCalls++;
+    const haveLamports = await connection.getBalance(owner, "confirmed");
+    if (haveLamports < needLamports) {
+      throw new ApiError(
+        "insufficient_funds",
+        `creating the trading account needs about ${needLamports} lamports of SOL (${rent} account rent + fees + the ${SYSTEM_MIN_BALANCE} the wallet must keep); the wallet has ${haveLamports}. Fund it with devnet SOL and retry`,
+        { details: { needLamports, haveLamports, rentLamports: rent } },
+      );
+    }
     const ixs = [
       ...buildFirstTradeInitIxs({ programId: m.programId, owner, market, portfolio: fresh }, rent),
       buildFirstDepositIx(legs(fresh), { portfolioId: predictPortfolioId(next), sequence: 0n }),

@@ -7,7 +7,7 @@
  *   limit      an explicit limitPriceE6 may not sit more than 1000 bps on the adverse side of the effective price
  *   notional   |size| x effective price <= min(caller maxNotionalUsd, BOT_API_MAX_NOTIONAL_USD, default 5000), PER ORDER (not per position)
  *   leverage   after the order: notional / conservative equity <= min(caller maxLeverage, market max, BOT_API_MAX_LEVERAGE, default 10)
- *              (builders/equity.ts: capital less the open leg's unrealized loss and negative fee credits; the same equity
+ *              (builders/equity.ts: capital less the open legs' unrealized loss, stored AND pending K/F, and negative fee credits; the same equity
  *              GET /v1/account reports leverage on)
  *   reduceOnly refuse unless the order shrinks the position without flipping it
  *   size       |size| <= the market's per-side maximum (checkOpenMarketGuards), and the oracle must be fresh
@@ -28,6 +28,8 @@ import { conservativeEquity } from "./equity";
 import { openLegsValuePnl } from "../reads/account";
 import { decodeMarket } from "../reads/market";
 import { buildQuoteSource, expectedFee, matcherQuote } from "../reads/quote";
+import { quoteFailsLimit } from "@/lib/limits/matcher-quote";
+import { computeLimitPriceE6 } from "@/lib/slippage";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 
 export const DEFAULT_SLIPPAGE_BPS = 100;
@@ -117,8 +119,9 @@ export function checkOrderCaps(caps: OrderCaps, p: TradePreflight): { notionalUs
   const afterNotional = (abs(before + p.size) * px) / 1_000_000n;
   const risk = p.portfolioData ? decodePortfolioRisk(p.portfolioData) : null;
   if (!risk || !p.portfolioData) throw new ApiError("market_unreadable", "the trading account is unreadable, so leverage cannot be checked");
-  // Value-side PnL of the open leg at the effective price (the stored pnl is only the settled part): an under-water
-  // position must lower the equity the cap divides by.
+  // The account's PnL at the effective price: stored pnl + the K/F each open leg has accrued since its snapshot (the engine's
+  // settle arithmetic, reads/pending-pnl.ts). An under-water position, settled or not, lowers the equity the cap divides by.
+  // 0 is a valid stored pnl; only a leg whose pending cannot be computed (older ADL epoch, stale leg) is unreadable.
   const leg = openLegsValuePnl(p.marketData, p.portfolioData);
   if (leg.kind === "unreadable") throw new ApiError("market_unreadable", "the open position cannot be valued, so leverage cannot be checked");
   const equity = conservativeEquity(risk.capital, leg.kind === "open" ? leg.valuePnl : risk.pnl, risk.feeCredits);
@@ -135,12 +138,30 @@ export function checkOrderCaps(caps: OrderCaps, p: TradePreflight): { notionalUs
   return { notionalUsd, leverageAfter, marketMaxLeverage: marketMax };
 }
 
+/**
+ * The smallest whole slippageBps (measured from the effective price, the mark) whose limit still accepts an expected fill at
+ * `execE6`: slippage is not measured from the fill, so it has to cover the spread, the matcher's fee and the size impact too.
+ * Uses the builder's own rounding (computeLimitPriceE6), so slippageBps = this value passes the check below.
+ */
+export function minSlippageBpsFor(markE6: bigint, execE6: bigint, buy: boolean): number {
+  const adverse = buy ? execE6 - markE6 : markE6 - execE6;
+  // Start just under the exact figure and walk up: the builder's limit rounds against the taker, so the exact ceiling can be one too high.
+  let bps = adverse <= 0n ? 1n : (adverse * 10_000n) / markE6 - 1n;
+  if (bps < 1n) bps = 1n;
+  const size = buy ? 1n : -1n;
+  for (let i = 0; i < 6 && quoteFailsLimit(execE6, computeLimitPriceE6({ markE6, size, slippageBps: bps }), buy); i++) bps += 1n;
+  return Number(bps);
+}
+
 export interface MarketGuardResult {
   /** What the fill is expected to charge (bps of notional, atoms); null when unknown. See reads/quote.ts expectedFee. */
   expectedFeeBps: number | null;
   expectedFeeAtoms: bigint | null;
+  /** The whole cost against the mark (base fee + the quoted spread, once); see reads/quote.ts expectedFee. */
+  allInCostBps: number | null;
+  allInCostAtoms: bigint | null;
 }
-const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null };
+const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null };
 
 /**
  * Checks that need a fresh read of the market, the LP and the matcher, for orders that add risk:
@@ -169,6 +190,21 @@ export async function checkOpenMarketGuards(connection: Pick<Connection, "getMul
       });
     }
     const src = buildQuoteSource(md, new Uint8Array(c.data), new Uint8Array(pf.data), p.lp.accountB, at, p.positionBeforeQ ?? 0n);
+    const mq = matcherQuote(src, p.size);
+    if (enforce && mq && mq.fillQ > 0n && mq.quotePriceE6 !== null) {
+      // The program refuses a fill past the limit (buy: exec <= limit; sell: exec >= limit) with an opaque InvalidInstruction. The
+      // matcher's own estimate (the quote's estExecPriceE6) is checked first, so the caller gets the number that would pass. Not
+      // applied to a reducing order: the estimate does not model the close exemption, so it can only be worse than the real fill.
+      const buy = p.size > 0n;
+      if (quoteFailsLimit(mq.quotePriceE6, p.limitPriceE6, buy)) {
+        const minSlippageBps = minSlippageBpsFor(src.effectivePriceE6, mq.quotePriceE6, buy);
+        throw new ApiError(
+          "slippage_cap_exceeded",
+          `the limit ${p.limitPriceE6} is ${buy ? "below" : "above"} the matcher's estimated fill price ${mq.quotePriceE6}; slippage is measured from the mark (${src.effectivePriceE6}), so it must also cover the spread, fee and size impact: ${minSlippageBps <= MAX_SLIPPAGE_BPS ? `use slippageBps >= ${minSlippageBps} or a looser limitPriceE6` : `the fill needs ${minSlippageBps} bps, above the ${MAX_SLIPPAGE_BPS} bps maximum; try a smaller size`}`,
+          { details: { limitPriceE6: p.limitPriceE6.toString(), estExecPriceE6: mq.quotePriceE6.toString(), minSlippageBps } },
+        );
+      }
+    }
     if (enforce) {
       const side = p.size > 0n ? "long" : "short";
       const max = src.maxSizePerSide[side];
@@ -178,8 +214,8 @@ export async function checkOpenMarketGuards(connection: Pick<Connection, "getMul
         });
       }
     }
-    const f = expectedFee(src.baseFeeBps, matcherQuote(src, p.size), (abs(p.size) * src.effectivePriceE6) / 1_000_000n);
-    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms };
+    const f = expectedFee(src, mq, (abs(p.size) * src.effectivePriceE6) / 1_000_000n);
+    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms, allInCostBps: f.allInBps, allInCostAtoms: f.allInAtoms };
   } catch (e) {
     if (enforce) throw e;
     return NO_FEE;

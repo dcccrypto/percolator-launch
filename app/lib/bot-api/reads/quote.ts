@@ -18,6 +18,7 @@ import { ApiError } from "../errors";
 import { rpc, type ReadConnection } from "./common";
 import { loadMarket, type RawMarket } from "./market-source";
 import { decodeMarket } from "./market";
+import { explainNoLp } from "./no-lp";
 import {
   decodeAssetRiskLimits,
   decodeAssetVaultLp,
@@ -34,7 +35,7 @@ import { growthRecordPresence } from "@/lib/v21/growth-market";
 import { matcherExtCapsFromGrowth } from "@/lib/v22/matcher-ext-caps";
 import { effectiveExecBandBps, maxTradeSizePerSide, type SideLimit } from "@/lib/limits/risk-limits";
 import { resolveTradeFeeBps } from "@/lib/limits/trade-fee-resolve";
-import { feeChannelOf } from "@/lib/limits/fee-channel";
+import { feeChannelOf, requestedFeeBps } from "@/lib/limits/fee-channel";
 import { resolveLpTradeAccounts } from "@/lib/v22/trade-accounts";
 import { computeLimitPriceE6 } from "@/lib/slippage";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
@@ -176,28 +177,54 @@ const limitView = (l: SideLimit) => ({ maxQ: l.maxQ >= UNLIMITED_CAPACITY ? null
 const num = (b: bigint | null): number | null => (b === null ? null : Number(b));
 
 /**
- * What a fill is expected to be charged, in bps of notional: the market's base fee plus the matcher's current adaptive-fee
- * request for this size (the two terms the wrapper adds up and checks against the signed cap). It is NOT the cap: a build signs
- * `feeCapBps` (base + the matcher's worst case + a margin), the most a fill may ever charge. Utilisation fees of growth markets
- * are not included. null when the matcher fills nothing.
+ * What a fill costs, from the matcher's estimate. Two figures, kept apart so nothing is counted twice:
+ *
+ *  - `bps` / `atoms` (expectedFeeBps / expectedFeeAtoms): the FEE the wrapper charges, on top of the fill. The market's base fee,
+ *    plus - only on a market whose fee channel is on (`feeInPrice`, `feeChargedInPrice` on the wire) - the matcher's requested fee,
+ *    `ceil(|estExec - mark| x 1e4 / mark)` (lib/limits/fee-channel.ts requestedFeeBps, the program's own formula; the ticket signs the
+ *    same sum). Channel off: the base fee alone. Utilisation fees of growth markets are not included.
+ *  - `allInBps` / `allInAtoms` (allInCostBps / allInCostAtoms): the whole cost of the fill against the mark, in bps and atoms:
+ *    base fee + the spread the matcher quotes (adaptive fee, base spread, skew and size impact, which are all INSIDE
+ *    `totalSpreadBps`, so the adaptive fee is counted once). On a fee-channel market that spread is charged as the requested fee and
+ *    the trade settles at the mark; otherwise it is paid in the price. The sum is the same either way. Do NOT add expectedFeeBps to
+ *    the spread: on a fee-channel market they overlap.
+ * It is NOT the cap: a build signs `feeCapBps` (base + the matcher's worst case + a margin), the most a fill may ever charge.
+ * Both null when the matcher fills nothing.
  */
-export function expectedFee(baseFeeBps: bigint, q: PreTradeQuote | null, notionalAtoms: bigint): { bps: number | null; atoms: bigint | null } {
-  if (!q || q.fillQ <= 0n) return { bps: null, atoms: null };
-  const bps = baseFeeBps + (q.adaptiveFeeBps ?? 0n);
-  return { bps: Number(bps), atoms: (notionalAtoms * bps + 9_999n) / 10_000n };
+export function expectedFee(
+  src: Pick<QuoteSource, "baseFeeBps" | "feeInPrice" | "effectivePriceE6">,
+  q: PreTradeQuote | null,
+  notionalAtoms: bigint,
+): { bps: number | null; atoms: bigint | null; allInBps: number | null; allInAtoms: bigint | null } {
+  if (!q || q.fillQ <= 0n) return { bps: null, atoms: null, allInBps: null, allInAtoms: null };
+  // A matcher without an exact quote (legacy kind) has no spread to read: the fee is the base fee, and the all-in cost is unknown.
+  if (q.quotePriceE6 === null) return { bps: Number(src.baseFeeBps), atoms: (notionalAtoms * src.baseFeeBps + 9_999n) / 10_000n, allInBps: null, allInAtoms: null };
+  const spread = requestedFeeBps(src.effectivePriceE6, q.quotePriceE6);
+  const bps = src.baseFeeBps + (src.feeInPrice ? spread : 0n);
+  const allIn = src.baseFeeBps + spread;
+  return {
+    bps: Number(bps),
+    atoms: (notionalAtoms * bps + 9_999n) / 10_000n,
+    allInBps: Number(allIn),
+    allInAtoms: (notionalAtoms * allIn + 9_999n) / 10_000n,
+  };
 }
 
 export function quoteView(src: QuoteSource, sizeQ: bigint, slippageBps: number) {
   const buy = sizeQ > 0n;
   const abs = buy ? sizeQ : -sizeQ;
-  const q = matcherQuote(src, sizeQ);
-  if (!q) throw new ApiError("market_unreadable", "the matcher cannot price this size");
   const limitPriceE6 = computeLimitPriceE6({ markE6: src.effectivePriceE6, size: sizeQ, slippageBps: BigInt(slippageBps) });
   const max = src.maxSizePerSide[buy ? "long" : "short"];
-  // A matcher that fills nothing (halted LP) has no price: its impact and spread are not 0, they are unknown.
-  const fills = q.fillQ > 0n;
+  const exceedsMaxSize = max.maxQ < UNLIMITED_CAPACITY && abs > max.maxQ;
+  // The size the market can actually take: an order beyond the per-side maximum fills only up to it (and is refused by the builder),
+  // so the price, impact, fee and limit check are those of the FILLABLE size, not of the unfillable request.
+  const fillableAbs = exceedsMaxSize ? max.maxQ : abs;
+  const q = fillableAbs > 0n ? matcherQuote(src, buy ? fillableAbs : -fillableAbs) : null;
+  if (!q && !exceedsMaxSize) throw new ApiError("market_unreadable", "the matcher cannot price this size");
+  // A matcher that fills nothing (halted LP, or a side with no room) has no price: its impact and spread are not 0, they are unknown.
+  const fills = q !== null && q.fillQ > 0n;
   const notionalAtoms = (abs * src.effectivePriceE6) / 1_000_000n;
-  const fee = expectedFee(src.baseFeeBps, q, notionalAtoms);
+  const fee = expectedFee(src, q, (fillableAbs * src.effectivePriceE6) / 1_000_000n);
   return {
     market: src.market,
     side: buy ? "buy" : "sell",
@@ -207,29 +234,33 @@ export function quoteView(src: QuoteSource, sizeQ: bigint, slippageBps: number) 
     oracle: src.oracle,
     slippageBps,
     limitPriceE6,
-    estExecPriceE6: fills ? q.quotePriceE6 : null,
-    priceImpactBps: fills ? num(q.impactBps) : null,
-    totalSpreadBps: fills ? num(q.totalBps) : null,
+    estExecPriceE6: fills && q ? q.quotePriceE6 : null,
+    priceImpactBps: fills && q ? num(q.impactBps) : null,
+    totalSpreadBps: fills && q ? num(q.totalBps) : null,
     // Whether the program would accept this fill at that limit (buy: exec <= limit, sell: exec >= limit); null = the matcher is unquoted.
-    withinLimit: !fills || q.quotePriceE6 === null ? null : !quoteFailsLimit(q.quotePriceE6, limitPriceE6, buy),
+    withinLimit: !fills || !q || q.quotePriceE6 === null ? null : !quoteFailsLimit(q.quotePriceE6, limitPriceE6, buy),
     matcher: {
-      kind: q.kind,
-      fillQ: q.fillQ,
-      clipped: q.fillQ < abs,
-      clippedByTotal: q.clippedByTotal,
-      baseSpreadBps: q.baseSpreadBps,
-      maxTotalBps: q.maxTotalBps,
-      adaptiveFeeBps: fills ? num(q.adaptiveFeeBps) : null,
-      skewBps: fills ? num(q.skewBps) : null,
-      feeCold: q.feeCold,
+      kind: q ? q.kind : null,
+      fillQ: q ? q.fillQ : 0n,
+      clipped: (q ? q.fillQ : 0n) < abs,
+      clippedByTotal: q ? q.clippedByTotal : false,
+      baseSpreadBps: q ? q.baseSpreadBps : null,
+      maxTotalBps: q ? q.maxTotalBps : null,
+      adaptiveFeeBps: fills && q ? num(q.adaptiveFeeBps) : null,
+      skewBps: fills && q ? num(q.skewBps) : null,
+      feeCold: q ? q.feeCold : false,
     },
     expectedFeeBps: fee.bps,
     expectedFeeAtoms: fee.atoms,
+    allInCostBps: fee.allInBps,
+    allInCostAtoms: fee.allInAtoms,
     feeCapBps: num(src.feeBps),
     baseFeeBps: Number(src.baseFeeBps),
     feeChargedInPrice: src.feeInPrice,
     maxSizePerSide: { long: limitView(src.maxSizePerSide.long), short: limitView(src.maxSizePerSide.short) },
-    exceedsMaxSize: max.maxQ < UNLIMITED_CAPACITY && abs > max.maxQ,
+    exceedsMaxSize,
+    // The size the figures above are for: the request, or the per-side maximum when the request is beyond it.
+    fillableQ: fillableAbs,
     lotExp: src.lotExp,
   };
 }
@@ -270,7 +301,9 @@ export function depthView(src: QuoteSource) {
 export async function loadQuoteSource(connection: ReadConnection, meta: { rpcCalls: number }, market: PublicKey): Promise<QuoteSource> {
   const first: RawMarket = await loadMarket(connection, meta, market);
   decodeMarket(first.raw, { market, programId: first.programId, slot: first.slot }); // unsupported / unreadable before the LP scan
-  const lp = await cachedLp(connection, meta, first.programId, market);
+  const lp = await cachedLp(connection, meta, first.programId, market).catch((e) => {
+    throw e instanceof ApiError && e.code === "no_lp" ? explainNoLp(first.raw, { market, programId: first.programId, slot: first.slot }) : e;
+  });
   const res = await rpc(meta, () => connection.getMultipleAccountsInfoAndContext([market, lp.matcherCtx, lp.accountB], "confirmed"));
   const [m, c, p] = res.value;
   if (!m) throw new ApiError("market_not_found");

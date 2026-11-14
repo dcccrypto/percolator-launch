@@ -6,7 +6,8 @@
  */
 import { createHash } from "node:crypto";
 import { ComputeBudgetProgram, PublicKey, Transaction, VersionedTransaction, type Connection, type TransactionInstruction } from "@solana/web3.js";
-import { ApiError, apiCodeForOnchain, customCodeOf, onchainErrorName, type ErrorCode } from "@/lib/bot-api/errors";
+import { ApiError, apiCodeForOnchain, type ErrorCode } from "@/lib/bot-api/errors";
+import { attributeFailure } from "@/lib/bot-api/onchain";
 import { TradeBuildRefusal } from "@/lib/v22/trade-build";
 
 export const MAX_U64 = (1n << 64n) - 1n;
@@ -77,7 +78,7 @@ const REFUSAL_TO_API: Record<string, ErrorCode> = {
   bad_size: "bad_request",
   bad_limit: "bad_request",
   market_not_found: "market_not_found",
-  unknown_program: "market_unsupported",
+  unknown_program: "market_not_found",
   not_v22: "market_unsupported",
   multi_asset_unsupported: "market_unsupported",
   lots_unsupported: "market_unsupported",
@@ -107,7 +108,7 @@ export function noTradingAccount(): ApiError {
 
 /** Builder refusal -> API error. A failed simulation keeps its decoded on-chain code and the last log lines. */
 export function refusalToApi(e: TradeBuildRefusal): ApiError {
-  if (e.code === "simulation_failed") return simulationError(customCodeOf(e.message), e.logs);
+  if (e.code === "simulation_failed") return simulationError(e.message, e.logs);
   // The shared builder's texts point at the app ("deposit in the app first") and say "portfolio"; the API says "trading
   // account" and names its own way to create one. /api/v22/trade keeps its text.
   if (e.code === "no_portfolio") return noTradingAccount();
@@ -116,11 +117,21 @@ export function refusalToApi(e: TradeBuildRefusal): ApiError {
   return new ApiError(REFUSAL_TO_API[e.code] ?? "internal", e.message, e.logs.length > 0 ? { logs: e.logs } : {});
 }
 
-export function simulationError(custom: number | null, logs: readonly string[]): ApiError {
+/**
+ * A failed simulation as an API error. `err` is the InstructionError (or text carrying it); `programAt` resolves the failing
+ * instruction's program when the caller has the list. Only a code the WRAPPER returned is named and mapped to an API code
+ * (lib/bot-api/onchain.ts); any other program's code is `simulation_failed` with the program and the number, unnamed.
+ */
+export function simulationError(err: unknown, logs: readonly string[], programAt?: (i: number) => string | null | undefined): ApiError {
   const tail = logs.slice(-12);
-  if (custom === null) return new ApiError("simulation_failed", undefined, { logs: tail });
-  const name = onchainErrorName(custom);
-  return new ApiError(apiCodeForOnchain(custom), `simulation failed: ${name ?? `Custom(${custom})`}`, { onchain: { code: custom, name }, logs: tail });
+  const a = attributeFailure(err, logs, programAt);
+  if (!a) return new ApiError("simulation_failed", undefined, { logs: tail });
+  const { onchain, wrapper } = a;
+  if (wrapper) return new ApiError(apiCodeForOnchain(onchain.code), `simulation failed: ${onchain.name ?? `Custom(${onchain.code})`}`, { onchain, logs: tail });
+  const who = onchain.program ? (a.programLabel ? `${a.programLabel} (${onchain.program})` : `program ${onchain.program}`) : "a program that could not be identified";
+  // The program's own last "Program log:" line is usually the reason (System: "Transfer: insufficient lamports X, need Y").
+  const why = [...logs].reverse().map((l) => /^Program log: (.+)$/.exec(l)?.[1]).find((x) => x !== undefined);
+  return new ApiError("simulation_failed", `simulation failed in ${who}: Custom(${onchain.code})${why ? `: ${why}` : ""}`, { onchain, logs: tail });
 }
 
 // ── transactions ───────────────────────────────────────────────────────────────
@@ -169,7 +180,7 @@ export async function finalizeTx(connection: Connection, tx: Transaction, purpos
   const err = sim.value.err;
   if (err) {
     if (JSON.stringify(err).includes("BlockhashNotFound")) throw new ApiError("rpc_unavailable", "the RPC does not know the blockhash yet, try again");
-    throw simulationError(customCodeOf(err), sim.value.logs ?? []);
+    throw simulationError(err, sim.value.logs ?? [], (i) => tx.instructions[i]?.programId.toBase58());
   }
   const signers = message.accountKeys.slice(0, message.header.numRequiredSignatures).map((k) => k.toBase58());
   return {

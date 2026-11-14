@@ -350,9 +350,13 @@ describe("council fixes: quote and market shape", () => {
     const d = JSON.parse(JSON.stringify(depthView(src()), (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
     for (const r of [...d.asks, ...d.bids]) for (const v of [r.spreadBps, r.impactBps]) expect(typeof v === "number" || v === null).toBe(true);
   });
-  it("trader (b): expected fee is base + adaptive request, in bps and atoms, and never above the cap", () => {
+  it("trader (b): expected fee is base + the matcher's requested fee (the quoted spread, the program's formula) on a fee-channel market", () => {
     const q = quoteView(src(), size(), 100);
-    expect(q.expectedFeeBps).toBe(q.baseFeeBps + (q.matcher.adaptiveFeeBps ?? 0));
+    expect(q.feeChargedInPrice).toBe(true);
+    // requested = ceil(|estExec - mark| x 1e4 / mark): the spread the matcher quotes, adaptive fee included (lib/limits/fee-channel.ts requestedFeeBps)
+    const d = q.estExecPriceE6! > q.effectivePriceE6 ? q.estExecPriceE6! - q.effectivePriceE6 : q.effectivePriceE6 - q.estExecPriceE6!;
+    const requested = (d * 10_000n + q.effectivePriceE6 - 1n) / q.effectivePriceE6;
+    expect(q.expectedFeeBps).toBe(q.baseFeeBps + Number(requested));
     expect(q.expectedFeeBps!).toBeLessThanOrEqual(q.feeCapBps!);
     expect(q.expectedFeeAtoms).toBe((q.notionalAtoms * BigInt(q.expectedFeeBps!) + 9_999n) / 10_000n);
   });
@@ -377,7 +381,7 @@ describe("council fixes: quote and market shape", () => {
     const v = portfolioView({ pubkey: LP, account: { data: LP_DATA } }, wallet, WRAPPER, { raw: raw(SOL_DATA), programId: WRAPPER }, SLOT)!;
     const p = v.positions[0];
     expect(v.leverageEquity).toBeLessThanOrEqual(v.capital + (v.feeCredits > 0n ? 0n : v.feeCredits));
-    expect(p.leverage).toBe(Number((p.notional! * 100n) / v.leverageEquity) / 100);
+    expect(p.leverage).toBe(Number((p.notional! * 10_000n) / v.leverageEquity) / 10_000); // 4 decimals: a 0.0034x position does not read 0
   });
 });
 

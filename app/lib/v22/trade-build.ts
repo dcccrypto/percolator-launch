@@ -315,18 +315,14 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   });
 
   const beforeFull = readBeforeTradeFull(connection, accountA, slabPk).catch(() => null);
-  const [takerId, lpId, marketId, portInfo] = await Promise.all([
-    fetchPortfolioIdentity(connection, accountA),
-    fetchPortfolioIdentity(connection, lp.accountB),
-    fetchAssetMarketId(connection, slabPk, 0),
-    connection.getAccountInfo(accountA, "confirmed"),
-  ]);
-
+  // A caller-named portfolio is checked BEFORE anything reads its identity: a wrong or missing account is the caller's input
+  // (bad_portfolio, 400), not an RPC problem. It must be the owner's own taker portfolio on THIS market (same fields the scan selects on).
+  let namedInfo: Awaited<ReturnType<Connection["getAccountInfo"]>> | undefined;
   if (req.portfolio) {
-    // A caller-named portfolio must be the owner's own taker portfolio on THIS market (same fields the scan selects on).
+    namedInfo = await connection.getAccountInfo(accountA, "confirmed");
     let pf: ReturnType<typeof parsePortfolio> | null = null;
     try {
-      pf = portInfo && portInfo.owner.equals(programId) ? parsePortfolio(new Uint8Array(portInfo.data)) : null;
+      pf = namedInfo && namedInfo.owner.equals(programId) ? parsePortfolio(new Uint8Array(namedInfo.data)) : null;
     } catch {
       pf = null;
     }
@@ -334,6 +330,12 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
       throw new TradeBuildRefusal("bad_portfolio", "portfolio is not this owner's taker portfolio on this market", 400);
     }
   }
+  const [takerId, lpId, marketId, portInfo] = await Promise.all([
+    fetchPortfolioIdentity(connection, accountA),
+    fetchPortfolioIdentity(connection, lp.accountB),
+    fetchAssetMarketId(connection, slabPk, 0),
+    namedInfo !== undefined ? Promise.resolve(namedInfo) : connection.getAccountInfo(accountA, "confirmed"),
+  ]);
 
   let feeBps = await fetchTradeFeeBps(connection, slabPk, lp.matcherCtx, { fallback: cfg.tradeFeeBps, strict: true }).catch(() => {
     throw new TradeBuildRefusal("fee_unreadable", "market fee terms unreadable; nothing built", 503);

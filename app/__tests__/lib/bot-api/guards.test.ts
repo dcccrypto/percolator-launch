@@ -32,9 +32,12 @@ const conn = (slot: number, calls: { n: number } = { n: 0 }) =>
       };
     },
   }) as unknown as Connection;
-const pre = (o: Partial<TradePreflight> = {}): TradePreflight => ({
+const pre = (o: Partial<TradePreflight> = {}): TradePreflight => {
+  const size = o.size ?? 1_000n;
+  return {
   size: 1_000n,
-  limitPriceE6: 1n,
+  // far on the loose side for both directions, so the slippage pre-check (tested in slippage-precheck.test.ts) stays out of these cases
+  limitPriceE6: size > 0n ? 10n ** 12n : 1n,
   effectivePriceE6: 1n,
   positionBeforeQ: 0n,
   positionLegReset: false,
@@ -45,7 +48,8 @@ const pre = (o: Partial<TradePreflight> = {}): TradePreflight => ({
   market: SOL,
   lp: { accountB: LP, matcherCtx: CTX },
   ...o,
-});
+  };
+};
 const code = (p: Promise<unknown>) => p.then(() => "ok", (e: { code?: string }) => e.code ?? "throw");
 
 describe("stale oracle", () => {
@@ -70,7 +74,7 @@ describe("stale oracle", () => {
     expect(await code(checkOpenMarketGuards(conn(stale), pre(reduce)))).toBe("ok");
     expect(await code(checkOpenMarketGuards(conn(stale), pre({ ...reduce, size: -(2n ** 90n) })))).toBe("ok");
     const bad = { getMultipleAccountsInfoAndContext: async () => { throw new Error("429"); } } as unknown as Connection;
-    expect(await checkOpenMarketGuards(bad, pre(reduce))).toEqual({ expectedFeeBps: null, expectedFeeAtoms: null });
+    expect(await checkOpenMarketGuards(bad, pre(reduce))).toEqual({ expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null });
   });
   it("reports the expected fee: base fee plus the matcher's adaptive request, in bps and atoms", async () => {
     const fresh = slotAtAge(decodeMarket(raw(SOL_DATA), at(SOL_SLOT)).oracle.staleBoundSecs - 30);
