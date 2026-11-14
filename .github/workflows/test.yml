@@ -149,7 +149,11 @@ jobs:
 
   e2e-tests:
     name: E2E Tests
-    runs-on: ubuntu-latest
+    # Pinned: `ubuntu-latest` moved to ubuntu-26.04, and Playwright 1.58.2 cannot install chromium's
+    # system dependencies there ("Playwright does not support chromium on ubuntu26.04-x64"), so
+    # `playwright install --with-deps` failed and every push to main has been red since 2026-11-07.
+    # Unpin when Playwright is upgraded to a release that supports 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     
     env:
