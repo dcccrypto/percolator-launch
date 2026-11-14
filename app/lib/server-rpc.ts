@@ -57,7 +57,7 @@ export function makeRotatingFetch(upstreams: readonly UpstreamSpec[], cluster: R
 
 export function getServerConnection(
   commitment: Commitment = "confirmed",
-  opts: { disableRetryOnRateLimit?: boolean } = {},
+  opts: { disableRetryOnRateLimit?: boolean; rateLimitRetryMs?: readonly number[] } = {},
 ): Connection {
   const net = getNetwork();
   const override = (
@@ -72,9 +72,10 @@ export function getServerConnection(
   const cluster = net === "mainnet" ? "mainnet" : "devnet";
   const upstreams = buildUpstreams(cluster, { url, headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) } });
   const rotating = upstreams.length > 1 ? makeRotatingFetch(upstreams, cluster) : undefined;
+  const fetchFn = opts.rateLimitRetryMs?.length ? retryRateLimited(rotating ?? fetch, opts.rateLimitRetryMs) : rotating;
   return new Connection(url, {
     commitment,
-    ...(rotating ? { fetch: rotating } : {}),
+    ...(fetchFn ? { fetch: fetchFn } : {}),
     // Opt-in per call (default unchanged): web3.js otherwise retries HTTP 429 with backoff, which a
     // latency-sensitive probe must not do.
     ...(opts.disableRetryOnRateLimit ? { disableRetryOnRateLimit: true } : {}),
@@ -83,6 +84,22 @@ export function getServerConnection(
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * A short, bounded retry of an HTTP 429 (e.g. [250, 750] ms), for callers that turn web3.js's own 500/1000/2000 ms back-off off
+ * but should still ride out a brief per-method rate limit. After the last delay the 429 is returned as is.
+ */
+export function retryRateLimited(inner: typeof fetch, delaysMs: readonly number[]): typeof fetch {
+  return async (input, init) => {
+    let res = await inner(input, init);
+    for (const d of delaysMs) {
+      if (res.status !== 429 || init?.signal?.aborted) break;
+      await sleep(d);
+      res = await inner(input, init);
+    }
+    return res;
+  };
+}
 function isBlockhashMiss(e: unknown): boolean {
   const m = (e instanceof Error ? e.message : String(e)).toLowerCase();
   return m.includes("blockhashnotfound") || m.includes("blockhash not found");

@@ -123,7 +123,7 @@ describe("operator F3: bot routes fail fast on RPC 429", () => {
     const spy = vi.mocked(getServerConnection);
     const { getBotConnection } = await import("@/lib/bot-api/rpc");
     getBotConnection();
-    expect(spy).toHaveBeenCalledWith("confirmed", { disableRetryOnRateLimit: true });
+    expect(spy).toHaveBeenCalledWith("confirmed", { disableRetryOnRateLimit: true, rateLimitRetryMs: [250, 750] });
   });
   it("no /api/v1 route or bot-api lib calls getServerConnection directly", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
