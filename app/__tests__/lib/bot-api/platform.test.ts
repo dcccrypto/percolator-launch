@@ -114,3 +114,42 @@ describe("operator F2: refuse to enable on a deployed build without the shared K
     expect(botApiDisabledReason()).toBeNull();
   });
 });
+
+describe("operator F3: bot routes fail fast on RPC 429", () => {
+  it("getBotConnection disables web3.js 429 retries", async () => {
+    vi.resetModules();
+    const spy = vi.fn(() => ({}));
+    vi.doMock("@/lib/server-rpc", () => ({ getServerConnection: spy }));
+    const { getBotConnection } = await import("@/lib/bot-api/rpc");
+    getBotConnection();
+    expect(spy).toHaveBeenCalledWith("confirmed", { disableRetryOnRateLimit: true });
+    vi.doUnmock("@/lib/server-rpc");
+  });
+  it("no /api/v1 route or bot-api lib calls getServerConnection directly", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const walk = (d: string): string[] => readdirSync(d).flatMap((n) => (statSync(join(d, n)).isDirectory() ? walk(join(d, n)) : [join(d, n)]));
+    const files = [...walk(join(process.cwd(), "app/api/v1")), ...walk(join(process.cwd(), "lib/bot-api"))].filter((f) => f.endsWith(".ts") && !f.endsWith("bot-api/rpc.ts"));
+    const bad = files.filter((f) => /getServerConnection\(/.test(readFileSync(f, "utf8")));
+    expect(bad).toEqual([]);
+  });
+  it("an upstream 429 thrown by a handler is a retryable 503 rpc_unavailable with Retry-After, not a 500", async () => {
+    const r = botRoute({ route: "/v1/t", scope: "read", weight: 1 }, async () => {
+      throw new Error("Server responded with 429 Too Many Requests.  https://rpc.example/?api-key=SECRET");
+    });
+    const res = await r(req("/api/v1/t"));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toMatchObject({ code: "rpc_unavailable", retryable: true });
+    expect(res.headers.get("Retry-After")).toBe("2");
+  });
+  it("a handler that outlives the deadline answers rpc_unavailable", async () => {
+    const r = botRoute({ route: "/v1/t", scope: "read", weight: 1, deadlineMs: 30 }, () => new Promise(() => {}));
+    const res = await r(req("/api/v1/t"));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("rpc_unavailable");
+  });
+  it("log redaction strips URLs and query strings", async () => {
+    const { redactUrls } = await import("@/lib/bot-api/errors");
+    expect(redactUrls("fetch failed https://devnet.helius-rpc.com/?api-key=abc123 timeout")).toBe("fetch failed <url> timeout");
+  });
+});

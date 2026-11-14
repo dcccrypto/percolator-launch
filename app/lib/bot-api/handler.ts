@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { getClientIp } from "@/lib/get-client-ip";
-import { ApiError } from "./errors";
+import { ApiError, looksRateLimited, redactUrls } from "./errors";
 import { botApiDisabledReason, anonReadsAllowed, MAX_BODY_BYTES } from "./config";
 import { keyFromHeaders, verifyKey, type Principal, type Scope } from "./keys";
 import { checkLimit, noteAuthFailure, authLocked, type LimitResult } from "./limits";
@@ -25,6 +25,30 @@ export interface RouteSpec {
   body?: boolean;
   /** Honours Idempotency-Key. */
   idempotent?: boolean;
+  /** Per-request deadline for the handler (RPC reads/simulations), ms. Default RPC_DEADLINE_MS. */
+  deadlineMs?: number;
+}
+
+/** A handler that has not answered by now is a failed upstream: retryable rpc_unavailable, not a hung function. */
+export const RPC_DEADLINE_MS = 20_000;
+
+/** The handler's own promise, or rpc_unavailable at the deadline (the timer is always cleared). */
+async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, rej) => {
+    t = setTimeout(() => rej(new ApiError("rpc_unavailable", "the upstream RPC did not answer in time, try again")), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Unexpected throws that are really an upstream 429 become retryable rpc_unavailable, not a 500. */
+function classify(e: unknown): ApiError {
+  if (e instanceof ApiError) return e;
+  return looksRateLimited(e) ? new ApiError("rpc_unavailable", "the Solana RPC is rate limiting, try again shortly") : new ApiError("internal");
 }
 
 export interface Ctx<P> {
@@ -135,10 +159,10 @@ export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: 
       const params = ((await routeCtx?.params) ?? {}) as P;
       let out: HandlerResult;
       try {
-        out = await fn({ req, reqId, principal, params, body, meta });
+        out = await withDeadline(fn({ req, reqId, principal, params, body, meta }), spec.deadlineMs ?? RPC_DEADLINE_MS);
       } catch (e) {
         if (idemKey && idem === "new") {
-          const err = e instanceof ApiError ? e : new ApiError("internal");
+          const err = classify(e);
           await finishIdempotent(principal.id, idemKey, hash, { status: err.status, body: null });
         }
         throw e;
@@ -149,14 +173,16 @@ export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: 
       res = respond(status, json, { ...base(), ...(out.headers ?? {}) });
       return res;
     } catch (e) {
-      const err = e instanceof ApiError ? e : new ApiError("internal");
+      const err = classify(e);
       if (!(e instanceof ApiError)) {
         // Server-side only, short, no request body: the message of an unexpected throw.
-        console.error(JSON.stringify({ svc: "bot-api", event: "unhandled", reqId, route: spec.route, err: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) }));
+        console.error(JSON.stringify({ svc: "bot-api", event: "unhandled", reqId, route: spec.route, err: redactUrls(e instanceof Error ? e.message : String(e)).slice(0, 200) }));
       }
       status = err.status;
       code = err.code;
-      res = respond(err.status, err.body(), { ...base(), ...(err.extra.headers ?? {}) });
+      // A retryable upstream failure always tells the client when to come back.
+      const retryAfter = err.code === "rpc_unavailable" || err.code === "kv_unavailable" ? { "Retry-After": "2" } : {};
+      res = respond(err.status, err.body(), { ...base(), ...retryAfter, ...(err.extra.headers ?? {}) });
       return res;
     } finally {
       record({

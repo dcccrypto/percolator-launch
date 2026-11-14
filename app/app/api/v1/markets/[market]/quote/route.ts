@@ -3,7 +3,7 @@
  * Pre-trade quote from the LP's matcher context. `size` is the same signed engine q the POST builder takes (> 0 buy,
  * < 0 sell), as a decimal string. See lib/bot-api/reads/quote.ts for what is and is not modelled.
  */
-import { getServerConnection } from "@/lib/server-rpc";
+import { getBotConnection } from "@/lib/bot-api/rpc";
 import { botRoute } from "@/lib/bot-api/handler";
 import { ApiError } from "@/lib/bot-api/errors";
 import { MARKET_CACHE, observedAt, parsePubkey, queryParam } from "@/lib/bot-api/reads/common";
@@ -26,6 +26,6 @@ export const GET = botRoute<{ market: string }>({ route: "/v1/markets/{market}/q
     slippageBps = Number(rawSlip);
     if (slippageBps > MAX_QUOTE_SLIPPAGE_BPS) throw new ApiError("slippage_cap_exceeded", `slippageBps is above the maximum of ${MAX_QUOTE_SLIPPAGE_BPS}`);
   }
-  const src = await loadQuoteSource(getServerConnection("confirmed"), meta, market);
+  const src = await loadQuoteSource(getBotConnection("confirmed"), meta, market);
   return { body: { slot: src.slot, observedAt: observedAt(), quote: quoteView(src, size, slippageBps) }, headers: MARKET_CACHE };
 });

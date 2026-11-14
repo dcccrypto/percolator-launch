@@ -4,7 +4,7 @@
  * Sign: rate > 0 means longs pay shorts. The rate is per slot (e9 of notional); `pctPer8h` is what is actually applied
  * (0 unless both sides hold exposure and the oracle mode is price-managed), `impliedPctPer8h` is the rate before that gate.
  */
-import { getServerConnection } from "@/lib/server-rpc";
+import { getBotConnection } from "@/lib/bot-api/rpc";
 import { botRoute } from "@/lib/bot-api/handler";
 import { ApiError } from "@/lib/bot-api/errors";
 import { MARKET_CACHE, observedAt, parsePubkey } from "@/lib/bot-api/reads/common";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 export const GET = botRoute<{ market: string }>({ route: "/v1/markets/{market}/funding", scope: "read", weight: 1 }, async ({ params, meta }) => {
   const market = parsePubkey(params.market, "market");
-  const m = await loadMarket(getServerConnection("confirmed"), meta, market);
+  const m = await loadMarket(getBotConnection("confirmed"), meta, market);
   decodeMarket(m.raw, { market, programId: m.programId, slot: m.slot }); // market_unsupported / market_unreadable
   const f = decodeFundingV22(m.raw, 0);
   if (!f) throw new ApiError("market_unreadable");
