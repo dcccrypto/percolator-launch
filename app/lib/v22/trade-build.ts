@@ -44,6 +44,7 @@ import { resolveLpTradeAccounts, isReducingOrder } from "@/lib/v22/trade-account
 import { findOwnerPortfolio } from "@/lib/owner-portfolio";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { decodeMarketEngineView, signedPositionForAsset } from "@/lib/limits/decode";
+import { effectiveLeg } from "@/lib/limits/effective-quantity";
 import { fetchTradeFeeBps, isUtilFeeNotCovered } from "@/lib/limits/trade-fee-resolve";
 import { limitFromEngine } from "@/lib/close-limit";
 import { computeLimitPriceE6 } from "@/lib/slippage";
@@ -78,9 +79,17 @@ export interface TradeBuildRequest {
   portfolio?: PublicKey;
   /**
    * Caller checks that run once the market, the limit and the owner's position are known and BEFORE anything is simulated
-   * (the bot API's caps: slippage, notional, leverage, reduce-only). Throw to refuse; nothing is built.
+   * (the bot API's caps: slippage, notional, leverage, reduce-only). Throw to refuse; nothing is built. May be async
+   * (the bot API reads the LP's accounts for the per-side size cap); a rejection that is not the caller's own error
+   * reads as an RPC failure.
    */
-  preflight?: (p: TradePreflight) => void;
+  preflight?: (p: TradePreflight) => void | Promise<void>;
+  /**
+   * An order still refused 121 (EngineLossStale) after the stale peers' refresh cranks: when the taker has an open leg and a
+   * crank of its portfolio simulates clean, return that crank alone with resubmitAfter, as a reducing order gets. Without
+   * it a buy failed non-retryably where a sell got the crank (council trader seat). Off for POST /api/v22/trade.
+   */
+  crankOnLossStale?: boolean;
 }
 
 export interface TradePreflight {
@@ -88,11 +97,42 @@ export interface TradePreflight {
   limitPriceE6: bigint;
   /** Engine effective price (0 when unreadable). */
   effectivePriceE6: bigint;
-  /** Signed position on this market before the order (null when unreadable). */
+  /**
+   * Signed ADL-EFFECTIVE position on this market before the order (null when unreadable: the engine would refuse the
+   * leg, or the market's engine view does not decode). The engine applies a trade to this quantity, not to the leg's
+   * raw basis (lib/limits/effective-quantity.ts), so every size check here uses it. A prior-reset leg owns 0.
+   */
   positionBeforeQ: bigint | null;
+  /** The leg is a prior-reset obligation: it owns no open interest (positionBeforeQ is 0). */
+  positionLegReset: boolean;
+  /** isReducingOrder on the effective position. */
   reducing: boolean;
   marketData: Uint8Array;
   portfolioData: Uint8Array | null;
+  programId: PublicKey;
+  market: PublicKey;
+  /** The market's LP side the order trades against. */
+  lp: { accountB: PublicKey; matcherCtx: PublicKey };
+}
+
+/**
+ * The taker's ADL-effective signed position on asset 0 of this market, from the portfolio and market bytes.
+ * `q` is null when the engine would refuse the leg (InvalidLeg) or the engine view is unreadable; `reset` marks a
+ * prior-reset leg (owns 0). Same rule as hooks/useClosePosition.ts (effectiveLeg).
+ */
+export function effectiveTakerPosition(portfolio: Uint8Array, engine: ReturnType<typeof decodeMarketEngineView>): { q: bigint | null; reset: boolean } {
+  if (!engine || engine.marketId === null || engine.marketId === undefined) return { q: null, reset: false };
+  let pf: ReturnType<typeof parsePortfolio>;
+  try {
+    pf = parsePortfolio(portfolio);
+  } catch {
+    return { q: null, reset: false };
+  }
+  const leg = pf.legs.find((l) => l.active && l.assetIndex === 0 && l.marketId === engine.marketId);
+  if (!leg) return { q: 0n, reset: false };
+  const eff = effectiveLeg(engine, leg);
+  if (eff.kind === "invalid") return { q: null, reset: false };
+  return { q: eff.signedQ, reset: eff.kind === "reset" };
 }
 
 export interface BuiltTx {
@@ -262,14 +302,17 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   }
 
   // ── accounts ──────────────────────────────────────────────────────────────
-  const lp = await cachedLp(connection, programId, slabPk).catch((e) => {
-    // Fixed text: the cause carries upstream RPC wording (review finding 5).
-    throw new TradeBuildRefusal("no_lp", "this market has no usable LP right now", 503, [], e);
-  });
+  // Order is fixed so the same request always answers the same way: the owner's account first (a missing account is
+  // permanent, never dressed up as an RPC or LP problem), then the LP.
   const accountA = req.portfolio ?? (await findOwnerPortfolio(connection, programId, slabPk, owner).catch(() => {
     throw new TradeBuildRefusal("rpc", "portfolio lookup failed, try again", 503);
   }));
   if (!accountA) throw new TradeBuildRefusal("no_portfolio", "owner has no portfolio on this market; deposit in the app first", 409);
+  const lp = await cachedLp(connection, programId, slabPk).catch((e) => {
+    // Fixed text: the cause carries upstream RPC wording (review finding 5). An RPC failure is retryable, never "no LP".
+    if (e instanceof Error && e.message.startsWith("Failed to scan")) throw new TradeBuildRefusal("rpc", "a market read failed, try again", 503, [], e);
+    throw new TradeBuildRefusal("no_lp", "this market has no usable LP right now", 503, [], e);
+  });
 
   const beforeFull = readBeforeTradeFull(connection, accountA, slabPk).catch(() => null);
   const [takerId, lpId, marketId, portInfo] = await Promise.all([
@@ -339,14 +382,19 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   const reducing = isReducingOrder(beforeQ, size, 1);
   if (req.preflight) {
     try {
-      req.preflight({
+      const eff = portInfo ? effectiveTakerPosition(new Uint8Array(portInfo.data), engine) : { q: null, reset: false };
+      await req.preflight({
         size,
         limitPriceE6,
         effectivePriceE6: effectiveE6,
-        positionBeforeQ: beforeQ,
-        reducing,
+        positionBeforeQ: eff.q,
+        positionLegReset: eff.reset,
+        reducing: isReducingOrder(eff.q, size, 1),
         marketData: raw,
         portfolioData: portInfo ? new Uint8Array(portInfo.data) : null,
+        programId,
+        market: slabPk,
+        lp: { accountB: lp.accountB, matcherCtx: lp.matcherCtx },
       });
     } catch (e) {
       throw new PreflightThrow(e);
@@ -354,10 +402,12 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   }
   const prefix: TransactionInstruction[] = [];
   const crankTxIxs: TransactionInstruction[] = [];
+  let takerCrankIx: TransactionInstruction | null = null;
   if (hasActiveLegs) {
     const keys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [owner, slabPk, accountA]);
     keys.push(...oracleTail);
     const crankIx = buildIx({ programId, keys, data: encodePermissionlessCrank({ nowSlot: 0n, observations: defaultCrankObservations(0) }) });
+    takerCrankIx = crankIx;
     const plan = await planTakerCrank((ixs) => gate(connection, owner, ixs), tradeIxs, crankIx, 2, reducing);
     if (plan === "bundle") prefix.push(crankIx);
     else if (plan === "separate-tx") crankTxIxs.push(crankIx);
@@ -379,19 +429,20 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   });
   const repairs: string[] = [];
 
-  if (crankTxIxs.length > 0) {
-    // Simulated clean by planTakerCrank just now; sized like the hook's crank send (cap 200k).
-    const g = await gate(connection, owner, crankTxIxs);
+  const crankOnly = async (ixs: TransactionInstruction[]): Promise<TradeBuildResult> => {
+    // Simulated clean just now; sized like the hook's crank send (cap 200k).
+    const g = await gate(connection, owner, ixs);
     if (g.err) throw new TradeBuildRefusal("simulation_failed", new SimulationRefusal(g.err, g.logs, g.simulated).message, 422, g.logs.slice(-12));
     const lim = signedComputeUnitLimit(g.consumed, { cap: 200_000 });
     return {
-      transactions: [{ purpose: "crank", transaction: wrap(crankTxIxs, lim, priorityFee, owner, blockhash), computeUnitLimit: lim, unitsConsumed: g.consumed }],
+      transactions: [{ purpose: "crank", transaction: wrap(ixs, lim, priorityFee, owner, blockhash), computeUnitLimit: lim, unitsConsumed: g.consumed }],
       resubmitAfter: true,
       blockhash,
       lastValidBlockHeight,
       summary: summary(),
     };
-  }
+  };
+  if (crankTxIxs.length > 0) return crankOnly(crankTxIxs);
 
   // ── order body ────────────────────────────────────────────────────────────
   const memo = memoIfFits([...prefix, ...tradeIxs], openFundingMemoIx(await beforeFull), owner);
@@ -453,6 +504,21 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
       instructions = heal.instructions;
       repairs.push(...heal.repairs.map((r) => String((r as { kind?: string }).kind ?? "repair")));
       sim = await gate(connection, owner, instructions);
+    }
+  }
+
+  // Still 121 with nothing left to refresh: the taker's own crank, alone, when it simulates clean (same answer on both sides).
+  if (sim.err && req.crankOnLossStale && takerCrankIx && isLossStaleError(new SimulationRefusal(sim.err, sim.logs, sim.simulated), programId.toBase58())) {
+    const alone = await gate(connection, owner, [takerCrankIx]);
+    if (!alone.err) {
+      const lim = signedComputeUnitLimit(alone.consumed, { cap: 200_000 });
+      return {
+        transactions: [{ purpose: "crank", transaction: wrap([takerCrankIx], lim, priorityFee, owner, blockhash), computeUnitLimit: lim, unitsConsumed: alone.consumed }],
+        resubmitAfter: true,
+        blockhash,
+        lastValidBlockHeight,
+        summary: summary(),
+      };
     }
   }
 

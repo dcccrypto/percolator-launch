@@ -306,6 +306,50 @@ describe("buildV22Trade", () => {
     expect(r.transactions.map((t) => t.purpose)).toEqual(["crank"]);
   });
 
+  it("first-timer F4: the owner's account is checked before the LP, so a missing account is no_portfolio whatever the RPC does", async () => {
+    m.portfolio = null;
+    const e = await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }));
+    expect([e.code, e.status]).toEqual(["no_portfolio", 409]);
+    expect(vi.mocked(resolveLpTradeAccounts)).not.toHaveBeenCalled(); // the LP scan (the flaky part) never ran
+  });
+  it("first-timer F4: an RPC failure while discovering the LP is a retryable rpc refusal, never no_lp; a market without an LP is no_lp", async () => {
+    vi.mocked(resolveLpTradeAccounts).mockRejectedValueOnce(new Error("Failed to scan LP portfolio accounts on-chain: 429 Too Many Requests https://secret.example"));
+    const rpc = await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }));
+    expect([rpc.code, rpc.status]).toEqual(["rpc", 503]);
+    expect(rpc.message).not.toContain("secret");
+    __clearTradeBuildCacheForTest();
+    vi.mocked(resolveLpTradeAccounts).mockRejectedValueOnce(new Error("No LP portfolio with an active matcher config found for this market."));
+    expect((await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }))).code).toBe("no_lp");
+  });
+
+  describe("trader (a): 121 with nothing to refresh", () => {
+    const withLeg = async () => {
+      const layout = await import("@/lib/v22/layout");
+      return vi.spyOn(layout, "parsePortfolio").mockReturnValue({ legs: [{ active: true }] } as unknown as ReturnType<typeof layout.parsePortfolio>);
+    };
+    const err121 = { err: { InstructionError: [3, { Custom: 121 }] } };
+    it("crankOnLossStale: returns the taker crank with resubmitAfter, as a reducing order gets", async () => {
+      m.sims = [err121, { err: null, consumed: 90_000 }];
+      const spy = await withLeg();
+      const r = await buildV22Trade(conn({ portfolio: Buffer.alloc(16) }), { owner: OWNER, slab: SLAB, size: 1_000_000n, crankOnLossStale: true });
+      spy.mockRestore();
+      expect(r.resubmitAfter).toBe(true);
+      expect(r.transactions.map((t) => t.purpose)).toEqual(["crank"]);
+    });
+    it("without the option (POST /api/v22/trade) the refusal is unchanged", async () => {
+      m.sims = [err121];
+      const spy = await withLeg();
+      const e = await refusal(buildV22Trade(conn({ portfolio: Buffer.alloc(16) }), { owner: OWNER, slab: SLAB, size: 1_000_000n }));
+      spy.mockRestore();
+      expect(e.code).toBe("simulation_failed");
+    });
+    it("a taker without an open leg has nothing to crank: the refusal stands", async () => {
+      m.sims = [err121];
+      const e = await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n, crankOnLossStale: true }));
+      expect(e.code).toBe("simulation_failed");
+    });
+  });
+
   it("an RPC failure mid-build is a 503 rpc refusal, never a partial result", async () => {
     const { fetchAssetMarketId } = await import("@/lib/v18-wire");
     vi.mocked(fetchAssetMarketId).mockRejectedValueOnce(new Error("429 Too Many Requests"));
