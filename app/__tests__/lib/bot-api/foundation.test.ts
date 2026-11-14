@@ -152,6 +152,8 @@ describe("errors", () => {
     expect(apiCodeForOnchain(49)).toBe("insufficient_margin");
     expect(apiCodeForOnchain(27)).toBe("market_stale");
     expect(apiCodeForOnchain(133)).toBe("leverage_cap_exceeded");
+    expect(apiCodeForOnchain(121)).toBe("market_needs_crank");
+    expect(ERROR_CATALOG.market_needs_crank.retryable).toBe(true);
     expect(apiCodeForOnchain(21)).toBe("simulation_failed");
     expect(apiCodeForOnchain(99999)).toBe("simulation_failed");
   });

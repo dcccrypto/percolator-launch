@@ -31,6 +31,7 @@ export const ERROR_CATALOG = {
   market_unsupported: { status: 422, retryable: false, message: "this market is not supported by the API yet" },
   market_unreadable: { status: 503, retryable: true, message: "market state could not be read" },
   market_stale: { status: 409, retryable: true, message: "the market's oracle price is stale" },
+  market_needs_crank: { status: 409, retryable: true, message: "the market's engine state needs a refresh crank; retry shortly" },
   no_portfolio: { status: 409, retryable: false, message: "the wallet has no trading account on this market" },
   bad_portfolio: { status: 400, retryable: false, message: "portfolio is not this wallet's trading account on this market" },
   no_lp: { status: 503, retryable: true, message: "this market has no usable LP right now" },
@@ -112,6 +113,8 @@ export function onchainErrorName(code: number): string | null {
 const ONCHAIN_TO_API: Record<string, ErrorCode> = {
   EngineInsufficientInitialMargin: "insufficient_margin",
   OracleStale: "market_stale",
+  // 121: the engine's loss accounting is behind; any crank fixes it, so a retry a few slots later succeeds.
+  EngineLossStale: "market_needs_crank",
   GrowthUtilisationFeeNotCovered: "fee_raise_required",
   LevGuardRefused: "leverage_cap_exceeded",
   GrowthLeverageExceeded: "leverage_cap_exceeded",

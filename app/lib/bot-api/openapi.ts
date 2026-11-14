@@ -6,12 +6,12 @@
  */
 import { API_VERSION, MAX_BODY_BYTES } from "./config";
 import { ERROR_CATALOG, type ErrorCode } from "./errors";
-import { TIER_BUDGET, GLOBAL_BUILD_BUDGET, WINDOW_SEC, AUTH_FAIL_LIMIT } from "./limits";
+import { TIER_BUDGET, GLOBAL_BUILD_BUDGET, GLOBAL_READ_BUDGET, PRINCIPAL_BUILD_CAP, WINDOW_SEC, AUTH_FAIL_LIMIT } from "./limits";
 import { TTL_SEC } from "./idempotency";
 import { DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS, DEFAULT_MAX_NOTIONAL_USD, DEFAULT_MAX_LEVERAGE } from "./builders/caps";
 import { DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT } from "./reads/history";
 import { DEPTH_LADDER_USD } from "./reads/quote";
-import { HEARTBEAT_MS, MAX_STREAM_MS, SNAPSHOT_MS } from "./stream";
+import { HEARTBEAT_MS, MAX_OPEN_STREAMS, MAX_STREAM_MS, SNAPSHOT_MS } from "./stream";
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 type Obj = { [k: string]: Json };
@@ -623,7 +623,7 @@ export function buildOpenApi(): Obj {
         "",
         `Auth: \`Authorization: Bearer pbk_<id>_<secret>\` or \`X-API-Key\`. Read endpoints also work without a key at the anonymous budget. Builders need a key with the \`build\` scope. After ${AUTH_FAIL_LIMIT} bad keys in a window an address is refused until the window ends. A key never grants wallet authority.`,
         "",
-        `Rate limits: each endpoint has a weight (the \`x-weight\` of the operation); a caller spends weight from a budget of ${WINDOW_SEC} s windows. Budget per window: ${tierLine}. Builders also draw on one global ceiling of ${GLOBAL_BUILD_BUDGET} per window. Every answer carries X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds); a 429 carries Retry-After.`,
+        `Rate limits: each endpoint has a weight (the \`x-weight\` of the operation); a caller spends weight from a budget of ${WINDOW_SEC} s windows. Budget per window: ${tierLine}. Builders also draw on one global ceiling of ${GLOBAL_BUILD_BUDGET} per window, of which one caller may take at most ${PRINCIPAL_BUILD_CAP}; reads and streams draw on a global read ceiling of ${GLOBAL_READ_BUDGET}. A stream is charged its weight on admission and 1 more per snapshot tick while open, with at most ${MAX_OPEN_STREAMS.anon} open streams per anonymous caller and ${MAX_OPEN_STREAMS.default} per key. 503 kv_unavailable (retryable) means the key store is down, not that the key is bad; 503 client_ip_unknown means the deployment cannot see caller addresses and anonymous access is off. Every answer carries X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds); a 429 carries Retry-After.`,
         "",
         `Idempotency: send \`Idempotency-Key\` (8 to 128 chars of A-Za-z0-9_.:-) on every build. The same key and body inside ${TTL_SEC} s returns the same bytes (header \`Idempotent-Replayed: true\`), so a retried signature is identical and the cluster dedupes it. Same key, different body: 409 idempotency_conflict. Still running: 409 idempotency_in_progress.`,
         "",
