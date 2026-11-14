@@ -91,9 +91,25 @@ export async function revokeKey(id: string, kv: Kv = getKv()): Promise<boolean> 
   return true;
 }
 
+/**
+ * Local load tests only: a `next start` server keeps keys in its own process map, so a script cannot issue it a key. When
+ * BOT_API_DEV_SEED_KEY holds a well-formed key, the in-process map of a NON-deployed process (VERCEL unset, memory backend)
+ * learns that key as a read+build `mm` key under the process's own pepper. Refused on any deployed build and on Upstash, so
+ * it can never create a credential in a shared store.
+ */
+async function seedDevKey(kv: Kv): Promise<void> {
+  const raw = process.env.BOT_API_DEV_SEED_KEY;
+  if (!raw || process.env.VERCEL || kv.backend !== "memory") return;
+  const p = parseKey(raw);
+  if (!p) return;
+  const rec: KeyRecord = { id: p.id, hash: hashSecret(p.secret), scopes: ["read", "build"], tier: "mm", label: "dev-seed", createdAt: new Date(0).toISOString(), revoked: false };
+  await kv.set(recKey(p.id), JSON.stringify(rec), { nx: true });
+}
+
 export async function getKeyRecord(id: string, kv: Kv = getKv()): Promise<KeyRecord | null> {
   let raw: string | null;
   try {
+    await seedDevKey(kv);
     raw = await (kv.getAuthoritative ? kv.getAuthoritative(recKey(id)) : kv.get(recKey(id)));
   } catch {
     // The lookup itself failed: that is not "no such key". Callers must not count it as an auth failure.

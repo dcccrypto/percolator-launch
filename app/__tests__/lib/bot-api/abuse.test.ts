@@ -319,3 +319,24 @@ describe("operator R2-low: every non-stream route outlasts the handler deadline"
     }
   });
 });
+
+describe("local load-test key seeding", () => {
+  const seed = `pbk_${"S".repeat(12)}_${"c".repeat(43)}`;
+  it("a non-deployed memory store learns the seeded key; a deployed build never does", async () => {
+    const { verifyKey } = await import("@/lib/bot-api/keys");
+    vi.stubEnv("BOT_API_DEV_SEED_KEY", seed);
+    expect((await verifyKey(seed, kv))?.scopes).toEqual(["read", "build"]);
+    const other = new MemoryKv(() => now);
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("BOT_API_KEY_PEPPER", "p".repeat(40));
+    expect(await verifyKey(seed, other)).toBeNull();
+  });
+  it("is not applied to a shared (Upstash) store", async () => {
+    const { verifyKey } = await import("@/lib/bot-api/keys");
+    vi.stubEnv("BOT_API_DEV_SEED_KEY", seed);
+    const sets: string[] = [];
+    const redis = { get: async () => null, set: async (k: string) => void sets.push(k), del: async () => 0, incrby: async () => 1, expire: async () => 1 } as unknown as Redis;
+    expect(await verifyKey(seed, new UpstashKv(redis, new MemoryKv(), Date.now))).toBeNull();
+    expect(sets).toEqual([]);
+  });
+});
