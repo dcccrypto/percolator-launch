@@ -89,6 +89,8 @@ export interface QuoteSource {
   /** Fee cap the builder would sign right now (base + the matcher's request), bps; null when unreadable. */
   feeBps: bigint | null;
   baseFeeBps: bigint;
+  /** Oracle freshness, by the same rule GET /v1/markets exposes. */
+  oracle: { stale: boolean; ageSecs: number | null; staleBoundSecs: number };
   ctx: MatcherCtxView;
   ext: MatcherExtCaps | null;
   bandBps: number | undefined;
@@ -97,7 +99,7 @@ export interface QuoteSource {
 }
 
 /** Pure: everything the quote needs from three accounts' bytes. */
-export function buildQuoteSource(m: Uint8Array, c: Uint8Array, pf: Uint8Array, lp: PublicKey, at: { market: PublicKey; programId: PublicKey; slot: number }): QuoteSource {
+export function buildQuoteSource(m: Uint8Array, c: Uint8Array, pf: Uint8Array, lp: PublicKey, at: { market: PublicKey; programId: PublicKey; slot: number }, takerPosQ: bigint = 0n): QuoteSource {
   const view = decodeMarket(m, at); // throws market_unsupported / market_unreadable
   const engine = decodeMarketEngineView(m, 0);
   const ctx0 = decodeMatcherCtx(c);
@@ -123,7 +125,7 @@ export function buildQuoteSource(m: Uint8Array, c: Uint8Array, pf: Uint8Array, l
     if (!ext) throw new ApiError("market_unreadable");
   }
   const limits = decodeAssetRiskLimits(m, 0);
-  // P1 size limits, as lib/limits/ticket.ts deriveTicketLimits feeds them (no taker position: 0).
+  // P1 size limits, as lib/limits/ticket.ts deriveTicketLimits feeds them (the quote has no taker position: 0; the order preflight passes the taker's effective one).
   const boundVault =
     vaultLp?.bound && vaultLp.vaultLpPortfolio.length === lp.toBytes().length && lp.toBytes().every((b, k) => b === vaultLp!.vaultLpPortfolio[k])
       ? { levBps: vaultLp.vaultLpMaxLevBps !== 0 ? vaultLp.vaultLpMaxLevBps : growth ? growth.long.lambdaEffBps ?? growth.record.lambdaBps : VAULT_LP_DEFAULT_MAX_LEV_BPS }
@@ -136,7 +138,7 @@ export function buildQuoteSource(m: Uint8Array, c: Uint8Array, pf: Uint8Array, l
         oiEffShortQ: engine.oiEffShortQ,
         limits: growth && limits.lpExposureKBps === 0 ? { ...limits, lpExposureKBps: growth.long.lambdaEffBps ?? growth.record.lambdaBps } : limits,
         lp: lpView,
-        takerPosQ: 0n,
+        takerPosQ,
         // syncLive false: the conservative reading (room from the tighter of the counter and the real position).
         matcher: { maxFillAbs: ctx0.maxFillAbs, maxInventoryAbs: ctx0.maxInventoryAbs, inventoryBase: ctx0.inventoryBase, lpRealQ, syncLive: false },
         vaultLp: boundVault,
@@ -150,6 +152,7 @@ export function buildQuoteSource(m: Uint8Array, c: Uint8Array, pf: Uint8Array, l
     effectivePriceE6: effective,
     feeBps: fee ? fee.feeBps : null,
     baseFeeBps: view.feeBps,
+    oracle: { stale: view.oracle.stale, ageSecs: view.oracle.ageSecs, staleBoundSecs: view.oracle.staleBoundSecs },
     ctx,
     ext,
     bandBps: limits ? effectiveExecBandBps(limits.execBandBps) : undefined,
@@ -170,6 +173,20 @@ export function matcherQuote(src: QuoteSource, sizeQ: bigint): PreTradeQuote | n
 
 const limitView = (l: SideLimit) => ({ maxQ: l.maxQ >= UNLIMITED_CAPACITY ? null : l.maxQ, reason: l.reason, halted: l.halted });
 
+const num = (b: bigint | null): number | null => (b === null ? null : Number(b));
+
+/**
+ * What a fill is expected to be charged, in bps of notional: the market's base fee plus the matcher's current adaptive-fee
+ * request for this size (the two terms the wrapper adds up and checks against the signed cap). It is NOT the cap: a build signs
+ * `feeCapBps` (base + the matcher's worst case + a margin), the most a fill may ever charge. Utilisation fees of growth markets
+ * are not included. null when the matcher fills nothing.
+ */
+export function expectedFee(baseFeeBps: bigint, q: PreTradeQuote | null, notionalAtoms: bigint): { bps: number | null; atoms: bigint | null } {
+  if (!q || q.fillQ <= 0n) return { bps: null, atoms: null };
+  const bps = baseFeeBps + (q.adaptiveFeeBps ?? 0n);
+  return { bps: Number(bps), atoms: (notionalAtoms * bps + 9_999n) / 10_000n };
+}
+
 export function quoteView(src: QuoteSource, sizeQ: bigint, slippageBps: number) {
   const buy = sizeQ > 0n;
   const abs = buy ? sizeQ : -sizeQ;
@@ -177,19 +194,24 @@ export function quoteView(src: QuoteSource, sizeQ: bigint, slippageBps: number) 
   if (!q) throw new ApiError("market_unreadable", "the matcher cannot price this size");
   const limitPriceE6 = computeLimitPriceE6({ markE6: src.effectivePriceE6, size: sizeQ, slippageBps: BigInt(slippageBps) });
   const max = src.maxSizePerSide[buy ? "long" : "short"];
+  // A matcher that fills nothing (halted LP) has no price: its impact and spread are not 0, they are unknown.
+  const fills = q.fillQ > 0n;
+  const notionalAtoms = (abs * src.effectivePriceE6) / 1_000_000n;
+  const fee = expectedFee(src.baseFeeBps, q, notionalAtoms);
   return {
     market: src.market,
     side: buy ? "buy" : "sell",
     sizeQ,
-    notionalAtoms: (abs * src.effectivePriceE6) / 1_000_000n,
+    notionalAtoms,
     effectivePriceE6: src.effectivePriceE6,
+    oracle: src.oracle,
     slippageBps,
     limitPriceE6,
-    estExecPriceE6: q.quotePriceE6,
-    priceImpactBps: q.impactBps,
-    totalSpreadBps: q.totalBps,
+    estExecPriceE6: fills ? q.quotePriceE6 : null,
+    priceImpactBps: fills ? num(q.impactBps) : null,
+    totalSpreadBps: fills ? num(q.totalBps) : null,
     // Whether the program would accept this fill at that limit (buy: exec <= limit, sell: exec >= limit); null = the matcher is unquoted.
-    withinLimit: q.quotePriceE6 === null ? null : !quoteFailsLimit(q.quotePriceE6, limitPriceE6, buy),
+    withinLimit: !fills || q.quotePriceE6 === null ? null : !quoteFailsLimit(q.quotePriceE6, limitPriceE6, buy),
     matcher: {
       kind: q.kind,
       fillQ: q.fillQ,
@@ -197,12 +219,14 @@ export function quoteView(src: QuoteSource, sizeQ: bigint, slippageBps: number) 
       clippedByTotal: q.clippedByTotal,
       baseSpreadBps: q.baseSpreadBps,
       maxTotalBps: q.maxTotalBps,
-      adaptiveFeeBps: q.adaptiveFeeBps,
-      skewBps: q.skewBps,
+      adaptiveFeeBps: fills ? num(q.adaptiveFeeBps) : null,
+      skewBps: fills ? num(q.skewBps) : null,
       feeCold: q.feeCold,
     },
-    feeBps: src.feeBps,
-    baseFeeBps: src.baseFeeBps,
+    expectedFeeBps: fee.bps,
+    expectedFeeAtoms: fee.atoms,
+    feeCapBps: num(src.feeBps),
+    baseFeeBps: Number(src.baseFeeBps),
     feeChargedInPrice: src.feeInPrice,
     maxSizePerSide: { long: limitView(src.maxSizePerSide.long), short: limitView(src.maxSizePerSide.short) },
     exceedsMaxSize: max.maxQ < UNLIMITED_CAPACITY && abs > max.maxQ,
@@ -222,9 +246,9 @@ export function depthView(src: QuoteSource) {
       sizeQ,
       fillQ: q ? q.fillQ : null,
       filledFully: q ? q.fillQ >= sizeQ : false,
-      execPriceE6: q ? q.quotePriceE6 : null,
-      spreadBps: q ? q.totalBps : null,
-      impactBps: q ? q.impactBps : null,
+      execPriceE6: q && q.fillQ > 0n ? q.quotePriceE6 : null,
+      spreadBps: q && q.fillQ > 0n ? num(q.totalBps) : null,
+      impactBps: q && q.fillQ > 0n ? num(q.impactBps) : null,
     };
   };
   return {
@@ -235,8 +259,9 @@ export function depthView(src: QuoteSource) {
     asks: DEPTH_LADDER_USD.map((u) => row(u, true)),
     bids: DEPTH_LADDER_USD.map((u) => row(u, false)),
     maxSizePerSide: { long: limitView(src.maxSizePerSide.long), short: limitView(src.maxSizePerSide.short) },
-    feeBps: src.feeBps,
-    baseFeeBps: src.baseFeeBps,
+    oracle: src.oracle,
+    feeCapBps: num(src.feeBps),
+    baseFeeBps: Number(src.baseFeeBps),
     lotExp: src.lotExp,
   };
 }

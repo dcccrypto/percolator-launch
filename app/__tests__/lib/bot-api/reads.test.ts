@@ -13,7 +13,7 @@ import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { ApiError } from "@/lib/bot-api/errors";
 import { DEFAULT_STALE_SECS, decodeMarket, decodeMarketDetail } from "@/lib/bot-api/reads/market";
 import { buildQuoteSource, depthView, quoteView, DEPTH_LADDER_USD } from "@/lib/bot-api/reads/quote";
-import { portfolioView } from "@/lib/bot-api/reads/account";
+import { portfolioView, liqPriceWithMmFloor } from "@/lib/bot-api/reads/account";
 import { mergeSignatures, parseBefore, parseLimit } from "@/lib/bot-api/reads/history";
 import { parsePubkey } from "@/lib/bot-api/reads/common";
 import { marketEventStream, parseLastEventId } from "@/lib/bot-api/stream";
@@ -152,8 +152,8 @@ describe("quote and depth on the recorded SOL market + LP + matcher", () => {
   it("carries fee bps, max size per side and flags a size above it", () => {
     const s = src();
     const q = quoteView(s, 1n, 100);
-    expect(q.baseFeeBps).toBeGreaterThan(0n);
-    expect(q.feeBps === null || q.feeBps >= q.baseFeeBps).toBe(true);
+    expect(q.baseFeeBps).toBeGreaterThan(0);
+    expect(q.feeCapBps === null || q.feeCapBps >= q.baseFeeBps).toBe(true);
     expect(q.maxSizePerSide.long).toHaveProperty("reason");
     const maxQ = q.maxSizePerSide.long.maxQ;
     if (maxQ !== null) {
@@ -325,5 +325,84 @@ describe("SSE stream", () => {
     const calls = read.mock.calls.length;
     await vi.advanceTimersByTimeAsync(20_000);
     expect(read.mock.calls.length).toBe(calls);
+  });
+});
+
+describe("council fixes: quote and market shape", () => {
+  const SLOT = Number(SOL_ORACLE.slot);
+  const src = (slot = SLOT) => buildQuoteSource(raw(SOL_DATA), raw(CTX_DATA), raw(LP_DATA), LP, { market: SOL, programId: WRAPPER, slot });
+  const size = () => BigInt(GOLDEN.find((g) => g.side === "buy" && g.usd === 400 && !g.reducing)!.sizeQ);
+
+  it("clerk F2 / first-timer F5: the quote and depth carry the oracle freshness the market read exposes", () => {
+    const fresh = src();
+    expect(quoteView(fresh, size(), 100).oracle).toEqual({ stale: false, ageSecs: expect.any(Number), staleBoundSecs: expect.any(Number) });
+    const view = decodeMarket(raw(SOL_DATA), { market: SOL, programId: WRAPPER, slot: SLOT });
+    expect(quoteView(fresh, size(), 100).oracle.stale).toBe(view.oracle.stale);
+    const late = src(SLOT + 1_000_000);
+    expect(quoteView(late, size(), 100).oracle.stale).toBe(true);
+    expect(depthView(late).oracle.stale).toBe(true);
+  });
+  it("first-timer F6: bps on the wire are JSON numbers, the schema says so (no bigint left in a *Bps analytics field)", () => {
+    const q = JSON.parse(JSON.stringify(quoteView(src(), size(), 100), (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+    for (const v of [q.priceImpactBps, q.totalSpreadBps, q.matcher.adaptiveFeeBps, q.matcher.skewBps, q.matcher.baseSpreadBps, q.matcher.maxTotalBps, q.feeCapBps, q.baseFeeBps, q.expectedFeeBps]) {
+      expect(typeof v === "number" || v === null).toBe(true);
+    }
+    const d = JSON.parse(JSON.stringify(depthView(src()), (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+    for (const r of [...d.asks, ...d.bids]) for (const v of [r.spreadBps, r.impactBps]) expect(typeof v === "number" || v === null).toBe(true);
+  });
+  it("trader (b): expected fee is base + adaptive request, in bps and atoms, and never above the cap", () => {
+    const q = quoteView(src(), size(), 100);
+    expect(q.expectedFeeBps).toBe(q.baseFeeBps + (q.matcher.adaptiveFeeBps ?? 0));
+    expect(q.expectedFeeBps!).toBeLessThanOrEqual(q.feeCapBps!);
+    expect(q.expectedFeeAtoms).toBe((q.notionalAtoms * BigInt(q.expectedFeeBps!) + 9_999n) / 10_000n);
+  });
+  it("trader (f): nothing filled means no price, impact or spread (not 0)", () => {
+    const s = src();
+    // A halted LP: the matcher context has no capacity. Force it through the source's context.
+    const halted = { ...s, ctx: { ...s.ctx, maxFillAbs: 0n } };
+    const q = quoteView(halted, size(), 100);
+    if (q.matcher.fillQ === 0n) {
+      expect(q).toMatchObject({ estExecPriceE6: null, priceImpactBps: null, totalSpreadBps: null, withinLimit: null, expectedFeeBps: null, expectedFeeAtoms: null });
+      expect(depthView(halted).asks.every((r) => r.execPriceE6 === null && r.spreadBps === null && r.impactBps === null)).toBe(true);
+    } else {
+      throw new Error("fixture did not produce a zero fill; adjust the halted context");
+    }
+  });
+  it("attacker / first-timer F2: the market carries its collateral mint and decimals", () => {
+    const v = decodeMarket(raw(SOL_DATA), { market: SOL, programId: WRAPPER, slot: SLOT });
+    expect(v).toMatchObject({ collateralMint: "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC", collateralDecimals: 6 });
+  });
+  it("risk F5: account leverage is notional over the same conservative equity the order cap uses", () => {
+    const wallet = parsePortfolio(raw(LP_DATA)).owner;
+    const v = portfolioView({ pubkey: LP, account: { data: LP_DATA } }, wallet, WRAPPER, { raw: raw(SOL_DATA), programId: WRAPPER }, SLOT)!;
+    const p = v.positions[0];
+    expect(v.leverageEquity).toBeLessThanOrEqual(v.capital + (v.feeCredits > 0n ? 0n : v.feeCredits));
+    expect(p.leverage).toBe(Number((p.notional! * 100n) / v.leverageEquity) / 100);
+  });
+});
+
+describe("trader (d): liquidation price with the engine's minimum maintenance margin", () => {
+  it("a small long is liquidated where the floor binds, not at the percentage price (the trader seat's case: 29.99 -> about 32.19)", () => {
+    // entry 68.79, capital 10.149520 USD, q 0.249999, mm 600 bps -> percentage price 29.988320; floor 1.000000 USD
+    const v = liqPriceWithMmFloor(29_988_320n, 68_790_000n, 10_149_520n, 249_999n, 1_000_000n)!;
+    expect(v).toBeGreaterThan(32_100_000n);
+    expect(v).toBeLessThan(32_300_000n);
+    // at that price the position's equity equals the floor (within one q-unit of rounding)
+    const equity = 10_149_520n + (249_999n * (v - 68_790_000n)) / 1_000_000n;
+    expect(equity - 1_000_000n < 5n && equity - 1_000_000n > -5n).toBe(true);
+  });
+  it("leaves the percentage price alone when the floor is lower, absent, or the leg is flat", () => {
+    expect(liqPriceWithMmFloor(85_106_000n, 100_000_000n, 20_000_000n, 1_000_000n, 1_000_000n)).toBe(85_106_000n); // floor line 81.0 < 85.1
+    expect(liqPriceWithMmFloor(85_106_000n, 100_000_000n, 20_000_000n, 1_000_000n, 0n)).toBe(85_106_000n);
+    expect(liqPriceWithMmFloor(85_106_000n, 100_000_000n, 20_000_000n, 0n, 5_000_000n)).toBe(85_106_000n);
+    expect(liqPriceWithMmFloor(null, 100_000_000n, 20_000_000n, 1_000_000n, 5_000_000n)).toBeNull();
+  });
+  it("long: the higher of the two prices; a long covered at any price (0) still has the floor price", () => {
+    expect(liqPriceWithMmFloor(85_106_000n, 100_000_000n, 20_000_000n, 1_000_000n, 10_000_000n)).toBe(90_000_000n);
+    expect(liqPriceWithMmFloor(0n, 100_000_000n, 20_000_000n, 1_000_000n, 10_000_000n)).toBe(90_000_000n);
+  });
+  it("short: the lower of the two prices", () => {
+    // short 1 unit at 100, capital 20: percentage price 100 + 20 = 120/(1+0.06) = 113.2; floor 10 -> 110
+    expect(liqPriceWithMmFloor(113_207_547n, 100_000_000n, 20_000_000n, -1_000_000n, 10_000_000n)).toBe(110_000_000n);
   });
 });

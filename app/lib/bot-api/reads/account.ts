@@ -21,10 +21,12 @@ import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isLpPortfolio } from "@/lib/lpPortfolio";
 import { decodePortfolioRisk } from "@/lib/limits/decode";
 import { computePositionPnl } from "@/lib/position-pnl";
+import { sanitizePriceE6 } from "@/lib/oraclePrice";
 import { riskLegFields } from "@/lib/risk-entry";
 import { parseAssetAdlFactors, adlSideFactor, adlRemainingBps } from "@/lib/v17-adl";
 import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
+import { conservativeEquity } from "../builders/equity";
 
 type Scanned = { pubkey: PublicKey; account: { data: Buffer | Uint8Array } };
 
@@ -87,6 +89,77 @@ export async function loadAccountsRaw(
 
 const abs = (n: bigint): bigint => (n < 0n ? -n : n);
 
+type PortfolioParsed = ReturnType<typeof parsePortfolio>;
+
+/**
+ * Liquidation price with the engine's per-leg maintenance floor. The engine requires MM(n) = max(ceil(n x mm_bps / 1e4),
+ * min_nonzero_mm_req) (engine v16.rs maintenance_requirement_for_notional), so for a small position the floor, not the
+ * percentage, decides when it is liquidated. lib/liquidation-risk.ts computeEngineLiqPrice models the percentage only. MM is the
+ * larger of two lines, so a long is liquidated at the HIGHER of the two prices, a short at the LOWER:
+ *   floor line, long : equity(P) = capital + q (P - entry) = floor  ->  P = entry + (floor - capital) / q
+ *   floor line, short: equity(P) = capital + |q| (entry - P) = floor ->  P = entry + (capital - floor) / |q|
+ * (prices E6, q and atoms as the engine has them: notional atoms = |q| x P / 1e6). Rounded toward the mark, like the percentage
+ * price. `proportional` is that percentage price (null = unknown, 0n = a long covered at any price). Pure.
+ */
+export function liqPriceWithMmFloor(proportional: bigint | null, entryE6: bigint, capital: bigint, effectiveQ: bigint, mmFloorAtoms: bigint): bigint | null {
+  if (proportional === null || effectiveQ === 0n || entryE6 <= 0n || mmFloorAtoms <= 0n) return proportional;
+  const q = abs(effectiveQ);
+  const delta = effectiveQ > 0n ? mmFloorAtoms - capital : capital - mmFloorAtoms; // atoms
+  // delta x 1e6 / q, rounded away from the entry's far side (up for a long, down for a short): the shown price is never past the engine's
+  const num = delta * 1_000_000n;
+  const step = effectiveQ > 0n ? (num >= 0n ? (num + q - 1n) / q : -((-num) / q)) : num >= 0n ? num / q : -((-num + q - 1n) / q);
+  const floorPrice = entryE6 + step;
+  if (floorPrice <= 0n) return proportional;
+  if (effectiveQ > 0n) return proportional === 0n ? floorPrice : floorPrice > proportional ? floorPrice : proportional;
+  return floorPrice < proportional ? floorPrice : proportional;
+}
+
+/** computePositionPnl for one leg, with the inputs both the account view and the order caps use. */
+function legPnl(pf: PortfolioParsed, leg: PortfolioParsed["legs"][number], adl: ReturnType<typeof parseAssetAdlFactors> | null, mark: bigint, imBps: bigint, mmBps: bigint) {
+  return computePositionPnl({
+    basisQ: leg.basisPosQ,
+    aBasis: leg.aBasis,
+    epochSnap: leg.epochSnap,
+    adlFactors: adl,
+    markE6: mark,
+    onChainPnl: pf.pnl,
+    initialMarginBps: imBps,
+    maintenanceMarginBps: mmBps,
+    capital: pf.capital,
+    ...riskLegFields(pf.legs),
+  });
+}
+
+/**
+ * The account's value-side PnL at the engine's effective price (what `capital + pnl` is worth), for the order caps
+ * (builders/caps.ts): `flat` = no open leg (the settled pnl is the figure), `open` = the sum over the open legs,
+ * `unreadable` = a leg whose value cannot be computed (never guessed).
+ */
+export function openLegsValuePnl(marketRaw: Uint8Array, portfolioData: Uint8Array): { kind: "flat" } | { kind: "open"; valuePnl: bigint } | { kind: "unreadable" } {
+  let pf: PortfolioParsed;
+  try {
+    pf = parsePortfolio(portfolioData);
+  } catch {
+    return { kind: "unreadable" };
+  }
+  const legs = pf.legs.filter((l) => l.active);
+  if (legs.length === 0) return { kind: "flat" };
+  const engine = decodeMarketEngineView(marketRaw, 0);
+  if (!engine) return { kind: "unreadable" };
+  const mark = sanitizePriceE6(engine.effectivePriceE6);
+  if (mark <= 0n) return { kind: "unreadable" };
+  const adl = parseAssetAdlFactors(marketRaw, 0);
+  let total = 0n;
+  for (const leg of legs) {
+    const r = legPnl(pf, leg, adl, mark, engine.initialMarginBps, engine.maintenanceMarginBps);
+    const v = r.riskUnrealizedPnl ?? r.unrealizedPnl;
+    if (typeof v !== "bigint") return { kind: "unreadable" };
+    total += v;
+  }
+  return { kind: "open", valuePnl: total };
+}
+
+
 /** Pure: one scanned portfolio into the API view. Returns null for an account that is not a portfolio of this wallet. */
 export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKey, mkt: { raw: Uint8Array; programId: PublicKey } | null | undefined, slot: number) {
   const data = new Uint8Array(p.account.data);
@@ -116,31 +189,19 @@ export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKe
   const mmBps = engine?.maintenanceMarginBps ?? 0n;
   const adl = mkt && detail ? parseAssetAdlFactors(mkt.raw, 0) : null;
 
-  const positions = pf.legs
+  const rows = pf.legs
     .filter((l) => l.active)
     .map((leg) => {
       const side = leg.side === 0 ? "long" : "short";
       if (!detail || !engine) {
-        return { asset: leg.assetIndex, side, rawBasisQ: leg.basisPosQ, sizeQ: null, entryPriceE6: null, entrySource: null, entryIsEstimate: null, markPriceE6: null, unrealizedPnl: null, liqPriceE6: null, notional: null, leverage: null, marginCushion: null };
+        return { asset: leg.assetIndex, side, rawBasisQ: leg.basisPosQ, sizeQ: null, entryPriceE6: null, entrySource: null, entryIsEstimate: null, markPriceE6: null, unrealizedPnl: null, liqPriceE6: null, notional: null, marginCushion: null };
       }
       const aSide = adl ? adlSideFactor(adl, leg.side) : 0n;
-      const r = computePositionPnl({
-        basisQ: leg.basisPosQ,
-        aBasis: leg.aBasis,
-        epochSnap: leg.epochSnap,
-        adlFactors: adl,
-        markE6: mark,
-        onChainPnl: pf.pnl,
-        initialMarginBps: imBps,
-        maintenanceMarginBps: mmBps,
-        capital: pf.capital,
-        ...riskLegFields(pf.legs),
-      });
+      const r = legPnl(pf, leg, adl, mark, imBps, mmBps);
       // Raw basis is signed only by `side`; the effective (ADL-scaled) size is what exposure, notional and liquidation use.
       const eff = r.effectiveSize;
       const signedEff = eff === null ? null : leg.side === 0 ? abs(eff) : -abs(eff);
       const notional = eff === null ? null : (abs(eff) * mark) / 1_000_000n;
-      const leverage = notional !== null && pf.capital > 0n ? Number((notional * 100n) / pf.capital) / 100 : null;
       const cushion =
         signedEff === null
           ? null
@@ -156,15 +217,23 @@ export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKe
         entryIsEstimate: r.entrySource !== "server" && r.entrySource !== "cache",
         markPriceE6: mark,
         unrealizedPnl: r.riskUnrealizedPnl ?? r.unrealizedPnl,
-        liqPriceE6: r.liquidationPriceE6 !== null && r.liquidationPriceE6 > 0n ? r.liquidationPriceE6 : null,
+        liqPriceE6: ((): bigint | null => {
+          const v = liqPriceWithMmFloor(r.liquidationPriceE6, r.riskEntry, pf.capital, signedEff ?? 0n, detail.risk.minNonzeroMaintenanceMarginReq ?? 0n);
+          return v !== null && v > 0n ? v : null;
+        })(),
         notional,
-        leverage,
         marginCushion: cushion,
         severity: cushion === null ? null : severityFromCushion(cushion),
       };
     });
-  const valuePnl = positions.reduce((s, x) => s + (typeof x.unrealizedPnl === "bigint" ? x.unrealizedPnl : 0n), 0n);
-  const flat = positions.length === 0;
+  const valuePnl = rows.reduce((s, x) => s + (typeof x.unrealizedPnl === "bigint" ? x.unrealizedPnl : 0n), 0n);
+  const flat = rows.length === 0;
+  // The equity the order caps divide by (builders/equity.ts): capital less unrealized losses and negative fee credits.
+  const leverageEquity = conservativeEquity(pf.capital, flat ? pf.pnl : valuePnl, pf.feeCredits);
+  const positions = rows.map((x) => ({
+    ...x,
+    leverage: typeof x.notional === "bigint" && leverageEquity > 0n ? Number((x.notional * 100n) / leverageEquity) / 100 : null,
+  }));
   return {
     address: p.pubkey.toBase58(),
     market: marketKey.toBase58(),
@@ -175,6 +244,7 @@ export function portfolioView(p: Scanned, wallet: PublicKey, programId: PublicKe
     capital: pf.capital,
     pnl: pf.pnl,
     feeCredits: pf.feeCredits,
+    leverageEquity,
     // Account value at the mark: capital + the position's value-side PnL; a flat account holds its settled pnl.
     equity: flat ? pf.capital + pf.pnl : pf.capital + valuePnl,
     certifiedEquity: risk ? risk.cert.certifiedEquity : null,
