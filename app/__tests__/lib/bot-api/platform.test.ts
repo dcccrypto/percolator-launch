@@ -93,3 +93,24 @@ describe("operator F1: a KV outage is a retryable 503, not a 401", () => {
     expect(ok.status).toBe(200);
   });
 });
+
+describe("operator F2: refuse to enable on a deployed build without the shared KV", () => {
+  it("VERCEL set and no UPSTASH_* -> disabled with a reason; with both set -> allowed", async () => {
+    const { botApiDisabledReason } = await import("@/lib/bot-api/config");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+    expect(botApiDisabledReason()).toMatch(/shared key store/);
+    const res = await readRoute(req("/api/v1/t"));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("disabled");
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.invalid");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "t");
+    expect(botApiDisabledReason()).toBeNull();
+  });
+  it("local (no VERCEL) still works on the memory map", async () => {
+    const { botApiDisabledReason } = await import("@/lib/bot-api/config");
+    vi.stubEnv("VERCEL", "");
+    expect(botApiDisabledReason()).toBeNull();
+  });
+});
