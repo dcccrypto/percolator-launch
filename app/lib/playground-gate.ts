@@ -36,11 +36,17 @@
  *                               Metaplex record); the caller is a wallet or explorer, never a browser holding our cookie. Public by
  *                               design, built from chain state, base58-validated. Flag off the path stays gated (and 404s anyway).
  *
+ *   GET/POST /api/v1/*          the bot API (docs/ideas/bot-trading-rails.md), ONLY when BOT_API_ENABLED=1 on a v2.2 build.
+ *                               Callers are bots without our cookie; every route authenticates itself (API key, or an
+ *                               anonymous read at a low per-IP budget) and builds only UNSIGNED transactions. Flag unset:
+ *                               gated exactly as before.
+ *
  * Everything else under /api is called same-origin by the browser app, so it
  * is gated and the cookie rides along automatically.
  */
 import { SESSION_COOKIE, gateEnabled, sessionGrantsAccess } from "@/lib/playground-access";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { botApiFlagOn } from "@/lib/bot-api/config";
 
 export const LOCKED_PATH = "/locked";
 export const ENTER_PATH = "/enter";
@@ -77,7 +83,7 @@ const EXEMPT_VERCEL_INSIGHTS: ReadonlyArray<{ methods: readonly string[]; path: 
 ];
 
 /** Server-to-server API routes, by method. Each authenticates itself (see header). */
-const EXEMPT_API: ReadonlyArray<{ method: string; re: RegExp; v22?: true }> = [
+const EXEMPT_API: ReadonlyArray<{ method: string; re: RegExp; v22?: true; botApi?: true }> = [
   { method: "GET", re: /^\/api\/health\/?$/ },
   { method: "GET", re: /^\/api\/playground\/registered-markets\/?$/ },
   // base58 slab only, so PATCH /api/markets/challenge|health (no PATCH handler) stays gated
@@ -85,6 +91,9 @@ const EXEMPT_API: ReadonlyArray<{ method: string; re: RegExp; v22?: true }> = [
   { method: "POST", re: /^\/api\/oracle-keeper\/register\/?$/ },
   // v2.2 Earn share token metadata (wallets fetch it from the Metaplex record's uri); exempt only with the v2.2 flag on.
   { method: "GET", re: /^\/api\/earn-share\/[1-9A-HJ-NP-Za-km-z]{32,44}(?:\/image)?\/?$/, v22: true },
+  // Bot API: exempt only with BOT_API_ENABLED=1 and the v2.2 flag; the routes authenticate themselves (lib/bot-api/handler.ts).
+  { method: "GET", re: /^\/api\/v1(?:\/[A-Za-z0-9._-]+)*\/?$/, v22: true, botApi: true },
+  { method: "POST", re: /^\/api\/v1(?:\/[A-Za-z0-9._-]+)*\/?$/, v22: true, botApi: true },
 ];
 
 /**
@@ -103,7 +112,7 @@ export function isExempt(pathname: string, method: string): boolean {
   const m = method.toUpperCase();
   if (pathname.startsWith("/api/")) {
     // HEAD rides on GET's exemption (uptime monitors often send HEAD).
-    return EXEMPT_API.some((e) => (e.method === m || (m === "HEAD" && e.method === "GET")) && e.re.test(pathname) && (!e.v22 || isDevnetV22Enabled()));
+    return EXEMPT_API.some((e) => (e.method === m || (m === "HEAD" && e.method === "GET")) && e.re.test(pathname) && (!e.v22 || isDevnetV22Enabled()) && (!e.botApi || botApiFlagOn()));
   }
   // Hashed Vercel Analytics script: read-only methods, exact shape, nothing else nested.
   if ((m === "GET" || m === "HEAD") && VERCEL_ANALYTICS_SCRIPT_RE.test(pathname)) return true;
