@@ -422,3 +422,51 @@ describe("attacker F1 / operator F6: stream concurrency and metering", () => {
     expect(text).toContain("rate-limited");
   });
 });
+
+describe("operator F4: health reports degraded", () => {
+  const conn = { getSlot: async () => 123, getBlockHeight: async () => 99 };
+  beforeEach(() => {
+    vi.mocked(getServerConnection).mockReturnValue(conn as never);
+  });
+  const health = async () => (await import("@/app/api/v1/health/route")).GET(req("/api/v1/health"));
+
+  it("ok on a healthy store", async () => {
+    const res = await health();
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j).toMatchObject({ status: "ok", slot: 123, kv: { backend: "memory", degraded: false, memoryOnDeployedBuild: false }, clientIp: { resolved: true } });
+  });
+  it("degraded and 503 while the KV is failing", async () => {
+    const { redis } = deadRedis();
+    __setKvForTest(new UpstashKv(redis, new MemoryKv(() => now), () => now));
+    const res = await health();
+    expect(res.status).toBe(503);
+    const j = await res.json();
+    expect(j.status).toBe("degraded");
+    expect(j.kv.degraded).toBe(true);
+  });
+  it("degraded and 503 when a deployed build runs on the memory backend", async () => {
+    // config refuses first when UPSTASH_* is unset, so set it and keep the injected memory store: the state health must flag.
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("BOT_API_KEY_PEPPER", "p".repeat(40));
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.invalid");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "t");
+    const res = await health();
+    expect(res.status).toBe(503);
+    const j = await res.json();
+    expect(j).toMatchObject({ status: "degraded", kv: { backend: "memory", memoryOnDeployedBuild: true } });
+  });
+  it("flags an unresolved client address on a deployed build (keyed caller)", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("BOT_API_KEY_PEPPER", "p".repeat(40));
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.invalid");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "t");
+    vi.stubEnv("TRUSTED_PROXY_DEPTH", "0");
+    const { key } = await issueKey({ scopes: ["read"] }, kv);
+    const { GET } = await import("@/app/api/v1/health/route");
+    // memory-on-deployed also trips here, so assert the clientIp field rather than the status alone
+    const j = await (await GET(req("/api/v1/health", { headers: { authorization: `Bearer ${key}` } }))).json();
+    expect(j.clientIp).toEqual({ resolved: false, trustedProxyDepth: 0 });
+    expect(j.status).toBe("degraded");
+  });
+});
