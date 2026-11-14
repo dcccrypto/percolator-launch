@@ -65,7 +65,10 @@ describe("1a. one room: the program's plain N_cap, not the depth-aware quote", (
     expect(t.growthCapQ!).toBeLessThanOrEqual(9_284_648n);
   });
   it("the app builds its growth view WITH the v2.2 depth rules now that the deployed wrapper applies them (wiring)", () => {
-    const src = readFileSync(path.join(__dirname, "../../..", "hooks/useMarketLimits.ts"), "utf8");
+    // growthFor lives in lib/limits/growth-for.ts (shared with the bot API quote); the hook re-exports it.
+    const hook = readFileSync(path.join(__dirname, "../../..", "hooks/useMarketLimits.ts"), "utf8");
+    expect(hook).toContain('import { growthFor } from "@/lib/limits/growth-for";');
+    const src = readFileSync(path.join(__dirname, "../../..", "lib/limits/growth-for.ts"), "utf8");
     expect(src).toContain("isDevnetV22Enabled() && GROWTH_DEPTH_RULES_DEPLOYED");
     const gm = readFileSync(path.join(__dirname, "../../..", "lib/v21/growth-market.ts"), "utf8");
     expect(gm).toContain("export const GROWTH_DEPTH_RULES_DEPLOYED = true;");
