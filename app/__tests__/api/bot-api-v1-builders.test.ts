@@ -317,3 +317,50 @@ describe("GET /api/v1/tx/{signature}", () => {
     expect((await get(s, "?lastValidBlockHeight=-1")).status).toBe(400);
   });
 });
+
+// G13: the API's Deposit / Withdraw must be byte-identical to what the app's hooks send for the same account
+// (hooks/useDeposit.ts:240-256, hooks/useWithdraw.ts:388-402), so a bot and the UI hit the program the same way.
+describe("builder / hook parity", () => {
+  const dep = (o: Record<string, unknown> = {}) => ({ owner: OWNER.toBase58(), market: SLAB.toBase58(), amount: "25000000", ...o });
+  const wrapperIx = (b: { transactions: { transaction: string }[] }) => {
+    const ixs = Transaction.from(Buffer.from(b.transactions[0].transaction, "base64")).instructions.filter((ix) => ix.programId.equals(WRAPPER));
+    expect(ixs).toHaveLength(1);
+    return ixs[0];
+  };
+  const same = (a: TransactionInstruction, b: TransactionInstruction) => {
+    expect(a.programId.toBase58()).toBe(b.programId.toBase58());
+    expect(a.keys.map((k) => [k.pubkey.toBase58(), k.isSigner, k.isWritable])).toEqual(b.keys.map((k) => [k.pubkey.toBase58(), k.isSigner, k.isWritable]));
+    expect(Buffer.from(a.data).toString("hex")).toBe(Buffer.from(b.data).toString("hex"));
+  };
+  const accounts = async () => {
+    const sdk = await import("@percolatorct/sdk");
+    const mint = sdk.parseWrapperConfigV17(new Uint8Array(MARKET_DATA), sdk.V17_HEADER_LEN).collateralMint;
+    const [vaultPda] = sdk.deriveVaultAuthority(WRAPPER, SLAB);
+    return { sdk, vaultPda, userAta: await sdk.getAta(OWNER, mint), vaultTokenAta: await sdk.getAta(vaultPda, mint, true) };
+  };
+
+  it("deposit into an existing account matches useDeposit's v18 Deposit", async () => {
+    const r = await post(deposits, "/api/v1/deposits", dep());
+    expect(r.status).toBe(200);
+    const { sdk, userAta, vaultTokenAta } = await accounts();
+    // fetchPortfolioIdentity is mocked above: portfolioId 7, matcherSequence 3 (what the hook would read live).
+    const hook = sdk.buildIx({
+      programId: WRAPPER,
+      keys: sdk.buildAccountMetas(sdk.ACCOUNTS_DEPOSIT_COLLATERAL, [OWNER, SLAB, PORTFOLIO, userAta, vaultTokenAta, sdk.WELL_KNOWN.tokenProgram]),
+      data: sdk.encodeDepositCollateral({ portfolioId: 7n, expectedSequence: 3n, amount: "25000000" }),
+    });
+    same(wrapperIx(await r.json()), hook);
+  });
+
+  it("withdraw matches useWithdraw's v18 WithdrawCollateral", async () => {
+    const r = await post(withdrawals, "/api/v1/withdrawals", dep());
+    expect(r.status).toBe(200);
+    const { sdk, vaultPda, userAta, vaultTokenAta } = await accounts();
+    const hook = sdk.buildIx({
+      programId: WRAPPER,
+      keys: sdk.buildAccountMetas(sdk.ACCOUNTS_WITHDRAW_COLLATERAL, [OWNER, SLAB, PORTFOLIO, userAta, vaultTokenAta, vaultPda, sdk.WELL_KNOWN.tokenProgram]),
+      data: sdk.encodeWithdrawCollateral({ portfolioId: 7n, expectedSequence: 3n, amount: "25000000" }),
+    });
+    same(wrapperIx(await r.json()), hook);
+  });
+});
