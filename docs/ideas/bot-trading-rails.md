@@ -288,6 +288,15 @@ None of these has been decided. The code ships with the defaults below only so i
 3. Who issues keys in v1 (ops script) and whether anonymous reads are allowed (code default today: allowed, `BOT_API_ANON_READS=0` turns them off).
 4. Whether #3836's `/api/v22/trade` stays as a public alias or is folded into `/v1/orders`.
 
+### What the equity, fee and error figures do and do not count
+
+Written to match the code (council round 2, `fc04abcd0`), not to claim more.
+
+- **Cap equity and `GET /v1/accounts` equity** = capital + min(0, stored `pnl` + the K/F each open leg has accrued since its snapshot) + min(0, fee credits). The pending part is the engine's own settle arithmetic (`floor(|basis| x (K_now - k_snap) / (a_basis x 1e6))`, plus the same for F; `app/lib/bot-api/reads/pending-pnl.ts`, engine `leg_kf_delta_components_for_settlement_from_targets`), so a loss that accrued after the leg was last touched is counted, and a stored `pnl` of 0 is a valid value. It is exact to within 2 atoms, on the safe side: the sub-atom carries `k_rem_num` / `f_rem_num` are not decoded. **Not counted:** holding rent (`rent_snap` against the rent index) and the social-loss share (`b_snap`); unrealized profit is deliberately not margin. A leg whose pending cannot be computed (older ADL epoch, stale leg) makes an order that adds risk `market_unreadable` rather than guess. The on-chain initial-margin check at trade time is the hard backstop.
+- **`expectedFeeBps`** is base fee plus, on a fee-channel market, the matcher's requested fee (the quoted spread, `ceil(|estExec - mark| x 1e4 / mark)`, the program's formula and the one the app's ticket signs). **`allInCostBps`** = base fee + that spread, once. Growth-market utilisation fees are not counted in either.
+- A `Custom(n)` is named, and mapped to an API code, only when the Percolator wrapper returned it (the innermost failing program in the logs, else the program of instruction `index`). Any other program's code is `simulation_failed` with the program and number, unnamed.
+- **Slippage** is measured from the mark. An order whose limit is tighter than the matcher's estimated fill is refused up front (`slippage_cap_exceeded` with `minSlippageBps`); the estimate is not applied to reducing orders (it does not model the close exemption). The estimate is at the read slot and can differ slightly from the fill.
+
 ### Rollback runbook
 
 The kill switch is an env var, and on Vercel an env change only applies to a new deployment, so it is a redeploy (minutes), not instant.

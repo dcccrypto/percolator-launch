@@ -17,7 +17,11 @@ export type ClientErrorCode = "network_error" | "bad_response" | "timeout";
 
 export interface OnchainError {
   code: number;
+  /** The wrapper's name for the code; null when another program (System, SPL Token, the matcher) returned it. */
   name: string | null;
+  /** The program that returned the code; null when it could not be determined. */
+  program?: string | null;
+  instructionIndex?: number;
 }
 
 export interface ErrorEnvelope {
@@ -116,15 +120,22 @@ export interface Quote {
   totalSpreadBps: number | null;
   withinLimit: boolean | null;
   matcher: Record<string, unknown>;
-  /** What the fill is expected to charge: base fee + the matcher's adaptive fee, bps of notional. null when nothing fills. */
+  /** The FEE charged for the fillable size, bps: base fee, plus on a fee-channel market (feeChargedInPrice) the matcher's requested fee (the quoted spread). Do not add it to totalSpreadBps; use allInCostBps. null when nothing fills. */
   expectedFeeBps: number | null;
   expectedFeeAtoms: string | null;
+  /** Whole cost against the mark: baseFeeBps + the quoted spread, each counted once. null when nothing fills. */
+  allInCostBps: number | null;
+  allInCostAtoms: string | null;
   /** The fee cap a build signs (the MOST a fill may charge), bps. Far above expectedFeeBps by design. */
   feeCapBps: number | null;
   baseFeeBps: number;
+  /** true: fee channel on (settles at the mark, the quoted spread is charged as a fee); false: the spread is paid in the price. */
   feeChargedInPrice: boolean;
   maxSizePerSide: { long: SideLimit | null; short: SideLimit | null };
+  /** |sizeQ| is above maxSizePerSide: the price and fee figures are then for fillableQ. */
   exceedsMaxSize: boolean;
+  /** The size the price and fee figures are for (|sizeQ|, or the per-side maximum). */
+  fillableQ: string;
   lotExp: number;
 }
 
@@ -309,6 +320,12 @@ export interface BuildSummary {
   /** What a fill is expected to charge, bps of notional, and in collateral atoms. */
   expectedFeeBps?: number | null;
   expectedFeeAtoms?: string | null;
+  /** Whole expected cost against the mark (base fee + the quoted spread, once), bps and atoms. */
+  allInCostBps?: number | null;
+  allInCostAtoms?: string | null;
+  /** The ADL-effective position before the order (what the caps use) and the leg's raw basis. */
+  positionBeforeQ?: string | null;
+  rawBasisQ?: string | null;
   reducing?: boolean;
   repairs?: string[];
   [k: string]: unknown;

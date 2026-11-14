@@ -40,12 +40,12 @@ Everything the API takes or returns is an integer in one of these units. Get the
 
 | What | Unit | Where |
 | --- | --- | --- |
-| Position size, `size` / `sizeQ` | engine **q**: 1,000,000 q = one **lot** of the base asset. A lot is `10^lotExp` tokens (`lotExp` is on every market; most have 0) | order `size`, quote `size`, `Position.sizeQ` |
+| Position size, `size` / `sizeQ` | engine **q**: 1,000,000 q = one **lot** of the base asset. A lot is `10^lotExp` tokens (`lotExp` is on every market and varies: the live Sim-USDC markets have 0, 3 and 4, so read it per market and size with `sizeFromUsd`) | order `size`, quote `size`, `Position.sizeQ` |
 | Price, `...PriceE6` | the price of **one lot**, times 1e6 | `effectivePriceE6`, `limitPriceE6` |
 | Collateral amount | **atoms** of the market's collateral token: tokens x 10^decimals. `Market.collateralMint` and `Market.collateralDecimals` say which token (the devnet Sim-USDC has 6 decimals) | deposit `amount`, `capital`, `equity`, `notionalAtoms` |
 | Notional | `notionalAtoms = |q| x effectivePriceE6 / 1e6`. For a 6-decimal USD stable, USD = atoms / 1e6 | `Quote.notionalAtoms`, `Position.notional` |
-| Fees and spreads | **bps** = 1/100 of a percent. `expectedFeeBps` is what a fill pays; `feeCapBps` is the most it may pay (what the transaction signs) | quote, build summary |
-| Types on the wire | q, E6 prices, atoms and config bps are decimal **strings** (use `BigInt`); computed bps, leverage and ages are JSON **numbers** | |
+| Fees and spreads | **bps** = 1/100 of a percent. `allInCostBps` is the whole expected cost of a fill against the mark; `expectedFeeBps` is the fee part of it; `feeCapBps` is the most the fee may be (what the transaction signs). See Fees and slippage below | quote, build summary |
+| Types on the wire | q, E6 prices, atoms and config bps are decimal **strings** (use `BigInt`); computed bps, leverage (4 decimals) and ages are JSON **numbers** | |
 
 **Worked example.** A market has `effectivePriceE6 = "980974"` (0.980974 per lot), 6 collateral decimals, `lotExp` 0. You want 25 USD of exposure:
 
@@ -59,9 +59,22 @@ Everything the API takes or returns is an integer in one of these units. Get the
 
 **Collateral the API can price.** The notional cap is in USD, so the API only builds risk-adding orders on markets whose collateral it knows to be a USD stable (the devnet Sim-USDC). Any other collateral is refused with `market_unsupported`; reducing orders and closes are never blocked by that.
 
+## Fees and slippage
+
+A fill costs the **base fee** (`baseFeeBps`, the market's configured fee) plus the **spread** the matcher quotes (`totalSpreadBps`: its base spread, an adaptive fee, inventory skew and size impact, all inside that one number).
+
+- **`allInCostBps` / `allInCostAtoms`** (quote and build summary) is that whole cost against the mark: `baseFeeBps` + the quoted spread, each counted once. Use this one to compare markets or size a trade.
+- **`expectedFeeBps` / `expectedFeeAtoms`** is only the *fee* the wrapper charges. When `feeChargedInPrice` is **true** (the market's fee channel is on) the trade settles at the mark and the wrapper charges the quoted spread as a fee on top of the base fee, so `expectedFeeBps` equals `allInCostBps` and the spread is **not** also paid in `estExecPriceE6`. When it is **false** the fee is the base fee alone and the spread is paid in the price. **Never add `expectedFeeBps` to `totalSpreadBps`**: on a fee-channel market that counts the spread twice.
+- **`feeCapBps`** is the most the fee may be, and is what the transaction signs. The program takes a fill only if the signed cap covers base + the matcher's request, and that request can move between your quote and landing, so the API signs the worst case: base fee + the matcher's worst-case request (the smaller of the market's `maxRequestedFeeBps`, the matcher's max total + 1, and 1023) + 5 bps, within the market's max trading fee. On the live devnet markets that is 30 + 100 + 5 = **135 bps**. You pay the fee in `expectedFeeBps`, not the cap.
+- **`maxFeeBps`** (on orders) is a ceiling on that cap. Below the floor above (135 on those markets) the order is refused with `fee_above_max`: the API cannot sign a cap the program would reject. It exists to stop you signing a cap *higher* than you accept, e.g. after a utilisation-fee raise (`fee_raise_required`).
+- **Slippage is measured from the mark** (`effectivePriceE6`), not from the expected fill. A `slippageBps` smaller than the quote's spread cannot fill: the order is refused before simulating with `slippage_cap_exceeded` and `details {limitPriceE6, estExecPriceE6, minSlippageBps}`; use at least `minSlippageBps`. (`quote` shows the same with `withinLimit: false`.) Reducing orders are not pre-checked.
+- A quote for a size beyond `maxSizePerSide` is priced on the **fillable** size (`fillableQ`), with `exceedsMaxSize: true`; a build refuses such an order (`size_cap_exceeded`).
+
 ## Getting devnet collateral
 
 The app has a faucet page at `/faucet` (on the app's own address, not the API's): connect a wallet and it mints 10,000 Sim-USDC to it once per wallet per day, plus a little SOL for fees. The token is the mint in `Market.collateralMint`. For SOL beyond that, use a devnet faucet or ask the team.
+
+**SOL for the first deposit.** Creating a trading account pays rent for the account in SOL, on top of the signatures and the priority fee, and the wallet must stay above the 0.00089088 SOL minimum of a system account. The rent depends on the deployed account layout (about 0.055 to 0.075 SOL), so a wallet with **about 0.1 SOL** is comfortable and **0.05 SOL is not enough**. The build checks this before simulating and answers `insufficient_funds` with `details {needLamports, haveLamports, rentLamports}` (lamports: 1 SOL = 1,000,000,000); fund the wallet to `needLamports` and retry. Orders, closes, deposits into an existing account and withdrawals need only the transaction fee.
 
 ## First trade from an empty wallet
 
@@ -79,7 +92,7 @@ Without step 4 an order answers `no_portfolio` with `details.next` pointing at `
 
 - Reads: `health`, `openapi`, `markets`, `market`, `funding`, `quote`, `depth`, `account`, `history`, `txStatus`.
 - Builders: `buildOrder`, `buildClose`, `buildDeposit`, `buildWithdraw`, `cancelOrder`. Each sets an `Idempotency-Key` for you, reuses it on every retry, and returns it as `idempotencyKey`. Pass `{ idempotencyKey }` to choose your own.
-- Errors: every failure is a `BotApiError` with `code`, `status`, `retryable`, `onchain` (`{ code, name }` for a failed simulation), `details`, `logs`, `requestId`, `retryAfterMs`. Branch on `code`, not on `message`.
+- Errors: every failure is a `BotApiError` with `code`, `status`, `retryable`, `onchain` (`{ code, name, program }` for a failed simulation; `name` is set only when the Percolator wrapper returned the code, so a System or SPL Token error comes back as `simulation_failed` with its program and number, unnamed), `details`, `logs`, `requestId`, `retryAfterMs`. Branch on `code`, not on `message`.
 - Retries: retryable codes, network errors and 429 are retried with exponential backoff and jitter (`maxRetries` 3, `retryBaseMs` 250, `maxDelayMs` 30000). A `Retry-After` is honored; one longer than `maxDelayMs` is thrown instead of waited out. **One call has a time budget** (`maxTotalMs`, default 15000): when the next wait would run past it, the last error is thrown instead. Set `maxTotalMs: 0` to turn the budget off.
 - `waitForTx(signature, { lastValidBlockHeight, until })` polls until `confirmed` (or `finalized` with `until: "finalized"`), `failed` or `expired`. It throws `timeout` if none happens in time.
 - `stream(markets, { signal })` is an async iterator of `market`, `heartbeat` and `error` events. The server ends each stream after about 55 s; the client reconnects with `Last-Event-ID` and also after drops and idle streams (30 s). Abort the signal to stop.
@@ -115,9 +128,9 @@ When a build comes back with `resubmitAfter: true`, the only transaction is a ma
 - **Matcher**: the program that prices a fill against the LP: spread, size impact, inventory skew and a fee.
 - **Crank**: a maintenance transaction that refreshes an account or the market's state. The API tells you when you need one (`resubmitAfter`).
 - **ADL** (auto-deleveraging): the market can scale a position down. `Position.sizeQ` is the size after ADL, `rawBasisQ` before; closes and reduce-only checks use `sizeQ`.
-- **Oracle modes**: `keeper` (a keeper pushes the price) or Pyth-pinned. `oracle.stale` is true when the last price is older than `staleBoundSecs`; orders that add risk are refused then.
+- **Oracle modes** (`Market.oracleMode`): `keeper` (a keeper service pushes the price), `pyth-pinned` (a pinned Pyth feed), `hyperp` (no external index feed: the price is the market's own mark) or `admin` (an authority pushes it). `oracle.stale` is true when the last price is older than `staleBoundSecs`; orders that add risk are refused then.
 - **Lot**: `10^lotExp` base tokens, the unit q and prices are in.
-- **Fee cap vs expected fee**: a fill pays `expectedFeeBps` (base fee plus the matcher's current fee). The transaction signs a higher `feeCapBps` so the fee can move a little before it lands; you are never charged the cap unless the market's fee really is that high.
+- **Fee cap vs expected fee vs all-in cost**: see Fees and slippage. A fill pays `expectedFeeBps`; its whole cost is `allInCostBps`; the transaction signs the higher `feeCapBps` so the fee can move before it lands, and you are never charged the cap unless the market's fee really is that high.
 
 ## Examples
 

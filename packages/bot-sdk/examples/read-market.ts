@@ -1,5 +1,5 @@
 /**
- * Read the first market and quote a buy of 1 unit. Reads only, no key needed.
+ * Read the first market and quote a buy of 1 lot (1,000,000 q). Reads only, no key needed.
  *   BOT_API_URL=http://localhost:3000 npx tsx examples/read-market.ts [marketAddress]
  */
 import { BotApiError, BotClient } from "../src/index";
@@ -13,7 +13,7 @@ try {
   if (!m) throw new Error("no markets");
   const { market } = await client.market(m);
   console.log(market.symbol ?? market.market, "price E6", market.effectivePriceE6, "oracle stale", market.oracle.stale);
-  // size is engine q: 1_000_000 q is 1 unit of the market's base asset
+  // size is engine q: 1_000_000 q is ONE LOT of the market's base asset (a lot is 10^lotExp tokens; lotExp varies by market)
   const { quote } = await client.quote(m, { size: 1_000_000n, slippageBps: 100 });
   console.log("est exec price E6", quote.estExecPriceE6, "impact bps", quote.priceImpactBps, "limit E6", quote.limitPriceE6);
 } catch (e) {
