@@ -27,7 +27,12 @@ const m = vi.hoisted(() => ({
   crankPlan: "none" as "none" | "bundle" | "separate-tx",
   refreshPeers: 0,
   heal: null as null | { outcome: string; instructions: TransactionInstruction[] },
+  slots: null as number | null,
 }));
+vi.mock("@/lib/v22/trade-refresh", async (orig) => {
+  const real = await orig<typeof import("@/lib/v22/trade-refresh")>();
+  return { ...real, marketAssetSlots: (d: Uint8Array) => m.slots ?? real.marketAssetSlots(d) };
+});
 
 vi.mock("@/lib/programAllowlist", () => ({
   assertKnownProgram: (p: PublicKey) => {
@@ -79,7 +84,10 @@ vi.mock("@/lib/tx", async (orig) => {
 });
 
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
-import { buildV22Trade, TradeBuildRefusal } from "@/lib/v22/trade-build";
+import { buildV22Trade, TradeBuildRefusal, __clearTradeBuildCacheForTest } from "@/lib/v22/trade-build";
+import { resolveLpTradeAccounts } from "@/lib/v22/trade-accounts";
+import { findOwnerPortfolio } from "@/lib/owner-portfolio";
+import * as layout from "@/lib/v22/layout";
 import { buildTradeIxs } from "@/lib/trade-ix";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { limitFromEngine } from "@/lib/close-limit";
@@ -113,11 +121,15 @@ beforeEach(() => {
   m.crankPlan = "none";
   m.refreshPeers = 0;
   m.heal = null;
+  m.slots = null;
+  __clearTradeBuildCacheForTest();
+  vi.mocked(resolveLpTradeAccounts).mockClear();
+  vi.mocked(findOwnerPortfolio).mockClear();
 });
 afterEach(() => __setDevnetV22ForTest(null));
 
 describe("buildV22Trade", () => {
-  it("returns one unsigned order whose TradeCpi is byte-identical to the app's builder for the same inputs", async () => {
+  it("TradeCpi wiring: same bytes/keys as buildTradeIxs with the engine-price limit, resolved fee and identities; owner is the only signer", async () => {
     const size = 3_000_000n;
     const r = await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size });
     expect(r.resubmitAfter).toBe(false);
@@ -126,6 +138,9 @@ describe("buildV22Trade", () => {
     expect(t.purpose).toBe("order");
     expect(t.transaction.feePayer?.equals(OWNER)).toBe(true);
     expect(t.transaction.signatures.every((s) => s.signature === null)).toBe(true);
+    const msg = t.transaction.compileMessage();
+    expect(msg.header.numRequiredSignatures).toBe(1);
+    expect(msg.accountKeys[0].equals(OWNER)).toBe(true);
 
     const engine = decodeMarketEngineView(new Uint8Array(MARKET_DATA));
     const limit = limitFromEngine(engine, size);
@@ -183,15 +198,58 @@ describe("buildV22Trade", () => {
     expect((await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }))).code).toBe("fee_unreadable");
   });
 
-  it("98: rebuilds once with the utilisation maximum, and refuses if that is above maxFeeBps", async () => {
+  it("98 without maxFeeBps: refused with the new cap (no silent raise)", async () => {
+    m.sims = [{ err: { InstructionError: [3, { Custom: 98 }] } }];
+    const e = await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }));
+    expect([e.code, e.status]).toEqual(["fee_raise_required", 409]);
+    expect(e.message).toContain("160");
+  });
+
+  it("98 with maxFeeBps: rebuilds once with the utilisation maximum, and refuses if that is above maxFeeBps", async () => {
     m.sims = [{ err: { InstructionError: [3, { Custom: 98 }] } }, { err: null }];
-    const r = await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n });
+    const r = await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n, maxFeeBps: 200n });
     expect(r.summary.feeBps).toBe("160");
     expect(r.summary.repairs).toEqual(["fee-cap-raised:160"]);
 
     m.sims = [{ err: { InstructionError: [3, { Custom: 98 }] } }];
     const e = await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n, maxFeeBps: 150n }));
     expect(e.code).toBe("fee_above_max");
+  });
+
+  it("an RPC failure on ANY re-simulation is a 503, never a returned tx", async () => {
+    m.sims = [{ err: { InstructionError: [3, { Custom: 98 }] } }, { err: null, rpcFailed: true }];
+    const e = await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n, maxFeeBps: 200n }));
+    expect([e.code, e.status]).toEqual(["rpc", 503]);
+    m.sims = [{ err: { InstructionError: [3, { Custom: 19 }] } }, { err: null, rpcFailed: true }];
+    m.heal = { outcome: "repaired", instructions: [{ programId: WRAPPER, keys: [], data: Buffer.from([89]) } as unknown as TransactionInstruction] };
+    expect((await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }))).code).toBe("rpc");
+  });
+
+  it("refuses a multi-asset market (not covered yet), nothing simulated", async () => {
+    m.slots = 2;
+    expect((await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }))).code).toBe("multi_asset_unsupported");
+    expect(m.simCalls).toHaveLength(0);
+  });
+
+  it("resolves the LP once per market within the TTL", async () => {
+    await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n });
+    await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: -1_000_000n });
+    expect(vi.mocked(resolveLpTradeAccounts)).toHaveBeenCalledTimes(1);
+  });
+
+  it("a caller-named portfolio skips the scan only when it is the owner's taker portfolio on this market", async () => {
+    const good = { owner: OWNER, marketGroupId: SLAB, matcherEnabled: false, legs: [] };
+    const spy = vi.spyOn(layout, "parsePortfolio");
+    spy.mockReturnValue(good as unknown as ReturnType<typeof layout.parsePortfolio>);
+    const r = await buildV22Trade(conn({ portfolio: Buffer.alloc(16) }), { owner: OWNER, slab: SLAB, size: 1_000_000n, portfolio: PORTFOLIO });
+    expect(r.summary.portfolio).toBe(PORTFOLIO.toBase58());
+    expect(vi.mocked(findOwnerPortfolio)).not.toHaveBeenCalled();
+    for (const bad of [{ ...good, owner: pk() }, { ...good, marketGroupId: pk() }, { ...good, matcherEnabled: true }]) {
+      spy.mockReturnValue(bad as unknown as ReturnType<typeof layout.parsePortfolio>);
+      const e = await refusal(buildV22Trade(conn({ portfolio: Buffer.alloc(16) }), { owner: OWNER, slab: SLAB, size: 1_000_000n, portfolio: PORTFOLIO }));
+      expect(e.code).toBe("bad_portfolio");
+    }
+    spy.mockRestore();
   });
 
   it("121: adds the stale peers' refresh cranks in front and re-simulates", async () => {
@@ -210,12 +268,14 @@ describe("buildV22Trade", () => {
     expect(e.logs).toEqual(["Program log: a", "Program log: b"]);
   });
 
-  it("self-heal repair is kept only when it simulates clean", async () => {
+  it("self-heal: a repair that simulates clean is returned; one that does not is a refusal", async () => {
     const extra = { programId: WRAPPER, keys: [], data: Buffer.from([89]) } as unknown as TransactionInstruction;
     m.sims = [{ err: { InstructionError: [3, { Custom: 19 }] } }, { err: null }];
     m.heal = { outcome: "repaired", instructions: [extra] };
     const r = await buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n });
     expect(r.summary.repairs).toEqual(["expire-bucket"]);
+    m.sims = [{ err: { InstructionError: [3, { Custom: 19 }] } }, { err: { InstructionError: [4, { Custom: 19 }] } }];
+    expect((await refusal(buildV22Trade(conn(), { owner: OWNER, slab: SLAB, size: 1_000_000n }))).code).toBe("simulation_failed");
   });
 
   it("a taker that needs a maintenance crank first gets ONLY the crank and resubmitAfter", async () => {

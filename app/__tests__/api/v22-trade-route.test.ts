@@ -4,8 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Keypair, Transaction, SystemProgram } from "@solana/web3.js";
 import { NextRequest } from "next/server";
 
-const m = vi.hoisted(() => ({ build: vi.fn(), allowed: true }));
-vi.mock("@/lib/upstash-rate-limit", () => ({ createUpstashRateLimiter: () => ({ check: async () => ({ allowed: m.allowed, remaining: 0, retryAfterSecs: 30 }) }) }));
+const m = vi.hoisted(() => ({ build: vi.fn(), allowed: true, globalAllowed: true }));
+vi.mock("@/lib/upstash-rate-limit", () => ({
+  createUpstashRateLimiter: (o: { prefix: string }) => ({
+    check: async () => ({ allowed: o.prefix.endsWith("-all") ? m.globalAllowed : m.allowed, remaining: 0, retryAfterSecs: 30 }),
+  }),
+}));
 vi.mock("@/lib/server-rpc", () => ({ getServerConnection: () => ({}) }));
 vi.mock("@/lib/v22/trade-build", async (orig) => ({ ...(await orig<typeof import("@/lib/v22/trade-build")>()), buildV22Trade: m.build }));
 
@@ -22,6 +26,7 @@ beforeEach(() => {
   __setDevnetV22ForTest(true);
   m.build.mockReset();
   m.allowed = true;
+  m.globalAllowed = true;
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -30,10 +35,11 @@ afterEach(() => {
 
 describe("parseTradeBody", () => {
   it("accepts a minimal body and the optional fields", () => {
-    const r = parseTradeBody({ owner, market, size: "-2500000", slippageBps: 50, limitPriceE6: "1234", maxFeeBps: "200" });
+    const r = parseTradeBody({ owner, market, size: "-2500000", slippageBps: 50, limitPriceE6: "1234", maxFeeBps: "200", portfolio: owner });
     expect(typeof r).toBe("object");
     const o = r as Exclude<typeof r, string>;
     expect([o.size, o.slippageBps, o.limitPriceE6, o.maxFeeBps]).toEqual([-2_500_000n, 50n, 1234n, 200n]);
+    expect(o.portfolio?.toBase58()).toBe(owner);
   });
   it.each([
     [null, "object"],
@@ -46,6 +52,13 @@ describe("parseTradeBody", () => {
     [{ owner, market, size: "1", limitPriceE6: "0" }, "limitPriceE6"],
     [{ owner, market, size: "1", limitPriceE6: "-5" }, "limitPriceE6"],
     [{ owner, market, size: "1", maxFeeBps: "x" }, "maxFeeBps"],
+    // A JSON number above 2^53 has already lost precision: size and limit must be strings, small fields safe integers.
+    [{ owner, market, size: 9007199254740993 }, "size"],
+    [{ owner, market, size: 5 }, "size"],
+    [{ owner, market, size: "1", limitPriceE6: 1234 }, "limitPriceE6"],
+    [{ owner, market, size: "1", maxFeeBps: 1e20 }, "maxFeeBps"],
+    [{ owner, market, size: "1", slippageBps: 1.5 }, "slippageBps"],
+    [{ owner, market, size: "1", portfolio: "nope" }, "portfolio"],
   ])("refuses %j (%s)", (body, word) => {
     const r = parseTradeBody(body);
     expect(typeof r).toBe("string");
@@ -77,6 +90,10 @@ describe("route", () => {
     const r = await POST(req({ owner, market, size: "1" }));
     expect(r.status).toBe(429);
     expect(r.headers.get("Retry-After")).toBe("30");
+    m.allowed = true;
+    m.globalAllowed = false;
+    expect((await POST(req({ owner, market, size: "1" }))).status).toBe(429);
+    expect(m.build).not.toHaveBeenCalled();
   });
 
   it("200 returns unsigned base64 transactions that deserialize with the owner as fee payer", async () => {

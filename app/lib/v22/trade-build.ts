@@ -68,8 +68,14 @@ export interface TradeBuildRequest {
   slippageBps?: bigint;
   /** Explicit worst price (E6, per lot as the engine prices). 0 is refused: it disables the on-chain check. */
   limitPriceE6?: bigint;
-  /** The most fee (bps) the caller agrees to sign. Default: whatever the market currently requires. */
+  /**
+   * The most fee (bps) the caller agrees to sign. Without it the fee the market requires now is signed, and a 98 (that fee
+   * no longer covers the utilisation fee) is refused with the new cap instead of raised silently: an API caller is a
+   * confirmed order (the hook's sendWithConfirmedFeeCap), never the silent close retry.
+   */
   maxFeeBps?: bigint;
+  /** The owner's portfolio on this market, when the caller knows it: checked (program, owner, market) and the scan is skipped. */
+  portfolio?: PublicKey;
 }
 
 export interface BuiltTx {
@@ -111,6 +117,44 @@ export class TradeBuildRefusal extends Error {
 }
 
 const ZERO = new PublicKey(new Uint8Array(32));
+
+/**
+ * The market's LP side, cached per (program, market) like the hook's 60 s trade-account cache: it is a market-wide
+ * getProgramAccounts scan and only changes on SetMatcherConfig. A failed build does not evict it (the next scan is
+ * at most 60 s away); a stale entry costs one refused simulation, never a wrong counterparty, because the canonical
+ * matcher check ran when it was cached and the program checks the binding on every trade.
+ */
+const LP_TTL_MS = 60_000;
+const lpCache = new Map<string, { at: number; value: Awaited<ReturnType<typeof resolveLpTradeAccounts>> }>();
+const lpInflight = new Map<string, Promise<Awaited<ReturnType<typeof resolveLpTradeAccounts>>>>();
+async function cachedLp(connection: Connection, programId: PublicKey, market: PublicKey, now = Date.now()) {
+  const k = `${programId.toBase58()}|${market.toBase58()}`;
+  const hit = lpCache.get(k);
+  if (hit && now - hit.at < LP_TTL_MS) return hit.value;
+  const running = lpInflight.get(k);
+  if (running) return running;
+  const p = resolveLpTradeAccounts(connection, programId, market)
+    .then((value) => {
+      lpCache.set(k, { at: Date.now(), value });
+      return value;
+    })
+    .finally(() => lpInflight.delete(k));
+  lpInflight.set(k, p);
+  return p;
+}
+/** Test seam. */
+export function __clearTradeBuildCacheForTest(): void {
+  lpCache.clear();
+  lpInflight.clear();
+}
+
+type Sim = Awaited<ReturnType<typeof simulateForGate>>;
+/** Every simulation gates what is returned: an RPC failure is never read as "clean" (review finding 2). */
+async function gate(connection: Connection, owner: PublicKey, ixs: TransactionInstruction[]): Promise<Sim> {
+  const s = await simulateForGate(connection, owner, ixs);
+  if (s.rpcFailed) throw new TradeBuildRefusal("rpc", "simulation RPC failed, try again", 503);
+  return s;
+}
 
 function wrap(ixs: TransactionInstruction[], cuLimit: number, priorityFee: number, owner: PublicKey, blockhash: string): Transaction {
   const tx = new Transaction();
@@ -189,12 +233,13 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   }
 
   // ── accounts ──────────────────────────────────────────────────────────────
-  const lp = await resolveLpTradeAccounts(connection, programId, slabPk).catch((e) => {
-    throw new TradeBuildRefusal("no_lp", e instanceof Error ? e.message : String(e), 503);
+  const lp = await cachedLp(connection, programId, slabPk).catch((e) => {
+    // Fixed text: the cause carries upstream RPC wording (review finding 5).
+    throw new TradeBuildRefusal("no_lp", "this market has no usable LP right now", 503, [], e);
   });
-  const accountA = await findOwnerPortfolio(connection, programId, slabPk, owner).catch(() => {
+  const accountA = req.portfolio ?? (await findOwnerPortfolio(connection, programId, slabPk, owner).catch(() => {
     throw new TradeBuildRefusal("rpc", "portfolio lookup failed, try again", 503);
-  });
+  }));
   if (!accountA) throw new TradeBuildRefusal("no_portfolio", "owner has no portfolio on this market; deposit in the app first", 409);
 
   const beforeFull = readBeforeTradeFull(connection, accountA, slabPk).catch(() => null);
@@ -204,6 +249,19 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     fetchAssetMarketId(connection, slabPk, 0),
     connection.getAccountInfo(accountA, "confirmed"),
   ]);
+
+  if (req.portfolio) {
+    // A caller-named portfolio must be the owner's own taker portfolio on THIS market (same fields the scan selects on).
+    let pf: ReturnType<typeof parsePortfolio> | null = null;
+    try {
+      pf = portInfo && portInfo.owner.equals(programId) ? parsePortfolio(new Uint8Array(portInfo.data)) : null;
+    } catch {
+      pf = null;
+    }
+    if (!pf || !pf.owner.equals(owner) || !pf.marketGroupId.equals(slabPk) || pf.matcherEnabled) {
+      throw new TradeBuildRefusal("bad_portfolio", "portfolio is not this owner's taker portfolio on this market", 400);
+    }
+  }
 
   let feeBps = await fetchTradeFeeBps(connection, slabPk, lp.matcherCtx, { fallback: cfg.tradeFeeBps, strict: true }).catch(() => {
     throw new TradeBuildRefusal("fee_unreadable", "market fee terms unreadable; nothing built", 503);
@@ -256,7 +314,7 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     const keys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [owner, slabPk, accountA]);
     keys.push(...oracleTail);
     const crankIx = buildIx({ programId, keys, data: encodePermissionlessCrank({ nowSlot: 0n, observations: defaultCrankObservations(0) }) });
-    const plan = await planTakerCrank((ixs) => simulateForGate(connection, owner, ixs), tradeIxs, crankIx, 2, reducing);
+    const plan = await planTakerCrank((ixs) => gate(connection, owner, ixs), tradeIxs, crankIx, 2, reducing);
     if (plan === "bundle") prefix.push(crankIx);
     else if (plan === "separate-tx") crankTxIxs.push(crankIx);
   }
@@ -279,7 +337,7 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
 
   if (crankTxIxs.length > 0) {
     // Simulated clean by planTakerCrank just now; sized like the hook's crank send (cap 200k).
-    const g = await simulateForGate(connection, owner, crankTxIxs);
+    const g = await gate(connection, owner, crankTxIxs);
     if (g.err) throw new TradeBuildRefusal("simulation_failed", new SimulationRefusal(g.err, g.logs, g.simulated).message, 422, g.logs.slice(-12));
     const lim = signedComputeUnitLimit(g.consumed, { cap: 200_000 });
     return {
@@ -294,18 +352,21 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   const body = (t: TransactionInstruction[]) => [...(memo ? [memo] : []), ...prefix, ...t];
   let instructions = body(tradeIxs);
 
-  let sim = await simulateForGate(connection, owner, instructions);
-  if (sim.rpcFailed) throw new TradeBuildRefusal("rpc", "simulation RPC failed, try again", 503);
+  let sim = await gate(connection, owner, instructions);
 
   // 98: the cap does not cover the utilisation fee. Rebuild ONCE with the maximum (the hook's U-2), within maxFeeBps.
   if (sim.err && isUtilFeeNotCovered(new SimulationRefusal(sim.err, sim.logs, sim.simulated))) {
     const raised = await fetchTradeFeeBps(connection, slabPk, lp.matcherCtx, { fallback: feeBps, withUtilMax: true });
+    if (req.maxFeeBps === undefined) {
+      // No consent to a higher cap: say what it would take (review finding 1).
+      throw new TradeBuildRefusal("fee_raise_required", `the market now needs a ${raised ?? "higher"} bps fee cap; ask again with maxFeeBps to accept it`, 409);
+    }
     checkFee(raised);
     feeBps = raised;
     tradeIxs = buildTradeIxs({ ...tradeParams, feeBps: raised });
     instructions = body(tradeIxs);
     repairs.push(`fee-cap-raised:${raised}`);
-    sim = await simulateForGate(connection, owner, instructions);
+    sim = await gate(connection, owner, instructions);
   }
 
   // 121 (EngineLossStale): the stale positioned peers' refresh cranks in the same tx (the hook's single-asset path).
@@ -316,7 +377,7 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     if (plan.cranks.some((c) => c.role === "peer")) {
       instructions = plan.instructions;
       repairs.push(`peer-refresh:${plan.cranks.filter((c) => c.role === "peer").length}`);
-      sim = await simulateForGate(connection, owner, instructions);
+      sim = await gate(connection, owner, instructions);
     }
   }
 
@@ -329,7 +390,18 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     if (heal.outcome === "repaired" && finalTxWireSize(heal.instructions, owner) <= PACKET_DATA_SIZE) {
       instructions = heal.instructions;
       repairs.push(...heal.repairs.map((r) => String((r as { kind?: string }).kind ?? "repair")));
-      sim = await simulateForGate(connection, owner, instructions);
+      sim = await gate(connection, owner, instructions);
+    }
+  }
+
+  // Too large for one packet (peer cranks + memo): the memo goes first, as in the hook; still too large is a refusal.
+  if (!sim.err && finalTxWireSize(instructions, owner) > PACKET_DATA_SIZE) {
+    if (memo && instructions.includes(memo)) {
+      instructions = instructions.filter((ix) => ix !== memo);
+      sim = await gate(connection, owner, instructions);
+    }
+    if (!sim.err && finalTxWireSize(instructions, owner) > PACKET_DATA_SIZE) {
+      throw new TradeBuildRefusal("too_large", "the order with its required repairs does not fit one transaction; try again shortly", 503);
     }
   }
 
