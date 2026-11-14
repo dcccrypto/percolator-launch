@@ -29,6 +29,7 @@ import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
 import { parseBlocklist, isIpBlocked } from "@/lib/ip-blocklist";
 import { gateDecision, LOCKED_PATH, SESSION_COOKIE } from "@/lib/playground-gate";
 import { trustedProxyDepth } from "@/lib/trusted-proxy-depth";
+import { botApiFlagOn } from "@/lib/bot-api/config";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
@@ -536,8 +537,11 @@ export async function middleware(request: NextRequest) {
     }
   }
   const isApi = request.nextUrl.pathname.startsWith("/api/");
+  // The bot API (BOT_API_ENABLED=1 only) applies its own weighted per-key / per-IP / global limits
+  // (lib/bot-api/limits.ts); the flat 120/min per IP here would cap a keyed bot below its published budget.
+  const botApi = botApiFlagOn() && /^\/api\/v1(?:\/|$)/.test(request.nextUrl.pathname);
 
-  if (isApi) {
+  if (isApi && !botApi) {
     const isRpc = request.nextUrl.pathname === "/api/rpc";
     const { allowed, remaining, reset } = await getRateLimit(ip, isRpc);
     const limit = isRpc ? RPC_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
