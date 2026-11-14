@@ -111,7 +111,7 @@ describe("auth and scopes", () => {
     expect((await r.json()).error.code).toBe("forbidden_scope");
     const bad = await echo(req("/api/v1/echo", { headers: { "x-api-key": key.slice(0, -1) + (key.endsWith("A") ? "B" : "A") } }));
     expect(bad.status).toBe(401);
-    expect(logs.join("\n")).not.toContain(key.split("_")[2]);
+    expect(logs.join("\n")).not.toContain(key.slice(key.indexOf("_", 4) + 1));
   });
   it("locks an IP out after 20 bad keys", async () => {
     for (let i = 0; i < 20; i++) await echo(req("/api/v1/echo", { headers: { "x-api-key": "pbk_AAAAAAAAAAAA_" + "x".repeat(43) } }));

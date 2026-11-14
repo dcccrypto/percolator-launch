@@ -93,9 +93,26 @@ const REFUSAL_TO_API: Record<string, ErrorCode> = {
   too_large: "too_large",
 };
 
+/**
+ * no_portfolio: the wallet has no trading account on this market. The API can create one: POST /v1/deposits with `newPortfolio`
+ * (a fresh keypair's public key, which co-signs the returned transaction).
+ */
+export function noTradingAccount(): ApiError {
+  return new ApiError(
+    "no_portfolio",
+    "this wallet has no trading account on this market. Create one with POST /api/v1/deposits {owner, market, amount, newPortfolio: <public key of a fresh keypair>} and co-sign the returned transaction with that keypair, then retry",
+    { details: { next: "POST /api/v1/deposits", needs: "newPortfolio" } },
+  );
+}
+
 /** Builder refusal -> API error. A failed simulation keeps its decoded on-chain code and the last log lines. */
 export function refusalToApi(e: TradeBuildRefusal): ApiError {
   if (e.code === "simulation_failed") return simulationError(customCodeOf(e.message), e.logs);
+  // The shared builder's texts point at the app ("deposit in the app first") and say "portfolio"; the API says "trading
+  // account" and names its own way to create one. /api/v22/trade keeps its text.
+  if (e.code === "no_portfolio") return noTradingAccount();
+  if (e.code === "bad_portfolio") return new ApiError("bad_portfolio", "the named portfolio is not this wallet's trading account on this market");
+  if (e.code === "rpc") return new ApiError("rpc_unavailable");
   return new ApiError(REFUSAL_TO_API[e.code] ?? "internal", e.message, e.logs.length > 0 ? { logs: e.logs } : {});
 }
 

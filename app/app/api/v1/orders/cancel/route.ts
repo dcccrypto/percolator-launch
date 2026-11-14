@@ -17,6 +17,7 @@ export const POST = botRoute({ route: "/v1/orders/cancel", scope: "build", weigh
   if (typeof k !== "string" || !validIdempotencyKey(k)) throw new ApiError("bad_request", "idempotencyKey must be the Idempotency-Key the build was sent with");
   const r = await cancelIdempotent(principal.id, k);
   if (!r.found) throw new ApiError("not_found", "no build with this Idempotency-Key in the last 120 s");
+  if (r.inProgress) throw new ApiError("idempotency_in_progress", "the build for this Idempotency-Key is still running; cancel again when it has answered", { headers: { "Retry-After": "1" } });
   return {
     body: {
       idempotencyKey: k,

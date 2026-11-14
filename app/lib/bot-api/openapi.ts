@@ -6,12 +6,12 @@
  */
 import { API_VERSION, MAX_BODY_BYTES } from "./config";
 import { ERROR_CATALOG, type ErrorCode } from "./errors";
-import { TIER_BUDGET, GLOBAL_BUILD_BUDGET, WINDOW_SEC, AUTH_FAIL_LIMIT } from "./limits";
+import { TIER_BUDGET, GLOBAL_BUILD_BUDGET, GLOBAL_READ_BUDGET, PRINCIPAL_BUILD_CAP, WINDOW_SEC, AUTH_FAIL_LIMIT } from "./limits";
 import { TTL_SEC } from "./idempotency";
 import { DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS, DEFAULT_MAX_NOTIONAL_USD, DEFAULT_MAX_LEVERAGE } from "./builders/caps";
 import { DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT } from "./reads/history";
 import { DEPTH_LADDER_USD } from "./reads/quote";
-import { HEARTBEAT_MS, MAX_STREAM_MS, SNAPSHOT_MS } from "./stream";
+import { HEARTBEAT_MS, MAX_OPEN_STREAMS, MAX_STREAM_MS, SNAPSHOT_MS } from "./stream";
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 type Obj = { [k: string]: Json };
@@ -28,6 +28,10 @@ const strict = (properties: Obj, required: string[]): Obj => obj(properties, req
 /** Big numbers (amounts, engine q, E6 prices) travel as decimal strings: a JSON number loses precision above 2^53. */
 const big = (description?: string): Obj => str(description, { pattern: "^-?[0-9]+$" });
 const bigOrNull = (description?: string): Obj => nullable(big(description));
+/** A non-negative decimal string (an order size, an amount): no sign. */
+const uint = (description?: string): Obj => str(description, { pattern: "^[0-9]+$" });
+/** Basis points computed by the API (impact, spread, fees) are small bounded integers and travel as JSON numbers. */
+const bps = (description?: string): Obj => nullable(int(description));
 
 const errorStatuses = [...new Set(Object.values(ERROR_CATALOG).map((e) => e.status))].sort((a, b) => a - b);
 const codesFor = (status: number): string[] => (Object.keys(ERROR_CATALOG) as ErrorCode[]).filter((c) => ERROR_CATALOG[c].status === status);
@@ -46,7 +50,7 @@ function schemas(): Obj {
             message: str("Human text. Do not parse it."),
             retryable: bool("true: the same request may succeed later. false: change the request or the state first."),
             onchain: obj({ code: int(), name: nullable(str()) }, ["code", "name"], { description: "Set when a simulation failed with a wrapper Custom(n) error." }),
-            details: obj({}, [], { additionalProperties: true, description: "Extra numbers for some caps, for example notionalUsd and capUsd." }),
+            details: obj({}, [], { additionalProperties: true, description: "Extra data for some codes: notionalUsd and capUsd, maxQ and side for size_cap_exceeded, ageSecs for market_stale, `next` (the endpoint to call) for no_portfolio." }),
             logs: arr(str()),
           },
           ["code", "message", "retryable"],
@@ -63,7 +67,7 @@ function schemas(): Obj {
         ageSecs: nullable(num()),
         staleBoundSecs: num(),
         staleBoundSource: { type: "string", enum: ["market", "default"] },
-        stale: bool("Builders refuse with market_stale while this is true"),
+        stale: bool("true when ageSecs is above staleBoundSecs (or the oracle never pushed). Orders that ADD risk are refused with market_stale while this is true; reducing orders and closes are never blocked by it."),
         markEwmaE6: big(),
       },
       ["mode", "stale", "staleBoundSecs"],
@@ -76,16 +80,18 @@ function schemas(): Obj {
         name: nullable(str()),
         lotExp: int(),
         assets: int(),
+        collateralMint: { ...pubkey, description: "The token the market holds as collateral" },
+        collateralDecimals: nullable(int("Decimals of that token. null = a mint the API cannot value in USD: orders that add risk are refused with market_unsupported (see Units)")),
         oracleMode: str(),
         effectivePriceE6: big("Price margin and fills use, 6 decimals"),
         targetPriceE6: big(),
         markEwmaE6: big(),
         oracle: ref("OracleFreshness"),
-        feeBps: big(),
+        feeBps: big("The market's configured BASE trade fee in bps. A fill's expected fee is on the quote (expectedFeeBps); the cap a build signs is feeCapBps"),
         maxLeverage: nullable(num()),
         openInterest: obj({ longQ: big(), shortQ: big() }, ["longQ", "shortQ"]),
       },
-      ["market", "programId", "effectivePriceE6", "oracle", "feeBps", "openInterest"],
+      ["market", "programId", "collateralMint", "collateralDecimals", "effectivePriceE6", "oracle", "feeBps", "openInterest"],
     ),
     MarketDetail: {
       allOf: [
@@ -141,25 +147,28 @@ function schemas(): Obj {
     Quote: obj(
       {
         market: pubkey,
-        side: { type: "string", enum: ["buy", "sell"] },
-        sizeQ: big(),
-        notionalAtoms: big(),
+        side: { type: "string", enum: ["buy", "sell"], description: "Taken from the SIGN of the quote's size query. POST /v1/orders takes side and a positive size instead." },
+        sizeQ: big("Signed: above 0 buy, below 0 sell (an order's size is unsigned and the side sets the sign)"),
+        notionalAtoms: big("|sizeQ| x effectivePriceE6 / 1e6, in collateral atoms"),
         effectivePriceE6: big(),
+        oracle: obj({ stale: bool(), ageSecs: nullable(num()), staleBoundSecs: num() }, ["stale", "ageSecs", "staleBoundSecs"], { description: "Oracle freshness, the same rule as Market.oracle. A stale market still quotes; orders that add risk are refused." }),
         slippageBps: int(),
         limitPriceE6: big("The limit a build with this slippageBps would sign"),
-        estExecPriceE6: bigOrNull("null when the matcher is unquoted"),
-        priceImpactBps: nullable(num()),
-        totalSpreadBps: nullable(num()),
+        estExecPriceE6: bigOrNull("null when the matcher is unquoted or fills nothing"),
+        priceImpactBps: bps("null when nothing fills"),
+        totalSpreadBps: bps("null when nothing fills"),
         withinLimit: nullable(bool()),
-        matcher: obj({ kind: str(), fillQ: big(), clipped: bool(), clippedByTotal: bool(), baseSpreadBps: nullable(num()), maxTotalBps: nullable(num()), adaptiveFeeBps: nullable(num()), skewBps: nullable(num()), feeCold: nullable(bool()) }, [], { additionalProperties: true }),
-        feeBps: bigOrNull(),
-        baseFeeBps: big(),
+        matcher: obj({ kind: str(), fillQ: big(), clipped: bool(), clippedByTotal: bool(), baseSpreadBps: nullable(num()), maxTotalBps: nullable(num()), adaptiveFeeBps: bps(), skewBps: bps(), feeCold: nullable(bool()) }, [], { additionalProperties: true }),
+        expectedFeeBps: bps("What the fill is expected to be charged: the market's base fee plus the matcher's adaptive fee for this size, bps of notional. Growth-market utilisation fees are not included. null when nothing fills."),
+        expectedFeeAtoms: bigOrNull("expectedFeeBps x notionalAtoms, rounded up, collateral atoms"),
+        feeCapBps: bps("The fee cap a build signs: base fee + the matcher's worst case + a margin. It is the MOST a fill may charge, not the fee you pay, so it sits well above expectedFeeBps. null when unreadable."),
+        baseFeeBps: int("The market's configured base fee (Market.feeBps, as a number here)"),
         feeChargedInPrice: bool(),
         maxSizePerSide: obj({ long: lot, short: lot }),
-        exceedsMaxSize: bool(),
+        exceedsMaxSize: bool("true when |sizeQ| is above maxSizePerSide for its side. A build refuses such an order with size_cap_exceeded (opens only)."),
         lotExp: int(),
       },
-      ["market", "side", "sizeQ", "effectivePriceE6", "limitPriceE6", "estExecPriceE6"],
+      ["market", "side", "sizeQ", "effectivePriceE6", "limitPriceE6", "estExecPriceE6", "oracle"],
     ),
     QuoteResponse: obj({ slot: int(), observedAt: str(undefined, { format: "date-time" }), quote: ref("Quote") }, ["slot", "observedAt", "quote"]),
     DepthRow: obj({ notionalUsd: num(), sizeQ: big(), fillQ: bigOrNull(), filledFully: bool(), execPriceE6: bigOrNull(), spreadBps: nullable(num()), impactBps: nullable(num()) }),
@@ -175,8 +184,9 @@ function schemas(): Obj {
           asks: arr(ref("DepthRow")),
           bids: arr(ref("DepthRow")),
           maxSizePerSide: obj({ long: lot, short: lot }),
-          feeBps: bigOrNull(),
-          baseFeeBps: big(),
+          oracle: obj({ stale: bool(), ageSecs: nullable(num()), staleBoundSecs: num() }, ["stale", "ageSecs", "staleBoundSecs"]),
+          feeCapBps: bps("See Quote.feeCapBps"),
+          baseFeeBps: int(),
           lotExp: int(),
         }),
       },
@@ -193,9 +203,9 @@ function schemas(): Obj {
         entryIsEstimate: nullable(bool()),
         markPriceE6: bigOrNull(),
         unrealizedPnl: bigOrNull(),
-        liqPriceE6: bigOrNull(),
-        notional: bigOrNull(),
-        leverage: nullable(num()),
+        liqPriceE6: bigOrNull("Where the engine liquidates: the larger of the percentage maintenance requirement and the market's minimum maintenance requirement (minNonzeroMaintenanceMarginReq). Funding, fees not yet settled and the target-lag penalty are not included, so the real price can be closer."),
+        notional: bigOrNull("|sizeQ| x markPriceE6 / 1e6, collateral atoms"),
+        leverage: nullable(num("notional / leverageEquity of the portfolio: the SAME equity the order caps use, so a bot that stays under this number is not refused for leverage")),
         marginCushion: nullable(num()),
         severity: nullable(str()),
         adlRemainingBps: nullable(num()),
@@ -214,8 +224,9 @@ function schemas(): Obj {
         capital: big(),
         pnl: big(),
         feeCredits: big(),
-        equity: big(),
-        certifiedEquity: bigOrNull(),
+        leverageEquity: big("capital + min(0, value-side PnL) + min(0, feeCredits): capital less the open position's unrealized loss and negative fee credits. Gains are not counted. The denominator of leverage and of the order leverage cap."),
+        equity: big("Account value at the mark: capital + value-side PnL (a flat account: capital + settled pnl)"),
+        certifiedEquity: bigOrNull("The equity recorded in the account's last health certificate, as of the engine's last crank of that account. It lags: it can differ a lot from equity (equity is at the current mark), and it is 0 or stale on an account nobody has cranked. Use equity or leverageEquity, not this, for margin decisions."),
         margin: obj({ initialMarginBps: bigOrNull(), maintenanceMarginBps: bigOrNull(), maxLeverage: nullable(num()) }),
         positions: arr(ref("Position")),
       },
@@ -255,13 +266,13 @@ function schemas(): Obj {
         owner: { ...pubkey, description: "The wallet that will sign. Any public wallet works; only its signature makes the tx land." },
         market: pubkey,
         side: { type: "string", enum: ["buy", "sell"] },
-        size: big("Engine q, a positive decimal string. The side sets the sign."),
+        size: uint("Engine q, a positive decimal string, no sign (a negative size is refused). `side` sets the direction; this is NOT the signed `size` the quote takes."),
         reduceOnly: bool("Refuse unless the order shrinks the position without flipping it"),
-        slippageBps: int(`Default ${DEFAULT_SLIPPAGE_BPS}, max ${MAX_SLIPPAGE_BPS}. Not with limitPriceE6.`, { minimum: 0, maximum: MAX_SLIPPAGE_BPS }),
-        limitPriceE6: big("Explicit limit; may not be more than the max slippage worse than the effective price. Not with slippageBps."),
-        maxFeeBps: int("Needed to accept a fee cap above the market's current one", { minimum: 0, maximum: 10000 }),
-        maxNotionalUsd: { type: "number", exclusiveMinimum: 0, maximum: 1e12, description: `Can only lower the server cap (default ${DEFAULT_MAX_NOTIONAL_USD})` },
-        maxLeverage: { type: "number", exclusiveMinimum: 0, maximum: 1000, description: `Can only lower the server cap (default ${DEFAULT_MAX_LEVERAGE}, or the market maximum if lower)` },
+        slippageBps: int(`Default ${DEFAULT_SLIPPAGE_BPS}, min 1, max ${MAX_SLIPPAGE_BPS}. Not with limitPriceE6. 0 is refused (a limit at the effective price cannot fill).`, { minimum: 1, maximum: MAX_SLIPPAGE_BPS }),
+        limitPriceE6: uint("Explicit limit, positive; may not be more than the max slippage worse than the effective price. Not with slippageBps."),
+        maxFeeBps: int("The highest fee CAP (feeCapBps, bps) you accept. A build whose cap would be higher is refused with fee_above_max. Without it the cap the market requires now is signed (it is shown as summary.feeCapBps, and is well above the expected fee), and a later utilisation-fee raise needs it (fee_raise_required).", { minimum: 0, maximum: 10000 }),
+        maxNotionalUsd: { type: "number", exclusiveMinimum: 0, maximum: 1e12, description: `USD notional of THIS order, in the market's collateral (|size| x effective price). Per order, not per position: the leverage cap is the exposure limit. Can only lower the server cap (default ${DEFAULT_MAX_NOTIONAL_USD}). Fractions are honoured.` },
+        maxLeverage: { type: "number", exclusiveMinimum: 0, maximum: 1000, description: `Leverage AFTER the order: |position after| x price / leverageEquity (capital less unrealized loss, see Portfolio.leverageEquity). Can only lower the server cap (default ${DEFAULT_MAX_LEVERAGE}, or the market maximum if lower).` },
         portfolio: pubkey,
         expiresAfter: int("Unix ms. A request older than this is refused with request_expired.", { minimum: 1 }),
       },
@@ -271,8 +282,8 @@ function schemas(): Obj {
       {
         owner: pubkey,
         market: pubkey,
-        size: big("Part of the position to close; default the whole position, never more"),
-        slippageBps: int(undefined, { minimum: 0, maximum: MAX_SLIPPAGE_BPS }),
+        size: uint("Part of the position to close, positive; default the whole position, never more. Measured on the ADL-effective position (Position.sizeQ), not rawBasisQ."),
+        slippageBps: int(undefined, { minimum: 1, maximum: MAX_SLIPPAGE_BPS }),
         maxFeeBps: int(undefined, { minimum: 0, maximum: 10000 }),
         portfolio: pubkey,
         expiresAfter: int(undefined, { minimum: 1 }),
@@ -283,7 +294,7 @@ function schemas(): Obj {
       {
         owner: pubkey,
         market: pubkey,
-        amount: big("Collateral atoms, positive"),
+        amount: uint("Collateral atoms, positive (see Units for the token and its decimals)"),
         portfolio: { ...pubkey, description: "An existing trading account. Not with newPortfolio." },
         newPortfolio: { ...pubkey, description: "Public key of a fresh keypair YOU generate, when the wallet has no account yet. That keypair must co-sign the returned tx." },
         expiresAfter: int(undefined, { minimum: 1 }),
@@ -291,7 +302,7 @@ function schemas(): Obj {
       ["owner", "market", "amount"],
     ),
     WithdrawRequest: strict(
-      { owner: pubkey, market: pubkey, amount: big("Collateral atoms, positive, at most the account's capital; no open position"), portfolio: pubkey, expiresAfter: int(undefined, { minimum: 1 }) },
+      { owner: pubkey, market: pubkey, amount: uint("Collateral atoms, positive, at most the account's capital; no open position"), portfolio: pubkey, expiresAfter: int(undefined, { minimum: 1 }) },
       ["owner", "market", "amount"],
     ),
     CancelRequest: strict({ idempotencyKey: str("The Idempotency-Key the build was sent with", { pattern: "^[A-Za-z0-9_.:-]{8,128}$" }) }, ["idempotencyKey"]),
@@ -312,7 +323,24 @@ function schemas(): Obj {
         blockhash: str(),
         lastValidBlockHeight: int(),
         resubmitAfter: bool("true: the only tx is a maintenance crank; send it, then build again"),
-        summary: obj({}, [], { additionalProperties: true }),
+        summary: obj(
+          {
+            market: pubkey,
+            portfolio: pubkey,
+            side: { type: "string", enum: ["buy", "sell"] },
+            size: big("Signed engine q"),
+            limitPriceE6: big(),
+            effectivePriceE6: big(),
+            feeCapBps: bps("The fee cap the transaction signs (the most a fill may charge). See Quote.feeCapBps."),
+            expectedFeeBps: bps("The fee a fill is expected to charge (base + matcher adaptive), bps of notional"),
+            expectedFeeAtoms: bigOrNull("expectedFeeBps of the order's notional, collateral atoms"),
+            lotExp: int(),
+            reducing: bool(),
+            repairs: arr(str()),
+          },
+          [],
+          { additionalProperties: true },
+        ),
         caps: obj(
           {
             reduceOnly: bool(),
@@ -436,11 +464,11 @@ function paths(): Obj {
       tag: "Markets",
       scope: "read",
       weight: 2,
-      description: "Pre-trade quote from the LP's matcher context. `size` is the signed engine q the order builder takes (above 0 buy, below 0 sell).",
+      description: "Pre-trade quote from the LP's matcher context. `size` is SIGNED engine q (above 0 buy, below 0 sell). POST /v1/orders takes an unsigned size and a `side` instead: size 1000000 with side sell is quote size -1000000.",
       parameters: [
         MARKET,
         q("size", str("Signed integer string", { pattern: "^-?[0-9]{1,39}$" }), "Signed engine q: above 0 buy, below 0 sell, never 0", true),
-        q("slippageBps", int(undefined, { minimum: 0, maximum: MAX_SLIPPAGE_BPS, default: DEFAULT_SLIPPAGE_BPS }), "Slippage the returned limit is built from"),
+        q("slippageBps", int(undefined, { minimum: 1, maximum: MAX_SLIPPAGE_BPS, default: DEFAULT_SLIPPAGE_BPS }), "Slippage the returned limit is built from (min 1)"),
       ],
       ok: json(ref("QuoteResponse")),
       errors: [...marketErrors, 422],
@@ -595,11 +623,21 @@ export function buildOpenApi(): Obj {
         "",
         `Auth: \`Authorization: Bearer pbk_<id>_<secret>\` or \`X-API-Key\`. Read endpoints also work without a key at the anonymous budget. Builders need a key with the \`build\` scope. After ${AUTH_FAIL_LIMIT} bad keys in a window an address is refused until the window ends. A key never grants wallet authority.`,
         "",
-        `Rate limits: each endpoint has a weight (the \`x-weight\` of the operation); a caller spends weight from a budget of ${WINDOW_SEC} s windows. Budget per window: ${tierLine}. Builders also draw on one global ceiling of ${GLOBAL_BUILD_BUDGET} per window. Every answer carries X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds); a 429 carries Retry-After.`,
+        `Rate limits: each endpoint has a weight (the \`x-weight\` of the operation); a caller spends weight from a budget of ${WINDOW_SEC} s windows. Budget per window: ${tierLine}. Builders also draw on one global ceiling of ${GLOBAL_BUILD_BUDGET} per window, of which one caller may take at most ${PRINCIPAL_BUILD_CAP}; reads and streams draw on a global read ceiling of ${GLOBAL_READ_BUDGET}. A stream is charged its weight on admission and 1 more per snapshot tick while open, with at most ${MAX_OPEN_STREAMS.anon} open streams per anonymous caller and ${MAX_OPEN_STREAMS.default} per key. 503 kv_unavailable (retryable) means the key store is down, not that the key is bad; 503 client_ip_unknown means the deployment cannot see caller addresses and anonymous access is off. Every answer carries X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds); a 429 carries Retry-After.`,
         "",
         `Idempotency: send \`Idempotency-Key\` (8 to 128 chars of A-Za-z0-9_.:-) on every build. The same key and body inside ${TTL_SEC} s returns the same bytes (header \`Idempotent-Replayed: true\`), so a retried signature is identical and the cluster dedupes it. Same key, different body: 409 idempotency_conflict. Still running: 409 idempotency_in_progress.`,
         "",
-        "Numbers: amounts, engine q and E6 prices are decimal strings. Parse them as BigInt.",
+        "Getting a key: devnet keys are issued by the Percolator team (ask them); there is no self-serve sign-up yet. Reads work without a key at the anonymous budget. A key needs the `build` scope to get transactions built. Keys are stored in the deployment's key store, so a key issued for one deployment does not work on another or on a local server that uses the in-memory store (see the SDK README for local development).",
+        "",
+        "Units. `size`/`sizeQ` is engine q: 1,000,000 q is one LOT of the market's base asset, and a lot is 10^lotExp tokens (lotExp is on every market; most markets have 0). Prices end in E6: `effectivePriceE6` is the price of ONE LOT times 1e6. Collateral amounts are atoms of the market's collateral token: atoms = tokens x 10^decimals (Market.collateralMint, Market.collateralDecimals; the devnet Sim-USDC is 6 decimals). So the notional of an order in collateral atoms is |size| x effectivePriceE6 / 1e6, and in USD (for a USD stable) notionalAtoms / 10^decimals. Worked example: effectivePriceE6 = 980974 (0.980974 USD per lot), you want 25 USD: atoms = 25 x 10^6 = 25,000,000; size = atoms x 1e6 / effectivePriceE6 = 25,000,000 x 1,000,000 / 980,974 = 25,484,875 q. A size too small to be worth one atom is accepted by the quote with notionalAtoms 0: size what you mean in USD. Basis points (bps) are 1/100 of a percent. The API can value only collateral it knows to be a USD stable (the devnet Sim-USDC); another collateral is refused with market_unsupported for orders that add risk.",
+        "",
+        "Number types on the wire: engine integers (q, E6 prices, collateral atoms, the margin and fee bps stored in a market's configuration) are decimal strings; parse them as BigInt. Values the API computes (price impact, spreads, expected fee and fee cap in bps, leverage, ages) are JSON numbers. Every schema in this document says which is which, and the contract test checks real responses against it.",
+        "",
+        "Glossary. Trading account (called a portfolio in some field names): your collateral and positions on one market; a wallet can create one with POST /v1/deposits and `newPortfolio`. LP: the liquidity provider's account that takes the other side of every trade. Matcher: the program that prices a fill against the LP (spread, size impact, inventory skew, fee). Crank: a maintenance transaction that refreshes an account or the market; the API tells you when one is needed (`resubmitAfter`). ADL: auto-deleveraging, which scales a position down; use `sizeQ` (after ADL), not `rawBasisQ`. Oracle modes: `keeper` (a keeper pushes the price) or Pyth-pinned; `oracle.stale` says whether the price is fresh enough to open or add risk. Lot: see Units.",
+        "",
+        "Getting devnet collateral: the app has a faucet at /faucet (10,000 Sim-USDC per wallet per day, plus a little SOL for fees) at the app's own address. The Sim-USDC mint is in Market.collateralMint. First trade from an empty wallet: fund the wallet, POST /v1/deposits with a fresh `newPortfolio` keypair (it co-signs), sign and send, then POST /v1/orders. The SDK README has the full walkthrough.",
+        "",
+        "Latency: builds simulate on a Solana RPC. Against the public devnet RPC expect seconds, and an occasional rpc_unavailable (retryable) under its rate limits. A dedicated RPC is much faster; ask before you rely on timing.",
         "",
         `Freshness: every read has \`slot\` and \`observedAt\`. Request bodies are capped at ${MAX_BODY_BYTES} bytes and unknown fields are refused.`,
         "",

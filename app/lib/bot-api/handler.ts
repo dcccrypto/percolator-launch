@@ -7,10 +7,10 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { getClientIp } from "@/lib/get-client-ip";
-import { ApiError } from "./errors";
+import { ApiError, looksRateLimited, redactUrls } from "./errors";
 import { botApiDisabledReason, anonReadsAllowed, MAX_BODY_BYTES } from "./config";
 import { keyFromHeaders, verifyKey, type Principal, type Scope } from "./keys";
-import { checkLimit, noteAuthFailure, authLocked, type LimitResult } from "./limits";
+import { checkLimit, peekLimit, noteAuthFailure, authLocked, clientBucket, type LimitResult } from "./limits";
 import { beginIdempotent, finishIdempotent, bodyHash, validIdempotencyKey } from "./idempotency";
 import { record } from "./metrics";
 
@@ -25,6 +25,30 @@ export interface RouteSpec {
   body?: boolean;
   /** Honours Idempotency-Key. */
   idempotent?: boolean;
+  /** Per-request deadline for the handler (RPC reads/simulations), ms. Default RPC_DEADLINE_MS. */
+  deadlineMs?: number;
+}
+
+/** A handler that has not answered by now is a failed upstream: retryable rpc_unavailable, not a hung function. */
+export const RPC_DEADLINE_MS = 20_000;
+
+/** The handler's own promise, or rpc_unavailable at the deadline (the timer is always cleared). */
+async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, rej) => {
+    t = setTimeout(() => rej(new ApiError("rpc_unavailable", "the upstream RPC did not answer in time, try again")), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Unexpected throws that are really an upstream 429 become retryable rpc_unavailable, not a 500. */
+function classify(e: unknown): ApiError {
+  if (e instanceof ApiError) return e;
+  return looksRateLimited(e) ? new ApiError("rpc_unavailable", "the Solana RPC is rate limiting, try again shortly") : new ApiError("internal");
 }
 
 export interface Ctx<P> {
@@ -57,19 +81,48 @@ function limitHeaders(l: LimitResult | null): Record<string, string> {
   return { "X-RateLimit-Limit": String(l.limit), "X-RateLimit-Remaining": String(l.remaining), "X-RateLimit-Reset": String(l.resetSec) };
 }
 
+/**
+ * Key first, address second. A valid key is never refused for someone else's failures; only failed attempts are counted
+ * (and a failed KV lookup is not a failed attempt: verifyKey throws kv_unavailable before we get here). When the address
+ * is "unknown" (TRUSTED_PROXY_DEPTH does not match the deployment) everyone would share one bucket, so there is no
+ * per-address state at all: keyed callers are limited per key, anonymous callers are refused with a clear 503.
+ */
 async function authenticate(req: NextRequest, spec: RouteSpec, ip: string): Promise<Principal> {
   const raw = keyFromHeaders(req.headers);
   if (raw) {
-    if (await authLocked(ip)) throw new ApiError("rate_limited", "too many invalid API keys from this address", { headers: { "Retry-After": "60" } });
     const rec = await verifyKey(raw);
-    if (!rec) {
+    if (rec) return { kind: "key", id: rec.id, scopes: rec.scopes, tier: rec.tier };
+    if (ip !== "unknown") {
+      const locked = await authLocked(ip);
       await noteAuthFailure(ip);
-      throw new ApiError("unauthorized");
+      if (locked) throw new ApiError("rate_limited", "too many invalid API keys from this address", { headers: { "Retry-After": "60" } });
     }
-    return { kind: "key", id: rec.id, scopes: rec.scopes, tier: rec.tier };
+    throw new ApiError("unauthorized");
   }
-  if (spec.scope === "read" && anonReadsAllowed()) return { kind: "anon", id: `ip:${ip}`, scopes: ["read"], tier: "anon" };
+  if (spec.scope === "read" && anonReadsAllowed()) {
+    if (ip === "unknown") throw new ApiError("client_ip_unknown");
+    return { kind: "anon", id: `ip:${ip}`, scopes: ["read"], tier: "anon" };
+  }
   throw new ApiError("unauthorized", spec.scope === "read" ? "an API key is required" : `an API key with the "${spec.scope}" scope is required`);
+}
+
+/** Reads the body up to `max` bytes and stops pulling at the first byte over, so a chunked upload is cut off, not buffered. */
+export async function readBodyCapped(req: Request, max: number): Promise<string> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      void reader.cancel().catch(() => undefined);
+      throw new ApiError("payload_too_large");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: Ctx<P>) => Promise<HandlerResult>) {
@@ -78,6 +131,7 @@ export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: 
     const reqId = randomUUID();
     const meta = { rpcCalls: 0, sims: 0 };
     let principal: Principal | null = null;
+    let ip = "unknown";
     let limit: LimitResult | null = null;
     let idem: "new" | "replay" | null = null;
     let status = 200;
@@ -87,19 +141,23 @@ export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: 
     try {
       const off = botApiDisabledReason();
       if (off) throw new ApiError("disabled", off);
-      const ip = getClientIp(req);
+      ip = clientBucket(getClientIp(req));
+      // Local / self-run (no VERCEL): no proxy to trust, so one shared "local" bucket. A deployed build never merges callers.
+      if (ip === "unknown" && !process.env.VERCEL) ip = "local";
       principal = await authenticate(req, spec, ip);
       if (!principal.scopes.includes(spec.scope)) throw new ApiError("forbidden_scope");
       limit = await checkLimit(principal, spec.weight, { build: spec.build });
-      if (!limit.allowed) throw new ApiError("rate_limited", undefined, { headers: { "Retry-After": String(limit.resetSec) } });
+      if (!limit.allowed) {
+        const msg = limit.reason === "global" ? "the API is at its shared capacity right now, retry shortly" : limit.reason === "build-share" ? "this caller has used its share of the build capacity for this window" : undefined;
+        throw new ApiError("rate_limited", msg, { headers: { "Retry-After": String(limit.resetSec) } });
+      }
 
       let body: Record<string, unknown> = {};
       let rawBody = "";
       if (spec.body) {
         const len = Number(req.headers.get("content-length") ?? "0");
         if (len > MAX_BODY_BYTES) throw new ApiError("payload_too_large");
-        rawBody = await req.text();
-        if (Buffer.byteLength(rawBody) > MAX_BODY_BYTES) throw new ApiError("payload_too_large");
+        rawBody = await readBodyCapped(req, MAX_BODY_BYTES);
         let parsed: unknown;
         try {
           parsed = JSON.parse(rawBody);
@@ -135,10 +193,10 @@ export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: 
       const params = ((await routeCtx?.params) ?? {}) as P;
       let out: HandlerResult;
       try {
-        out = await fn({ req, reqId, principal, params, body, meta });
+        out = await withDeadline(fn({ req, reqId, principal, params, body, meta }), spec.deadlineMs ?? RPC_DEADLINE_MS);
       } catch (e) {
         if (idemKey && idem === "new") {
-          const err = e instanceof ApiError ? e : new ApiError("internal");
+          const err = classify(e);
           await finishIdempotent(principal.id, idemKey, hash, { status: err.status, body: null });
         }
         throw e;
@@ -149,14 +207,24 @@ export function botRoute<P = Record<string, string>>(spec: RouteSpec, fn: (ctx: 
       res = respond(status, json, { ...base(), ...(out.headers ?? {}) });
       return res;
     } catch (e) {
-      const err = e instanceof ApiError ? e : new ApiError("internal");
+      const err = classify(e);
       if (!(e instanceof ApiError)) {
         // Server-side only, short, no request body: the message of an unexpected throw.
-        console.error(JSON.stringify({ svc: "bot-api", event: "unhandled", reqId, route: spec.route, err: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) }));
+        console.error(JSON.stringify({ svc: "bot-api", event: "unhandled", reqId, route: spec.route, err: redactUrls(e instanceof Error ? e.message : String(e)).slice(0, 200) }));
       }
       status = err.status;
       code = err.code;
-      res = respond(err.status, err.body(), { ...base(), ...(err.extra.headers ?? {}) });
+      // 401/403 are answered before the limit is charged; still tell the caller its budget (read-only peek).
+      if (!limit && (err.code === "unauthorized" || err.code === "forbidden_scope")) {
+        try {
+          limit = await peekLimit(principal ?? { id: `ip:${ip}`, tier: "anon" });
+        } catch {
+          /* headers are best effort */
+        }
+      }
+      // A retryable upstream failure always tells the client when to come back.
+      const retryAfter: Record<string, string> = err.code === "rpc_unavailable" || err.code === "kv_unavailable" ? { "Retry-After": "2" } : {};
+      res = respond(err.status, err.body(), { ...base(), ...retryAfter, ...(err.extra.headers ?? {}) });
       return res;
     } finally {
       record({

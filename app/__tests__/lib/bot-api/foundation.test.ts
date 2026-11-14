@@ -90,13 +90,14 @@ describe("weighted limits", () => {
   });
   it("builds from all keys share one global ceiling", async () => {
     const mm = (i: number) => ({ kind: "key" as const, id: `mm${i}`, scopes: ["build" as const], tier: "mm" as const });
+    const share = Math.floor(GLOBAL_BUILD_BUDGET / 4);
     let spent = 0;
     let i = 0;
-    while (spent + 1000 <= GLOBAL_BUILD_BUDGET) {
-      expect((await checkLimit(mm(i++), 1000, { kv, nowMs: now, build: true })).allowed).toBe(true);
-      spent += 1000;
+    while (spent + share <= GLOBAL_BUILD_BUDGET) {
+      expect((await checkLimit(mm(i++), share, { kv, nowMs: now, build: true })).allowed).toBe(true);
+      spent += share;
     }
-    expect((await checkLimit(mm(i++), 1000, { kv, nowMs: now, build: true })).allowed).toBe(false);
+    expect((await checkLimit(mm(i++), share, { kv, nowMs: now, build: true })).allowed).toBe(false);
   });
   it("locks an IP after repeated bad keys", async () => {
     for (let i = 0; i < AUTH_FAIL_LIMIT - 1; i++) await noteAuthFailure("9.9.9.9", kv, now);
@@ -151,6 +152,8 @@ describe("errors", () => {
     expect(apiCodeForOnchain(49)).toBe("insufficient_margin");
     expect(apiCodeForOnchain(27)).toBe("market_stale");
     expect(apiCodeForOnchain(133)).toBe("leverage_cap_exceeded");
+    expect(apiCodeForOnchain(121)).toBe("market_needs_crank");
+    expect(ERROR_CATALOG.market_needs_crank.retryable).toBe(true);
     expect(apiCodeForOnchain(21)).toBe("simulation_failed");
     expect(apiCodeForOnchain(99999)).toBe("simulation_failed");
   });

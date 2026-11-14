@@ -20,6 +20,7 @@ import { maxLeverageFromSlab } from "@/lib/slab-max-leverage";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { effectiveExecBandBps } from "@/lib/limits/risk-limits";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { collateralDecimalsOf } from "../builders/collateral";
 
 /** Staleness bound used when the market does not carry one (`max_staleness_secs` = 0). */
 export const DEFAULT_STALE_SECS = 120;
@@ -44,6 +45,9 @@ export interface MarketView {
   name: string | null;
   lotExp: number;
   assets: number;
+  /** The collateral token the market holds (base58) and its decimals (null = a mint the API cannot value in USD; orders that add risk are refused). */
+  collateralMint: string;
+  collateralDecimals: number | null;
   oracleMode: string;
   effectivePriceE6: bigint;
   targetPriceE6: bigint;
@@ -119,6 +123,8 @@ export function decodeMarket(raw: Uint8Array, at: { market: PublicKey; programId
     name: meta?.name ?? null,
     lotExp,
     assets,
+    collateralMint: cfg.collateralMint.toBase58(),
+    collateralDecimals: collateralDecimalsOf(cfg.collateralMint.toBase58()),
     oracleMode: mode,
     effectivePriceE6: sanitizePriceE6(engine.effectivePriceE6),
     targetPriceE6: sanitizePriceE6(engine.targetPriceE6),

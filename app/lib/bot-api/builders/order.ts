@@ -6,13 +6,14 @@
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { ApiError } from "@/lib/bot-api/errors";
-import { buildV22Trade, TradeBuildRefusal } from "@/lib/v22/trade-build";
+import { buildV22Trade, effectiveTakerPosition, TradeBuildRefusal } from "@/lib/v22/trade-build";
 import { findOwnerPortfolio } from "@/lib/owner-portfolio";
-import { decodeMarketEngineView, signedPositionForAsset } from "@/lib/limits/decode";
-import { checkOrderCaps, resolveCaps, MAX_SLIPPAGE_BPS } from "./caps";
+import { decodeMarketEngineView } from "@/lib/limits/decode";
+import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, MAX_SLIPPAGE_BPS } from "./caps";
 import {
   finalizeTx,
   refusalToApi,
+  noTradingAccount,
   onlyKeys,
   pubkeyField,
   uintStringField,
@@ -58,7 +59,7 @@ export function parseOrderBody(b: Record<string, unknown>): OrderInput {
   const q = uintStringField(b, "size", { required: true, max: MAX_I128_ABS, positive: true })!;
   const out: OrderInput = { owner, market, size: b.side === "buy" ? q : -q };
   out.reduceOnly = boolField(b, "reduceOnly");
-  out.slippageBps = intField(b, "slippageBps", { min: 0, max: MAX_SLIPPAGE_BPS, overCode: "slippage_cap_exceeded" });
+  out.slippageBps = intField(b, "slippageBps", { min: 1, max: MAX_SLIPPAGE_BPS, overCode: "slippage_cap_exceeded" });
   out.limitPriceE6 = uintStringField(b, "limitPriceE6", { required: false, max: MAX_U64, positive: true });
   if (out.limitPriceE6 !== undefined && out.slippageBps !== undefined) throw new ApiError("bad_request", "give slippageBps or limitPriceE6, not both");
   const fee = intField(b, "maxFeeBps", { min: 0, max: 10_000 });
@@ -67,6 +68,22 @@ export function parseOrderBody(b: Record<string, unknown>): OrderInput {
   out.maxLeverage = numberField(b, "maxLeverage", { minExclusive: 0, max: 1000 });
   out.portfolio = pubkeyField(b, "portfolio", false);
   return out;
+}
+
+/**
+ * The build summary for the API. The shared builder's `feeBps` is the fee CAP the transaction signs (base fee + the matcher's
+ * worst case + a margin, so far above the market's listed base fee): renamed feeCapBps. expectedFeeBps / expectedFeeAtoms are
+ * what the fill is expected to charge (reads/quote.ts expectedFee); a fill never charges more than the cap.
+ */
+export function orderSummary(base: Record<string, unknown> & { feeBps?: string | null }, size: bigint, fees: { expectedFeeBps: number | null; expectedFeeAtoms: bigint | null }): Record<string, unknown> {
+  const { feeBps, ...rest } = base;
+  return {
+    ...rest,
+    side: size > 0n ? "buy" : "sell",
+    feeCapBps: feeBps === null || feeBps === undefined ? null : Number(feeBps),
+    expectedFeeBps: fees.expectedFeeBps,
+    expectedFeeAtoms: fees.expectedFeeAtoms === null ? null : fees.expectedFeeAtoms.toString(),
+  };
 }
 
 export async function buildOrder(connection: Connection, input: OrderInput, meta: { rpcCalls: number; sims: number }): Promise<OrderResponse> {
@@ -78,6 +95,7 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     explicitLimit: input.limitPriceE6 !== undefined,
   });
   let applied: ReturnType<typeof checkOrderCaps> | null = null;
+  let fees: Awaited<ReturnType<typeof checkOpenMarketGuards>> = { expectedFeeBps: null, expectedFeeAtoms: null };
   let r: Awaited<ReturnType<typeof buildV22Trade>>;
   try {
     meta.rpcCalls += 8; // market, LP (cached), portfolio scan, identities, fee, lev guard, blockhash, priority fee
@@ -89,8 +107,10 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       ...(input.limitPriceE6 !== undefined ? { limitPriceE6: input.limitPriceE6 } : { slippageBps: BigInt(caps.slippageBps) }),
       ...(input.maxFeeBps !== undefined ? { maxFeeBps: input.maxFeeBps } : {}),
       ...(input.portfolio ? { portfolio: input.portfolio } : {}),
-      preflight: (p) => {
+      crankOnLossStale: true,
+      preflight: async (p) => {
         applied = checkOrderCaps(caps, p);
+        fees = await checkOpenMarketGuards(connection, p);
       },
     });
   } catch (e) {
@@ -106,7 +126,7 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     blockhash: r.blockhash,
     lastValidBlockHeight: r.lastValidBlockHeight,
     resubmitAfter: r.resubmitAfter,
-    summary: { ...r.summary, side: input.size > 0n ? "buy" : "sell" },
+    summary: orderSummary(r.summary, input.size, fees),
     caps: {
       reduceOnly: caps.reduceOnly,
       slippageBps: caps.explicitLimit ? null : caps.slippageBps,
@@ -122,18 +142,19 @@ const CLOSE_FIELDS = ["owner", "market", "size", "slippageBps", "maxFeeBps", "po
 
 /**
  * POST /v1/positions/close: reduce-only order for the whole position (or `size` of it, never more), against the
- * position read now. The builder re-reads it and the reduce-only preflight refuses if it changed in between.
+ * ADL-effective position read now (a prior-reset leg owns nothing: no_position). The builder re-reads it and the reduce-only preflight refuses if it changed in between.
  */
 export async function buildClose(connection: Connection, b: Record<string, unknown>, meta: { rpcCalls: number; sims: number }): Promise<OrderResponse> {
   onlyKeys(b, CLOSE_FIELDS);
   const owner = pubkeyField(b, "owner", true);
   const market = pubkeyField(b, "market", true);
   const part = uintStringField(b, "size", { required: false, max: MAX_I128_ABS, positive: true });
-  const slippageBps = intField(b, "slippageBps", { min: 0, max: MAX_SLIPPAGE_BPS, overCode: "slippage_cap_exceeded" });
+  const slippageBps = intField(b, "slippageBps", { min: 1, max: MAX_SLIPPAGE_BPS, overCode: "slippage_cap_exceeded" });
   const fee = intField(b, "maxFeeBps", { min: 0, max: 10_000 });
   let portfolio = pubkeyField(b, "portfolio", false);
 
   let before: bigint;
+  let legReset = false;
   try {
     meta.rpcCalls += 3;
     const info = await connection.getAccountInfo(market, "confirmed");
@@ -141,14 +162,20 @@ export async function buildClose(connection: Connection, b: Record<string, unkno
     const engine = decodeMarketEngineView(new Uint8Array(info.data));
     if (!engine || engine.marketId === null || engine.marketId === undefined) throw new ApiError("market_unreadable");
     portfolio = portfolio ?? (await findOwnerPortfolio(connection, info.owner, market, owner)) ?? undefined;
-    if (!portfolio) throw new ApiError("no_portfolio");
+    if (!portfolio) throw noTradingAccount();
     const pinfo = await connection.getAccountInfo(portfolio, "confirmed");
-    if (!pinfo) throw new ApiError("no_portfolio");
-    before = signedPositionForAsset(new Uint8Array(pinfo.data), 0, engine.marketId);
+    if (!pinfo) throw noTradingAccount();
+    // The ADL-EFFECTIVE position, the quantity the engine applies a close to (hooks/useClosePosition.ts effectiveLeg): a close
+    // sized from the raw basis over-closes after an ADL and the engine refuses the flip.
+    const eff = effectiveTakerPosition(new Uint8Array(pinfo.data), engine);
+    if (eff.q === null) throw new ApiError("market_unreadable", "the engine would refuse this position (epoch or ADL index mismatch), so it cannot be closed from here; try again after the market is cranked");
+    before = eff.q;
+    legReset = eff.reset;
   } catch (e) {
     if (e instanceof ApiError) throw e;
     throw new ApiError("rpc_unavailable");
   }
+  if (legReset) throw new ApiError("no_position", "the position was already cleared by a market reset; there is nothing to close");
   if (before === 0n) throw new ApiError("no_position");
   const absBefore = before < 0n ? -before : before;
   const q = part === undefined ? absBefore : part;

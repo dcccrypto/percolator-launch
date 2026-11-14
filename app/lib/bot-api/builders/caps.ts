@@ -5,17 +5,30 @@
  *
  *   slippage   default 100 bps around the engine effective price, max 1000 (the app uses 500, lib/slippage.ts:44)
  *   limit      an explicit limitPriceE6 may not sit more than 1000 bps on the adverse side of the effective price
- *   notional   |size| x effective price <= min(caller maxNotionalUsd, BOT_API_MAX_NOTIONAL_USD, default 5000)
+ *   notional   |size| x effective price <= min(caller maxNotionalUsd, BOT_API_MAX_NOTIONAL_USD, default 5000), PER ORDER (not per position)
  *   leverage   after the order: notional / conservative equity <= min(caller maxLeverage, market max, BOT_API_MAX_LEVERAGE, default 10)
+ *              (builders/equity.ts: capital less the open leg's unrealized loss and negative fee credits; the same equity
+ *              GET /v1/account reports leverage on)
  *   reduceOnly refuse unless the order shrinks the position without flipping it
- * A reducing order skips the notional and leverage caps (it lowers risk; a cap must never trap a position open).
- * Sizes: q units; notional atoms = |q| x priceE6 / 1e6 (lib/trading.ts computePositionInitialMargin); collateral is a
- * 6-decimal USD stable on devnet, so 1 USD = 1e6 atoms.
+ *   size       |size| <= the market's per-side maximum (checkOpenMarketGuards), and the oracle must be fresh
+ * The position every check uses is the ADL-EFFECTIVE one (lib/limits/effective-quantity.ts), the quantity the engine
+ * applies a trade to. An unreadable position refuses every order.
+ * A reducing order skips the notional, leverage, size and freshness checks (it lowers risk; a cap must never trap a
+ * position open).
+ * Sizes: q units; notional atoms = |q| x priceE6 / 1e6 (lib/trading.ts computePositionInitialMargin). The USD value of an
+ * atom comes from the market's collateral mint (builders/collateral.ts); a mint it cannot value is market_unsupported.
  */
 import { ApiError } from "@/lib/bot-api/errors";
 import type { TradePreflight } from "@/lib/v22/trade-build";
 import { decodePortfolioRisk } from "@/lib/limits/decode";
 import { maxLeverageFromSlab } from "@/lib/slab-max-leverage";
+import type { Connection } from "@solana/web3.js";
+import { requireValuedCollateral } from "./collateral";
+import { conservativeEquity } from "./equity";
+import { openLegsValuePnl } from "../reads/account";
+import { decodeMarket } from "../reads/market";
+import { buildQuoteSource, expectedFee, matcherQuote } from "../reads/quote";
+import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 
 export const DEFAULT_SLIPPAGE_BPS = 100;
 export const MAX_SLIPPAGE_BPS = 1000;
@@ -57,18 +70,24 @@ export function resolveCaps(req: { reduceOnly?: boolean; slippageBps?: number; m
 }
 
 const abs = (n: bigint) => (n < 0n ? -n : n);
-const USD = 1_000_000n;
+
+/** The USD cap in collateral atoms of `decimals`, at micro-USD precision (a fractional cap is honoured, not floored to whole USD). */
+export function notionalCapAtoms(maxNotionalUsd: number, decimals: number): bigint {
+  const micro = BigInt(Math.floor(maxNotionalUsd * 1e6));
+  return (micro * 10n ** BigInt(decimals)) / 1_000_000n;
+}
 
 /** The preflight the order builder runs. Throws ApiError; returns the applied numbers for the summary. */
 export function checkOrderCaps(caps: OrderCaps, p: TradePreflight): { notionalUsd: number; leverageAfter: number | null; marketMaxLeverage: number | null } {
   const px = p.effectivePriceE6;
   if (px <= 0n) throw new ApiError("market_unreadable", "the market's effective price is unreadable; nothing built");
+  // The position is unreadable (the engine would refuse the leg, or the market's engine view does not decode): every order
+  // is refused, because leverage and reduce-only both need it. Never read as a flat account.
+  if (p.positionBeforeQ === null) throw new ApiError("market_unreadable", "the current position is unreadable, so the order cannot be checked");
+  const before = p.positionBeforeQ;
 
   if (caps.reduceOnly && !p.reducing) {
-    throw new ApiError(
-      p.positionBeforeQ === null ? "market_unreadable" : p.positionBeforeQ === 0n ? "no_position" : "reduce_only_violation",
-      p.positionBeforeQ === null ? "the current position is unreadable, so reduce-only cannot be checked" : undefined,
-    );
+    throw new ApiError(before === 0n ? "no_position" : "reduce_only_violation");
   }
 
   if (caps.explicitLimit) {
@@ -79,24 +98,30 @@ export function checkOrderCaps(caps: OrderCaps, p: TradePreflight): { notionalUs
     }
   }
 
-  const orderNotional = (abs(p.size) * px) / 1_000_000n;
-  const notionalUsd = Number(orderNotional) / 1e6;
   const marketMax = maxLeverageFromSlab(p.marketData);
-  if (p.reducing) return { notionalUsd, leverageAfter: null, marketMaxLeverage: marketMax };
+  if (p.reducing) {
+    // Reporting only: a reducing order is never refused for its size, so an unvalued mint just reports 0.
+    return { notionalUsd: 0, leverageAfter: null, marketMaxLeverage: marketMax };
+  }
 
-  if (orderNotional > BigInt(Math.floor(caps.maxNotionalUsd)) * USD) {
-    throw new ApiError("notional_cap_exceeded", `order notional ${notionalUsd.toFixed(2)} USD is above the ${caps.maxNotionalUsd} USD cap`, {
+  // Everything below is in the market's collateral atoms; the mint decides what an atom is worth.
+  const { decimals } = requireValuedCollateral(p.marketData);
+  const orderNotional = (abs(p.size) * px) / 1_000_000n;
+  const notionalUsd = Number(orderNotional) / 10 ** decimals;
+  if (orderNotional > notionalCapAtoms(caps.maxNotionalUsd, decimals)) {
+    throw new ApiError("notional_cap_exceeded", `order notional ${notionalUsd.toFixed(2)} USD is above the ${caps.maxNotionalUsd} USD per-order cap`, {
       details: { notionalUsd, capUsd: caps.maxNotionalUsd },
     });
   }
 
-  const before = p.positionBeforeQ ?? 0n;
   const afterNotional = (abs(before + p.size) * px) / 1_000_000n;
   const risk = p.portfolioData ? decodePortfolioRisk(p.portfolioData) : null;
-  if (!risk) throw new ApiError("market_unreadable", "the trading account is unreadable, so leverage cannot be checked");
-  const negPnl = risk.pnl < 0n ? risk.pnl : 0n;
-  const negFee = risk.feeCredits < 0n ? risk.feeCredits : 0n;
-  const equity = risk.capital + negPnl + negFee;
+  if (!risk || !p.portfolioData) throw new ApiError("market_unreadable", "the trading account is unreadable, so leverage cannot be checked");
+  // Value-side PnL of the open leg at the effective price (the stored pnl is only the settled part): an under-water
+  // position must lower the equity the cap divides by.
+  const leg = openLegsValuePnl(p.marketData, p.portfolioData);
+  if (leg.kind === "unreadable") throw new ApiError("market_unreadable", "the open position cannot be valued, so leverage cannot be checked");
+  const equity = conservativeEquity(risk.capital, leg.kind === "open" ? leg.valuePnl : risk.pnl, risk.feeCredits);
   const cap = Math.min(caps.maxLeverage, marketMax ?? caps.maxLeverage);
   if (equity <= 0n) throw new ApiError("insufficient_margin", "the trading account has no equity");
   // afterNotional / equity > cap  <=>  afterNotional * 100 > cap*100 * equity  (cap to 0.01x)
@@ -108,4 +133,55 @@ export function checkOrderCaps(caps: OrderCaps, p: TradePreflight): { notionalUs
     });
   }
   return { notionalUsd, leverageAfter, marketMaxLeverage: marketMax };
+}
+
+export interface MarketGuardResult {
+  /** What the fill is expected to charge (bps of notional, atoms); null when unknown. See reads/quote.ts expectedFee. */
+  expectedFeeBps: number | null;
+  expectedFeeAtoms: bigint | null;
+}
+const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null };
+
+/**
+ * Checks that need a fresh read of the market, the LP and the matcher, for orders that add risk:
+ *  - the oracle is fresh, by the SAME rule GET /v1/markets exposes (reads/market.ts oracle.stale): else market_stale;
+ *  - |size| is within the market's per-side maximum (the quote's maxSizePerSide, from the taker's effective position):
+ *    else size_cap_exceeded.
+ * A reducing order is NEVER refused here (a stale oracle or a size cap must not trap a position open); the read is still
+ * tried so its fee estimate can be reported, and any failure of it just leaves the estimate null.
+ * One getMultipleAccountsInfoAndContext; its context slot is the read's slot.
+ */
+export async function checkOpenMarketGuards(connection: Pick<Connection, "getMultipleAccountsInfoAndContext">, p: TradePreflight): Promise<MarketGuardResult> {
+  const enforce = !p.reducing;
+  try {
+    const res = await connection.getMultipleAccountsInfoAndContext([p.market, p.lp.matcherCtx, p.lp.accountB], "confirmed").catch(() => {
+      throw new ApiError("rpc_unavailable");
+    });
+    const [m, c, pf] = res.value;
+    if (!m) throw new ApiError("market_not_found");
+    if (!c || !pf) throw new ApiError("no_lp");
+    const at = { market: p.market, programId: p.programId, slot: res.context.slot };
+    const md = new Uint8Array(m.data);
+    const view = decodeMarket(md, at);
+    if (enforce && view.oracle.stale) {
+      throw new ApiError("market_stale", `the market's oracle price is stale (${view.oracle.ageSecs === null ? "never pushed" : `${Math.round(view.oracle.ageSecs)} s old`}, bound ${view.oracle.staleBoundSecs} s); orders that add risk are refused until it is refreshed`, {
+        details: { ageSecs: view.oracle.ageSecs, staleBoundSecs: view.oracle.staleBoundSecs },
+      });
+    }
+    const src = buildQuoteSource(md, new Uint8Array(c.data), new Uint8Array(pf.data), p.lp.accountB, at, p.positionBeforeQ ?? 0n);
+    if (enforce) {
+      const side = p.size > 0n ? "long" : "short";
+      const max = src.maxSizePerSide[side];
+      if (max.maxQ < UNLIMITED_CAPACITY && abs(p.size) > max.maxQ) {
+        throw new ApiError("size_cap_exceeded", `order size ${abs(p.size)} is above the market's current ${p.size > 0n ? "buy" : "sell"} maximum of ${max.maxQ} (${max.reason})`, {
+          details: { maxQ: max.maxQ.toString(), side, reason: max.reason },
+        });
+      }
+    }
+    const f = expectedFee(src.baseFeeBps, matcherQuote(src, p.size), (abs(p.size) * src.effectivePriceE6) / 1_000_000n);
+    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms };
+  } catch (e) {
+    if (enforce) throw e;
+    return NO_FEE;
+  }
 }

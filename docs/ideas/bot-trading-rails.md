@@ -181,14 +181,17 @@ Error envelope: `{"error":{"code","message","retryable","onchain":{"code","name"
 | Failure | What the API does | Caller does |
 |---|---|---|
 | RPC down / 429 | 503 `rpc_unavailable`, `retryable:true`, Retry-After | back off |
-| Upstash down | rate limits fall back per instance (existing behaviour, `lib/upstash-rate-limit.ts:83`); idempotency falls back per instance; logged `degraded` | nothing; replay protection is weaker across instances, the chain still dedupes identical signed bytes |
+| Upstash down | API key lookups fail fast (Upstash client: 1 retry, 1.5 s timeout) as 503 `kv_unavailable`, `retryable:true`, Retry-After 2; they are never answered from a per-instance map and never count toward the auth lockout; a 30 s circuit breaker skips Upstash while it is failing; rate limits and idempotency fall back per instance (existing behaviour, `lib/upstash-rate-limit.ts:83`); `/v1/health` reports `degraded` (503); logged `kv_degraded` | retry after a couple of seconds; replay protection is weaker across instances meanwhile, the chain still dedupes identical signed bytes |
 | Oracle stale / keeper down | builders refuse `market_stale`; reads show `stale:true` | wait |
 | Owner needs a maintenance crank first | returns only the crank, `resubmitAfter:true` (#3836) | send crank, build again |
 | Blockhash expired | status `expired` | rebuild with a new key |
 | Fee rose between build and sign | simulation would fail; on chain 98 | build again with `maxFeeBps` |
 | Layout / program change | `not_v22` / `market_unreadable` | wait for release |
 | Maintenance flag | 503 `maintenance` (`lib/maintenance`) | wait |
-| Abuse | weighted limits per key and IP, global build ceiling, body cap, auth-failure lockout per IP | — |
+| Abuse | weighted limits per key and per address (anonymous IPv6 by /64); global build ceiling (3000/min) with at most 25% (750) per principal; global read/stream ceiling (6000/min); at most 2 open streams per anonymous caller and 5 per key, each stream tick charged; 4 KB body cap enforced while reading; failed-key throttle per address (a valid key is verified first and never refused for others' failures) | — |
+| Client address unknown (`TRUSTED_PROXY_DEPTH` does not match the deployment) | on a deployed build anonymous callers get 503 `client_ip_unknown`; keyed callers are limited per key only and no per-address state is kept; `/v1/health` shows `clientIp.resolved:false` and status `degraded` | operator fixes `TRUSTED_PROXY_DEPTH` |
+| Upstream RPC 429 | bot routes do not retry 429 (`disableRetryOnRateLimit`): 503 `rpc_unavailable`, Retry-After 2; handler deadline 20 s | back off |
+| Deployed build without the shared KV | the API refuses to enable (503 `disabled`, reason names the missing Upstash variables); `/v1/health` flags a memory backend on a deployed build | operator sets `UPSTASH_REDIS_REST_URL` and `_TOKEN` |
 | Bad release | `BOT_API_ENABLED` off -> 503 everywhere, gate back to normal | — |
 
 ## 4. v1 vs later
@@ -199,7 +202,7 @@ v1 (this stack, devnet only, behind `BOT_API_ENABLED`):
 - Builders: orders (open/modify/reduce/close via reduceOnly), positions/close, deposits (incl. first account), withdrawals, cancel (semantic), all simulated on the returned bytes, with caps.
 - Tx status polling.
 - OpenAPI, TS SDK, examples, uptime script, load test numbers.
-- #3836 stays as is; `/api/v22/trade` keeps working and becomes a thin alias later.
+- #3836 stays as is; `/api/v22/trade` keeps working until the owner decides alias vs fold: open (section 8.4).
 
 Later:
 - Self-serve keys (SIWS), per-wallet budgets like Hyperliquid's volume-based address limits.
@@ -276,9 +279,20 @@ Staged plan, each a draft PR stacked on the one before, none merged:
 - D `feat/v22-botrails-d` -> C: OpenAPI + spec test, `packages/bot-sdk`, examples, uptime script, load test and numbers.
 Then a full Council on A-D.
 
-## 8. Decisions for Khubair
+## 8. Open decisions for Khubair (not decided; values are provisional devnet test defaults)
+
+None of these has been decided. The code ships with the defaults below only so it can be tested on devnet; changing any of them is a one-line edit.
 
 1. Whether `/api/v1` may bypass the playground waitlist gate on the v2.2 preview when `BOT_API_ENABLED=1` (default: off, so no change).
 2. Default caps for devnet: 100 bps slippage, 5,000 USD notional per order, 10x leverage.
-3. Who issues keys in v1 (ops script) and whether anonymous reads are allowed.
+3. Who issues keys in v1 (ops script) and whether anonymous reads are allowed (code default today: allowed, `BOT_API_ANON_READS=0` turns them off).
 4. Whether #3836's `/api/v22/trade` stays as a public alias or is folded into `/v1/orders`.
+
+### Rollback runbook
+
+The kill switch is an env var, and on Vercel an env change only applies to a new deployment, so it is a redeploy (minutes), not instant.
+
+1. Unset `BOT_API_ENABLED` on the project (Vercel dashboard or `vercel env rm BOT_API_ENABLED <environment>`), then redeploy; or, faster, promote the previous good deployment (`vercel promote <deployment-url>` or the dashboard's Instant Rollback).
+2. Verify: `curl -i https://<deployment>/api/v1/health` returns 503 with `error.code` `disabled`, and `/api/v22/trade` and the waitlist gate behave as before.
+3. One bad or leaked key, no redeploy needed: `npx tsx scripts/bot-api/keys.ts revoke <keyId>` (needs the Upstash variables in the shell); the next request with it gets 401. `show <keyId>` confirms `revoked: true`.
+4. KV outage is not a rollback case: key calls answer 503 `kv_unavailable` (retryable) and `/v1/health` reports `degraded`; wait for Upstash or fix the credentials.

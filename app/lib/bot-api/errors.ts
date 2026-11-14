@@ -23,12 +23,15 @@ export const ERROR_CATALOG = {
   request_expired: { status: 400, retryable: false, message: "expiresAfter is in the past" },
   maintenance: { status: 503, retryable: true, message: "writes are paused for maintenance" },
   rpc_unavailable: { status: 503, retryable: true, message: "the Solana RPC failed, try again" },
+  kv_unavailable: { status: 503, retryable: true, message: "the API's key store is unavailable, try again" },
+  client_ip_unknown: { status: 503, retryable: false, message: "the server could not determine the caller's address; anonymous access is refused until the proxy depth is configured" },
   internal: { status: 500, retryable: true, message: "internal error" },
   // markets / accounts
   market_not_found: { status: 404, retryable: false, message: "market not found" },
   market_unsupported: { status: 422, retryable: false, message: "this market is not supported by the API yet" },
   market_unreadable: { status: 503, retryable: true, message: "market state could not be read" },
   market_stale: { status: 409, retryable: true, message: "the market's oracle price is stale" },
+  market_needs_crank: { status: 409, retryable: true, message: "the market's engine state needs a refresh crank; retry shortly" },
   no_portfolio: { status: 409, retryable: false, message: "the wallet has no trading account on this market" },
   bad_portfolio: { status: 400, retryable: false, message: "portfolio is not this wallet's trading account on this market" },
   no_lp: { status: 503, retryable: true, message: "this market has no usable LP right now" },
@@ -85,6 +88,17 @@ export class ApiError extends Error {
   }
 }
 
+/** Strips URLs (RPC endpoints can carry an api-key in the path or query) from a message that is about to be logged. */
+export function redactUrls(msg: string): string {
+  return msg.replace(/[a-z][a-z0-9+.-]*:\/\/\S*/gi, "<url>");
+}
+
+/** An upstream 429 / rate-limit message (web3.js: "Server responded with 429 Too Many Requests"). */
+export function looksRateLimited(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return /\b429\b|too many requests|rate.?limit/i.test(m);
+}
+
 const NAMES = new Map<number, string>();
 for (const [n, c] of Object.entries(WRAPPER_ERR)) NAMES.set(c, n);
 for (const [n, c] of Object.entries(WRAPPER_ERR_V21)) NAMES.set(c, n);
@@ -99,6 +113,8 @@ export function onchainErrorName(code: number): string | null {
 const ONCHAIN_TO_API: Record<string, ErrorCode> = {
   EngineInsufficientInitialMargin: "insufficient_margin",
   OracleStale: "market_stale",
+  // 121: the engine's loss accounting is behind; any crank fixes it, so a retry a few slots later succeeds.
+  EngineLossStale: "market_needs_crank",
   GrowthUtilisationFeeNotCovered: "fee_raise_required",
   LevGuardRefused: "leverage_cap_exceeded",
   GrowthLeverageExceeded: "leverage_cap_exceeded",

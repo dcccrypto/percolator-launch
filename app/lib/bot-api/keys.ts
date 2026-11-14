@@ -8,6 +8,7 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { getKv, type Kv } from "./kv";
+import { ApiError } from "./errors";
 
 export type Scope = "read" | "build" | "ops";
 export type Tier = "default" | "mm";
@@ -82,7 +83,13 @@ export async function revokeKey(id: string, kv: Kv = getKv()): Promise<boolean> 
 }
 
 export async function getKeyRecord(id: string, kv: Kv = getKv()): Promise<KeyRecord | null> {
-  const raw = await kv.get(recKey(id));
+  let raw: string | null;
+  try {
+    raw = await (kv.getAuthoritative ? kv.getAuthoritative(recKey(id)) : kv.get(recKey(id)));
+  } catch {
+    // The lookup itself failed: that is not "no such key". Callers must not count it as an auth failure.
+    throw new ApiError("kv_unavailable", undefined, { headers: { "Retry-After": "2" } });
+  }
   if (!raw) return null;
   try {
     return JSON.parse(raw) as KeyRecord;

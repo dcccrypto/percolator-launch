@@ -22,6 +22,8 @@ const BH = "GHtXQBsoZHVnNFa9YevAzFr17DJjgHXk3ycTKD5xD3Zi";
 
 const m = vi.hoisted(() => ({
   pre: { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n as bigint | null, reducing: false },
+  guards: 0,
+  guardThrow: null as unknown,
   buildCalls: 0,
   buildThrow: null as unknown,
   resubmit: false,
@@ -47,6 +49,17 @@ vi.mock("@/lib/limits/decode", async (orig) => ({
   decodePortfolioRisk: () => ({ capital: 1_000_000_000n, pnl: 0n, feeCredits: 0n }),
   signedPositionForAsset: () => m.position,
 }));
+// The open-order guards (stale oracle, per-side size cap) read market + matcher + LP: tested on real fixtures in guards.test.ts.
+vi.mock("@/lib/bot-api/builders/caps", async (orig) => ({
+  ...(await orig<typeof import("@/lib/bot-api/builders/caps")>()),
+  checkOpenMarketGuards: async (_c: unknown, p: { reducing: boolean }) => {
+    if (!p.reducing) {
+      m.guards++;
+      if (m.guardThrow) throw m.guardThrow;
+    }
+    return { expectedFeeBps: 65, expectedFeeAtoms: 130_000n };
+  },
+}));
 vi.mock("@/lib/slab-max-leverage", () => ({ maxLeverageFromSlab: () => 20 }));
 vi.mock("@/lib/tx", async (orig) => ({
   ...(await orig<typeof import("@/lib/tx")>()),
@@ -57,10 +70,24 @@ vi.mock("@/lib/v22/trade-build", async (orig) => {
   const real = await orig<typeof import("@/lib/v22/trade-build")>();
   return {
     ...real,
+    // The effective-position rule has its own real-fixture tests (adl-close.test.ts); here the position is the scenario's.
+    effectiveTakerPosition: () => ({ q: m.position, reset: false }),
     buildV22Trade: vi.fn(async (_c: unknown, req: import("@/lib/v22/trade-build").TradeBuildRequest) => {
       m.buildCalls++;
       if (m.buildThrow) throw m.buildThrow;
-      req.preflight?.({ size: req.size, limitPriceE6: req.limitPriceE6 ?? 2_020_000n, effectivePriceE6: m.pre.effectivePriceE6, positionBeforeQ: m.pre.positionBeforeQ, reducing: m.pre.reducing, marketData: new Uint8Array(0), portfolioData: new Uint8Array(1) });
+      await req.preflight?.({
+        size: req.size,
+        limitPriceE6: req.limitPriceE6 ?? 2_020_000n,
+        effectivePriceE6: m.pre.effectivePriceE6,
+        positionBeforeQ: m.pre.positionBeforeQ,
+        positionLegReset: false,
+        reducing: m.pre.reducing,
+        marketData: new Uint8Array(MARKET_DATA),
+        portfolioData: new Uint8Array(1),
+        programId: WRAPPER,
+        market: req.slab,
+        lp: { accountB: Keypair.generate().publicKey, matcherCtx: Keypair.generate().publicKey },
+      });
       const tx = new Transaction();
       tx.add(SystemProgram.transfer({ fromPubkey: req.owner, toPubkey: req.slab, lamports: 1 + m.buildCalls }));
       tx.feePayer = req.owner;
@@ -112,6 +139,8 @@ import { POST as close } from "@/app/api/v1/positions/close/route";
 import { POST as deposits } from "@/app/api/v1/deposits/route";
 import { POST as withdrawals } from "@/app/api/v1/withdrawals/route";
 import { GET as tx } from "@/app/api/v1/tx/[signature]/route";
+import { buildOpenApi } from "@/lib/bot-api/openapi";
+import { validate } from "../lib/bot-api/openapi-validate";
 
 let key: string;
 const post = (h: (r: NextRequest) => Promise<Response>, path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -127,7 +156,7 @@ beforeEach(async () => {
   __setKvForTest(kv);
   key = (await issueKey({ scopes: ["read", "build"], tier: "mm" }, kv)).key;
   Object.assign(m, {
-    pre: { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n, reducing: false },
+    pre: { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n, reducing: false }, guards: 0, guardThrow: null,
     buildCalls: 0, buildThrow: null, resubmit: false, finalSims: [], simTxs: [], gate: { err: null, logs: [] }, portfolioFound: true,
     pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100,
   });
@@ -178,6 +207,33 @@ describe("POST /api/v1/orders", () => {
     const ro = await post(orders, "/api/v1/orders", order({ reduceOnly: true }));
     expect((await ro.json()).error.code).toBe("reduce_only_violation");
     expect(m.simTxs).toHaveLength(0);
+  });
+  it("clerk F2/F3: opens run the market guards (stale oracle, size cap) before simulating; reducing orders and closes never do", async () => {
+    const { ApiError } = await import("@/lib/bot-api/errors");
+    m.guardThrow = new ApiError("market_stale");
+    const stale = await post(orders, "/api/v1/orders", order());
+    expect([stale.status, (await stale.json()).error.code]).toEqual([409, "market_stale"]);
+    m.guardThrow = new ApiError("size_cap_exceeded");
+    expect((await (await post(orders, "/api/v1/orders", order())).json()).error.code).toBe("size_cap_exceeded");
+    expect(m.simTxs).toHaveLength(0);
+    // a reducing order and a close go through even with a stale oracle
+    m.position = 7_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
+    expect((await post(orders, "/api/v1/orders", order({ side: "sell", size: "1000000", reduceOnly: true }))).status).toBe(200);
+    expect((await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() })).status).toBe(200);
+  });
+  it("first-timer F3: no_portfolio points at POST /deposits with newPortfolio and says trading account", async () => {
+    m.buildThrow = new TradeBuildRefusal("no_portfolio", "owner has no portfolio on this market; deposit in the app first", 409);
+    const e = (await (await post(orders, "/api/v1/orders", order())).json()).error;
+    expect(e.code).toBe("no_portfolio");
+    expect(e.message).toContain("trading account");
+    expect(e.message).toContain("POST /api/v1/deposits");
+    expect(e.message).toContain("newPortfolio");
+    expect(e.message).not.toContain("in the app");
+    expect(e.details).toMatchObject({ next: "POST /api/v1/deposits" });
+    m.portfolioFound = false;
+    const w = (await (await post(withdrawals, "/api/v1/withdrawals", { owner: OWNER.toBase58(), market: SLAB.toBase58(), amount: "1" })).json()).error;
+    expect(w.details).toMatchObject({ next: "POST /api/v1/deposits" });
   });
   it("a failed final simulation is refused with the decoded on-chain code; BlockhashNotFound is retryable", async () => {
     m.finalSims = [{ err: { InstructionError: [3, { Custom: 49 }] }, logs: ["Program log: margin"] }];
@@ -239,6 +295,37 @@ describe("POST /api/v1/positions/close", () => {
     m.position = 7_000_000n;
     m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n, reducing: false };
     expect((await (await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() })).json()).error.code).toBe("no_position");
+  });
+});
+
+describe("contract: builder JSON fits the OpenAPI schemas", () => {
+  const schemas = (buildOpenApi() as unknown as { components: { schemas: Record<string, Record<string, unknown>> } }).components.schemas;
+  const fits = (name: string, body: unknown) => expect(validate(schemas[name], body, schemas), name).toEqual([]);
+  it("orders, close, deposits (both shapes), withdrawals and an error answer", async () => {
+    const o = await (await post(orders, "/api/v1/orders", order())).json();
+    fits("BuildResponse", o);
+    expect(o.summary).toMatchObject({ side: "buy", feeCapBps: null, expectedFeeBps: 65, expectedFeeAtoms: "130000" });
+    expect(o.summary).not.toHaveProperty("feeBps");
+    m.position = 7_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
+    fits("BuildResponse", await (await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() })).json());
+    fits("BuildResponse", await (await post(deposits, "/api/v1/deposits", { owner: OWNER.toBase58(), market: SLAB.toBase58(), amount: "25000000" })).json());
+    fits("BuildResponse", await (await post(withdrawals, "/api/v1/withdrawals", { owner: OWNER.toBase58(), market: SLAB.toBase58(), amount: "25000000" })).json());
+    fits("ErrorEnvelope", await (await post(orders, "/api/v1/orders", order({ size: "0" }))).json());
+  });
+  it("first-timer F7: a negative size is refused, and the spec's pattern agrees", async () => {
+    const r = await post(orders, "/api/v1/orders", order({ size: "-1000000" }));
+    expect(r.status).toBe(400);
+    expect(validate(schemas.OrderRequest, order({ size: "-1000000" }), schemas).join()).toContain("size");
+    expect(validate(schemas.OrderRequest, order(), schemas)).toEqual([]);
+  });
+  it("trader (c): slippageBps 0 is refused before anything is built, and the spec's minimum agrees", async () => {
+    const r = await post(orders, "/api/v1/orders", order({ slippageBps: 0 }));
+    expect([r.status, (await r.json()).error.code]).toEqual([400, "bad_request"]);
+    expect(m.buildCalls).toBe(0);
+    expect(validate(schemas.OrderRequest, order({ slippageBps: 0 }), schemas).join()).toContain("slippageBps");
+    const c = await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58(), slippageBps: 0 });
+    expect(c.status).toBe(400);
   });
 });
 

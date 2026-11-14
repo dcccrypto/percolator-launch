@@ -25,9 +25,16 @@ export interface ClientOptions {
   maxDelayMs?: number;
   /** Per-request timeout in ms. Default 20000. */
   timeoutMs?: number;
+  /**
+   * Budget for ONE call including its retries and waits, in ms. When the next wait would run past it, the last error is
+   * thrown instead of waiting. Default 15000: a failing read on a rate-limited public RPC used to take about 30 s (4 tries of
+   * ~8 s each with backoff). Raise it for builders on a slow RPC; 0 = no budget.
+   */
+  maxTotalMs?: number;
   /** Test hooks. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   random?: () => number;
+  now?: () => number;
 }
 
 export interface CallOptions {
@@ -90,6 +97,8 @@ export class BotClient {
   private readonly retryBaseMs: number;
   private readonly maxDelayMs: number;
   private readonly timeoutMs: number;
+  private readonly maxTotalMs: number;
+  private readonly now: () => number;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   private readonly random: () => number;
 
@@ -101,6 +110,8 @@ export class BotClient {
     this.retryBaseMs = o.retryBaseMs ?? 250;
     this.maxDelayMs = o.maxDelayMs ?? 30_000;
     this.timeoutMs = o.timeoutMs ?? 20_000;
+    this.maxTotalMs = o.maxTotalMs ?? 15_000;
+    this.now = o.now ?? Date.now;
     this.sleep = o.sleep ?? defaultSleep;
     this.random = o.random ?? Math.random;
   }
@@ -277,6 +288,7 @@ export class BotClient {
 
   private async request<T>(method: "GET" | "POST", path: string, o: { query?: Query; body?: object; idempotencyKey?: string; signal?: AbortSignal }): Promise<T> {
     const url = this.url(path, o.query);
+    const started = this.now();
     for (let attempt = 0; ; attempt++) {
       let err: BotApiError;
       const ctl = new AbortController();
@@ -286,7 +298,7 @@ export class BotClient {
       const timer = setTimeout(() => {
         timedOut = true;
         ctl.abort();
-      }, this.timeoutMs);
+      }, this.attemptTimeoutMs(started));
       try {
         const res = await this.f(url, {
           method,
@@ -316,8 +328,17 @@ export class BotClient {
       }
       if (!err.retryable || attempt >= this.maxRetries) throw err;
       if (err.retryAfterMs !== undefined && err.retryAfterMs > this.maxDelayMs) throw err;
-      await this.sleep(err.retryAfterMs ?? this.backoff(attempt), o.signal);
+      const wait = err.retryAfterMs ?? this.backoff(attempt);
+      // The call's whole budget: if waiting and trying again would run past it, report what happened now.
+      if (this.maxTotalMs > 0 && this.now() - started + wait >= this.maxTotalMs) throw err;
+      await this.sleep(wait, o.signal);
     }
+  }
+
+  /** One attempt may use what is left of the call's budget (at least 1 s), never more than `timeoutMs`. */
+  private attemptTimeoutMs(started: number): number {
+    if (this.maxTotalMs <= 0) return this.timeoutMs;
+    return Math.max(1_000, Math.min(this.timeoutMs, this.maxTotalMs - (this.now() - started)));
   }
 
   private backoff(attempt: number): number {

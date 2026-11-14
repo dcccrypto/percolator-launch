@@ -1,9 +1,9 @@
 /**
  * GET /api/v1/stream?markets=a,b (max 10): Server-Sent Events. A `market` snapshot per market every 2 s, a `heartbeat` every
  * 10 s, `id:` = cluster slot, `retry: 2000`; closes after 55 s with an `end` event, the client reconnects with Last-Event-ID.
- * Wire format and the wrapper that reuses botRoute's auth and limit: lib/bot-api/stream.ts.
+ * Metering: weight 5 on admission, then 1 per 2 s read; at most 2 open streams per anonymous caller, 5 per key. Wire format and the wrapper that reuses botRoute's auth and limit: lib/bot-api/stream.ts.
  */
-import { getServerConnection } from "@/lib/server-rpc";
+import { getBotConnection } from "@/lib/bot-api/rpc";
 import { ApiError } from "@/lib/bot-api/errors";
 import { parsePubkey, queryParam } from "@/lib/bot-api/reads/common";
 import { loadMarketsByKey } from "@/lib/bot-api/reads/market-source";
@@ -20,7 +20,7 @@ export const GET = sseRoute({ route: "/v1/stream", scope: "read", weight: 5 }, a
   const parts = [...new Set(raw.split(",").map((s) => s.trim()))];
   if (parts.length > MAX_STREAM_MARKETS || parts.some((p) => p === "")) throw new ApiError("bad_request", `markets must be 1-${MAX_STREAM_MARKETS} distinct addresses`);
   const keys = parts.map((p) => parsePubkey(p, "markets"));
-  const connection = getServerConnection("confirmed");
+  const connection = getBotConnection("confirmed");
   const read = async (m: { rpcCalls: number }): Promise<StreamTick> => {
     const { slot, markets } = await loadMarketsByKey(connection, m, keys);
     return {

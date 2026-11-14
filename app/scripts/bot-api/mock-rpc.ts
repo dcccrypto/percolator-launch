@@ -1,8 +1,11 @@
 /**
  * A small fixture-backed Solana JSON-RPC server for load tests (no network, no keys). It serves the recorded devnet SOL
- * market with its LP portfolio and matcher context, and the GATO market, from __tests__/fixtures. It answers the read
- * methods the /api/v1 reads use; it cannot simulate or send, so builders cannot succeed against it (they stop at a coded
- * refusal). Usage as a server (to point `next start` at it with DEVNET_RPC_URL):
+ * market with its LP portfolio and matcher context, and the GATO market, from __tests__/fixtures, plus ONE taker portfolio
+ * (MOCK_OWNER's flat trading account on the SOL market, made from the recorded LP portfolio bytes: owner patched, matcher
+ * disabled, legs cleared, 1,000 USD capital). It answers the read methods the /api/v1 reads use AND simulateTransaction
+ * (always clean, with unitsConsumed), so a build for MOCK_OWNER reaches a clean simulated 200 and the load test can measure
+ * the build path. It never sends or signs anything: sendTransaction is not served. Usage as a server (to point `next start`
+ * at it with DEVNET_RPC_URL):
  *   npx tsx scripts/bot-api/mock-rpc.ts [port=3918]
  */
 import { createServer, type Server } from "node:http";
@@ -11,6 +14,8 @@ import { join } from "node:path";
 import bs58 from "bs58";
 import { PublicKey } from "@solana/web3.js";
 import { V17_PORTFOLIO_IDENTITY_TRAILER_LEN } from "@percolatorct/sdk";
+import { portfolioLegGeometry } from "@/lib/v22/layout";
+import { LEG_ACTIVE, PF_CAPITAL } from "@/lib/limits/constants";
 
 const fx = (p: string) => JSON.parse(readFileSync(join(__dirname, "../../__tests__/fixtures", p), "utf8"));
 const sol = fx("v22-spread-size-aware-sol.json");
@@ -30,11 +35,32 @@ const lpData = Buffer.from(sol.lpB64, "base64");
 // must be owned by that matcher program. Read it by offset so this does not depend on any env flag.
 const cfgOff = lpData.length - 104 - V17_PORTFOLIO_IDENTITY_TRAILER_LEN;
 const matcherProg = new PublicKey(lpData.subarray(cfgOff, cfgOff + 32)).toBase58();
+/** A wallet that has a flat trading account on the mock SOL market (use it as `owner` in builds). Any 32 bytes are a public key. */
+export const MOCK_OWNER = new PublicKey(Buffer.alloc(32, 9)).toBase58();
+const MOCK_TAKER = new PublicKey(Buffer.alloc(32, 10)).toBase58();
+export const MOCK_TAKER_CAPITAL_ATOMS = 1_000_000_000n; // 1,000 USD of 6-decimal Sim-USDC
+
+/** The recorded LP portfolio turned into a taker's: owner and account id patched, matcher control zeroed, legs cleared, capital set. */
+function takerPortfolio(): Buffer {
+  const d = Buffer.from(lpData);
+  new PublicKey(MOCK_OWNER).toBuffer().copy(d, 116); // mutable owner (OWNER_PORTFOLIO_OWNER_OFF)
+  new PublicKey(MOCK_OWNER).toBuffer().copy(d, 80); // provenance owner
+  new PublicKey(MOCK_TAKER).toBuffer().copy(d, 48); // account id = its own address
+  d.writeBigUInt64LE(0n, cfgOff + 96); // matcher control: disabled, so it is nobody's LP
+  const geo = portfolioLegGeometry(new Uint8Array(d));
+  if (!geo) throw new Error("mock rpc: the recorded portfolio has an unknown layout (set NEXT_PUBLIC_V22=1)");
+  for (let i = 0; i < geo.legCount; i++) d[geo.legsOff + i * geo.legStride + LEG_ACTIVE] = 0;
+  d.writeBigUInt64LE(MOCK_TAKER_CAPITAL_ATOMS & ((1n << 64n) - 1n), PF_CAPITAL);
+  d.writeBigUInt64LE(0n, PF_CAPITAL + 8);
+  return d;
+}
+
 const ACCOUNTS = new Map<string, Acct>([
   [sol.market, { owner: MOCK_WRAPPER, data: Buffer.from(sol.marketB64, "base64") }],
   [sol.lp, { owner: MOCK_WRAPPER, data: lpData }],
   [sol.ctx, { owner: matcherProg, data: Buffer.from(sol.ctxB64, "base64") }],
   [gato.slab, { owner: MOCK_WRAPPER, data: Buffer.from(gato.data, "base64") }],
+  [MOCK_TAKER, { owner: MOCK_WRAPPER, data: takerPortfolio() }],
 ]);
 
 type Memcmp = { memcmp?: { offset: number; bytes: string; encoding?: string } };
@@ -76,6 +102,11 @@ function handle(method: string, p: unknown[]): unknown {
     case "getSignaturesForAddress":
     case "getRecentPrioritizationFees":
       return [];
+    case "simulateTransaction":
+      // Clean for every transaction: what is measured is the API's build path, not the program. Nothing is executed or sent.
+      return { context: ctx(), value: { err: null, logs: ["Program log: mock simulation"], accounts: null, unitsConsumed: 180_000, returnData: null } };
+    case "getMinimumBalanceForRentExemption":
+      return 60_000_000;
     case "getLatestBlockhash":
       return { context: ctx(), value: { blockhash: bs58.encode(Buffer.alloc(32, 7)), lastValidBlockHeight: MOCK_BLOCK_HEIGHT + 150 } };
     default:

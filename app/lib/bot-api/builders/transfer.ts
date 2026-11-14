@@ -33,7 +33,7 @@ import { fetchPortfolioIdentity } from "@/lib/v18-wire";
 import { buildFirstTradeInitIxs, buildFirstDepositIx, readNextPortfolioId, predictPortfolioId } from "@/lib/first-trade";
 import { simulateForGate, getPriorityFee } from "@/lib/tx";
 import { signedComputeUnitLimit } from "@/lib/compute-budget";
-import { finalizeTx, onlyKeys, pubkeyField, uintStringField, wrapTx, simulationError, MAX_U64, type ReturnedTx } from "./common";
+import { finalizeTx, noTradingAccount, onlyKeys, pubkeyField, uintStringField, wrapTx, simulationError, MAX_U64, type ReturnedTx } from "./common";
 
 export interface TransferResponse {
   transactions: ReturnedTx[];
@@ -142,7 +142,7 @@ export async function buildDeposit(connection: Connection, b: Record<string, unk
     }
 
     if (!fresh) {
-      throw new ApiError("no_portfolio", "the wallet has no trading account on this market: generate a keypair, send its public key as newPortfolio, and co-sign the returned tx with it");
+      throw noTradingAccount();
     }
     meta.rpcCalls += 2;
     if (await connection.getAccountInfo(fresh, "confirmed")) throw new ApiError("bad_request", "newPortfolio already exists; use a fresh keypair");
@@ -179,7 +179,7 @@ export async function buildWithdraw(connection: Connection, b: Record<string, un
     const m = await readMarket(connection, market, owner, meta);
     meta.rpcCalls++;
     const portfolio = given ?? (await findOwnerPortfolio(connection, m.programId, market, owner));
-    if (!portfolio) throw new ApiError("no_portfolio");
+    if (!portfolio) throw noTradingAccount();
     meta.rpcCalls++;
     const pinfo = await connection.getAccountInfo(portfolio, "confirmed");
     let pf: ReturnType<typeof parsePortfolio> | null = null;

@@ -3,7 +3,7 @@
  * Each market: price, oracle freshness (`oracle.stale` against the market's own bound), fee, max leverage, open interest.
  * Multi-asset and non-v2.2 accounts are left out and counted in `skipped`.
  */
-import { getServerConnection } from "@/lib/server-rpc";
+import { getBotConnection } from "@/lib/bot-api/rpc";
 import { botRoute } from "@/lib/bot-api/handler";
 import { ApiError } from "@/lib/bot-api/errors";
 import { MARKET_CACHE, observedAt } from "@/lib/bot-api/reads/common";
@@ -13,7 +13,7 @@ import { decodeMarket, type MarketView } from "@/lib/bot-api/reads/market";
 export const dynamic = "force-dynamic";
 
 export const GET = botRoute({ route: "/v1/markets", scope: "read", weight: 2 }, async ({ meta }) => {
-  const { markets, slot } = await loadAllMarkets(getServerConnection("confirmed"), meta);
+  const { markets, slot } = await loadAllMarkets(getBotConnection("confirmed"), meta);
   const out: MarketView[] = [];
   let skipped = 0;
   for (const m of markets) {
