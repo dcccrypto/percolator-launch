@@ -105,6 +105,22 @@ describe("retry", () => {
     await expect(c.markets()).rejects.toMatchObject({ code: "market_unreadable" });
     expect(calls.length).toBe(3);
   });
+  it("clerk/trader: one call's total time is bounded (a failing read used to take ~30 s), and the last error is thrown", async () => {
+    let t = 0;
+    const { f, calls } = mock([() => { t += 7_800; return json(503, envelope("rpc_unavailable", true)); }]); // each try costs 7.8 s, like the public devnet RPC
+    const sleeps: number[] = [];
+    const c = new BotClient({ baseUrl: "http://x.test", fetch: f, random: () => 1, now: () => t, sleep: async (ms) => { t += ms; sleeps.push(ms); } });
+    await expect(c.markets()).rejects.toMatchObject({ code: "rpc_unavailable" });
+    expect(calls.length).toBe(2); // 7.8 s + 250 ms + 7.8 s would be 15.85 s: the third try is not made
+    expect(t).toBeLessThanOrEqual(15_850);
+  });
+  it("maxTotalMs 0 turns the budget off", async () => {
+    let t = 0;
+    const { f, calls } = mock([() => { t += 7_800; return json(503, envelope("rpc_unavailable", true)); }]);
+    const c = new BotClient({ baseUrl: "http://x.test", fetch: f, random: () => 1, now: () => t, maxTotalMs: 0, sleep: async (ms) => void (t += ms) });
+    await expect(c.markets()).rejects.toMatchObject({ code: "rpc_unavailable" });
+    expect(calls.length).toBe(4); // first try + maxRetries 3
+  });
   it("retries network errors", async () => {
     const { f, calls } = mock([new TypeError("fetch failed"), json(200, { a: 1 })]);
     const { c } = client(f);

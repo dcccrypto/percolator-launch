@@ -1,10 +1,10 @@
 /**
  * Read the first market and quote a buy of 1 unit. Reads only, no key needed.
- *   BOT_API_URL=http://localhost:3917 npx tsx examples/read-market.ts [marketAddress]
+ *   BOT_API_URL=http://localhost:3000 npx tsx examples/read-market.ts [marketAddress]
  */
 import { BotApiError, BotClient } from "../src/index";
 
-const client = new BotClient({ baseUrl: process.env.BOT_API_URL ?? "http://localhost:3917", apiKey: process.env.BOT_API_KEY });
+const client = new BotClient({ baseUrl: process.env.BOT_API_URL ?? "http://localhost:3000", apiKey: process.env.BOT_API_KEY });
 
 try {
   const { markets, slot } = await client.markets();

@@ -6,7 +6,7 @@ import { BotClient } from "../src/index";
 
 const markets = process.argv.slice(2);
 if (markets.length === 0) throw new Error("give at least one market address");
-const client = new BotClient({ baseUrl: process.env.BOT_API_URL ?? "http://localhost:3917", apiKey: process.env.BOT_API_KEY });
+const client = new BotClient({ baseUrl: process.env.BOT_API_URL ?? "http://localhost:3000", apiKey: process.env.BOT_API_KEY });
 const stop = new AbortController();
 setTimeout(() => stop.abort(), 30_000);
 

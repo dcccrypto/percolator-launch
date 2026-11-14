@@ -9,7 +9,7 @@ const owner = process.env.OWNER;
 const market = process.env.MARKET;
 const apiKey = process.env.BOT_API_KEY;
 if (!owner || !market || !apiKey) throw new Error("set OWNER, MARKET and BOT_API_KEY (a key with the build scope)");
-const client = new BotClient({ baseUrl: process.env.BOT_API_URL ?? "http://localhost:3917", apiKey });
+const client = new BotClient({ baseUrl: process.env.BOT_API_URL ?? "http://localhost:3000", apiKey });
 
 try {
   const res = await client.buildOrder({ owner, market, side: process.argv[2] === "sell" ? "sell" : "buy", size: process.argv[3] ?? "1000000", slippageBps: 100 });
