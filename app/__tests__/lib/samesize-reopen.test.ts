@@ -309,6 +309,46 @@ describe("Council round 2 review: beyond the walk's reach", () => {
     expect(recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 1n, legs: 0 }, sig: "close2x" }, Q, prev)).toBeNull();
   });
 
+  it("review H7: a Position NFT round trip beyond the walk's reach: the old display is removed (cannot be vouched for), not shown", async () => {
+    vi.useFakeTimers();
+    try {
+      device1Opens();
+      const nftTx = () => ({ logs: CRANK, wallet: true, extraKeys: [PERCOLATOR_NFT_PROGRAM_ID] });
+      txs.mint = nftTx();
+      txs.burn = nftTx();
+      txs.bClose = { ...fillTx(-Q, 85_000_000n), wallet: false };
+      txs.bOpen = { ...fillTx(Q, P2), wallet: false };
+      order = [...cranks(2100, "n"), "burn", "bOpen", "bClose", "mint", "k0", "open1"];
+      expect(await drive(syncChainEntry(conn, target, () => 10_000_000))).toBe("incomplete");
+      expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+      expect(loadBookByWallet(WALLET, SLAB)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("review H8: a wallet check that fails (RPC) after a reopen elsewhere is repeated the next minute, not skipped for the hour", async () => {
+    vi.useFakeTimers();
+    try {
+      device1Opens();
+      order = [...cranks(2100, "n"), "k2", "k1", "k0", "open1"];
+      expect(await drive(syncChainEntry(conn, target, () => 10_000_000))).toBe("incomplete");
+      expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(effective(P1));
+      txs.close9 = fillTx(-Q, P2);
+      txs.open9 = fillTx(Q, P2, BASE2);
+      order = ["open9", "close9", ...order];
+      const statuses = (conn as unknown as { getSignatureStatuses: ReturnType<typeof vi.fn> }).getSignatureStatuses;
+      statuses.mockRejectedValueOnce(new Error("429"));
+      await drive(syncChainEntry(conn, target, () => 10_000_000 + VERIFY_MS + 1));
+      expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(effective(P1)); // could not tell: unchanged for now
+      await drive(syncChainEntry(conn, target, () => 10_000_000 + 2 * VERIFY_MS + 2));
+      expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull(); // checked again a minute later, same wallet top
+      expect(loadBookByWallet(WALLET, SLAB)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("the check stops at the record's own fill; it is retried only while the fill is not listed yet, not after its read limit", async () => {
     txs.close1x = fillTx(-Q, P1);
     order = ["close1x", "k1", "k0", "open1"];

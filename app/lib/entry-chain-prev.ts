@@ -57,5 +57,6 @@ export async function prevChangeBeforeFill(
   const w = await walletChangeCheck(connection, wrapper, { wallet: t.wallet, market: t.market, portfolio: t.portfolio, assetIndex: t.assetIndex, recordSig: t.recordSig, fromSig: t.sig, paceMs: o.paceMs ?? 100, nftProgram: PERCOLATOR_NFT_PROGRAM_ID });
   if (w.kind === "current") return t.recordSig;
   if (w.kind === "changed") return w.sig;
+  // "foreign" (a Position NFT / ownership move in between): cannot be vouched for, so unknown.
   return null;
 }

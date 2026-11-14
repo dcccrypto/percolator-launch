@@ -230,8 +230,11 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   if (prior && prior.verdict === "incomplete" && prior.q === t.qNow.toString() && prior.walkTs !== undefined && now() - prior.walkTs < INCOMPLETE_WALK_MS) {
     // Only the wallet check, and only when the wallet signed something since the last one (one getSignaturesForAddress otherwise).
     const top = ownRecordSig(t, atStart) ? await walletTopSig(connection, t.wallet) : null;
-    if (ownRecordSig(t, atStart) && (top === null || top !== prior.walletTop)) await scanOwn(connection, t, atStart, now);
-    writeAttempt(pk, { ...prior, ts: now(), ...(top ? { walletTop: top } : {}) });
+    let settled = top !== null && top === prior.walletTop;
+    if (ownRecordSig(t, atStart) && !settled) settled = await scanOwn(connection, t, atStart, now);
+    // The wallet's top is remembered only once a check settled at it: a failed check is repeated next minute.
+    const { walletTop: _drop, ...rest } = prior;
+    writeAttempt(pk, { ...rest, ts: now(), ...(top && settled ? { walletTop: top } : {}) });
     return;
   }
   const facts = await marketFacts(connection, t.slab, t.assetIndex ?? 0);
@@ -305,16 +308,17 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   else if (verdict !== "chain" && ownStale) clearEntryPrice(t.slab, t.idx, t.wallet);
   // The walk did not reach the position's start (a long hold, an unreadable or unexplainable transaction): the wallet's own transactions since
   // this device's fill still show any trade that changed the position, however long ago.
-  const walletTop = !readToStart && ownRecordSig(t, atStart) ? await walletTopSig(connection, t.wallet) : null;
-  if (!readToStart) await scanOwn(connection, t, atStart, now);
+  let walletTop = !readToStart && ownRecordSig(t, atStart) ? await walletTopSig(connection, t.wallet) : null;
+  if (!readToStart && !(await scanOwn(connection, t, atStart, now))) walletTop = null;
   writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "incomplete" ? { walkTs: now() } : {}), ...(walletTop ? { walletTop } : {}), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
 }
 
 /**
  * Council r10 round 2 review: when the walk cannot reach the position's start, a device record (Entry, or the trade book) is checked against
  * the WALLET's own transactions since its newest fill (lib/entry-chain.ts walletChangeCheck): every trade from any client is wallet-signed.
- * One that changed the position means the record describes an earlier one: it is removed (unknown), never shown. Nothing is removed when it
- * cannot be told, or when a trade on this device is in flight / was written meanwhile.
+ * One that changed the position means the record describes an earlier one; a Position NFT / ownership move in between means it cannot be
+ * vouched for. Either way it is removed (unknown), never shown. Nothing is removed when it cannot be told, or when a trade on this device is in
+ * flight / was written meanwhile. Returns true when the check settled (so the wallet's top may be remembered), false to look again.
  */
 /** The newest fill of this device's own record for the position (its Entry, else its trade book), or null when it has none to check. */
 function ownRecordSig(t: SyncTarget, atStart: SavedEntry | null): string | null {
@@ -323,23 +327,26 @@ function ownRecordSig(t: SyncTarget, atStart: SavedEntry | null): string | null 
   return own?.lastSig ?? (book && book.q === t.qNow ? book.lastSig ?? null : null);
 }
 
-async function scanOwn(connection: Connection, t: SyncTarget, atStart: SavedEntry | null, now: () => number): Promise<void> {
+async function scanOwn(connection: Connection, t: SyncTarget, atStart: SavedEntry | null, now: () => number): Promise<boolean> {
   const pk = t.portfolio.toBase58();
   const own = atStart && !atStart.chainSig && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
   const book = loadBook(t.wallet, t.slab, pk);
   const ownBook = book && book.q === t.qNow ? book : null;
   const sig = ownRecordSig(t, atStart);
-  if (!sig) return;
+  if (!sig) return true;
   let wallet: PublicKey;
   try {
     wallet = new PublicKey(t.wallet);
   } catch {
-    return;
+    return false;
   }
   const m = await walletChangeCheck(connection, t.wrapper, { wallet, market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, recordSig: sig, paceMs: 1000 / PACE_TX_PER_S * 10, nftProgram: PERCOLATOR_NFT_PROGRAM_ID });
-  if (m.kind !== "changed" || chainSyncHeld(t.slab, now()) || !sameRecord(getSavedEntry(t.slab, t.idx, t.wallet), atStart)) return;
+  if (m.kind === "current") return true;
+  if (m.kind !== "changed" && m.kind !== "foreign") return false; // could not tell: checked again next minute
+  if (chainSyncHeld(t.slab, now()) || !sameRecord(getSavedEntry(t.slab, t.idx, t.wallet), atStart)) return false;
   if (own) clearEntryPrice(t.slab, t.idx, t.wallet);
   if (ownBook && loadBook(t.wallet, t.slab, pk)?.lastSig === ownBook.lastSig) saveBook(t.wallet, t.slab, pk, null);
+  return true;
 }
 
 async function walletTopSig(connection: Pick<Connection, "getSignaturesForAddress">, wallet: string): Promise<string | null> {

@@ -533,13 +533,14 @@ export async function prevChangeSig(connection: Conn, wrapper: PublicKey, o: Par
  *
  * The one way another wallet can trade this portfolio is the Position NFT: its holder trades the escrowed position, and the NFT can come back
  * and be burned (wrapper UnwrapEscrowedPortfolio, tag 82). So any wallet transaction in the window that names the NFT program (`nftProgram`)
- * or carries a wrapper ownership instruction (tag 72 transfer, tag 82 unwrap) gives "unknown": the history in between is not the wallet's.
+ * or carries a wrapper ownership instruction (tag 72 transfer, tag 82 unwrap) gives "foreign": the history in between may not be the wallet's,
+ * so the record cannot be vouched for (a money result is unknown; a display record is removed).
  */
 export async function walletChangeCheck(
   connection: Conn & Pick<Connection, "getSignatureStatuses">,
   wrapper: PublicKey,
   o: { wallet: PublicKey; market: PublicKey; portfolio: PublicKey; assetIndex?: number; recordSig: string; fromSig?: string | null; maxPages?: number; maxRead?: number; paceMs?: number; nftProgram?: PublicKey | null },
-): Promise<{ kind: "current" } | { kind: "changed"; sig: string } | { kind: "not-listed" } | { kind: "unknown" }> {
+): Promise<{ kind: "current" } | { kind: "changed"; sig: string } | { kind: "foreign"; sig: string } | { kind: "not-listed" } | { kind: "unknown" }> {
   const assetIndex = o.assetIndex ?? 0;
   const maxPages = o.maxPages ?? 3;
   const maxRead = o.maxRead ?? 100;
@@ -581,9 +582,9 @@ export async function walletChangeCheck(
         const tx = txs[j];
         if (!tx?.meta) return unknown;
         if (tx.meta.err !== null) continue;
-        if (o.nftProgram && txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], o.nftProgram)) return unknown;
+        if (o.nftProgram && txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], o.nftProgram)) return { kind: "foreign", sig: group[j] };
         if (!txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
-        if (wrapperTagIn(tx.transaction?.message as Parameters<typeof wrapperTagIn>[0], wrapper, OWNERSHIP_TAGS)) return unknown;
+        if (wrapperTagIn(tx.transaction?.message as Parameters<typeof wrapperTagIn>[0], wrapper, OWNERSHIP_TAGS)) return { kind: "foreign", sig: group[j] };
         const ds = deltasFromLogs(group[j], tx.meta.logMessages, true, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex });
         if (ds === null) return unknown;
         if (ds === "irreconcilable" || ds.length > 0) return { kind: "changed", sig: group[j] };
