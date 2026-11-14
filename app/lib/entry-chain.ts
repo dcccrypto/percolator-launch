@@ -520,44 +520,72 @@ export async function prevChangeSig(connection: Conn, wrapper: PublicKey, o: Par
   return r.kind === "sig" ? r.sig : null;
 }
 
-/** The text an open from flat by this app carries (lib/funding-memo.ts); the RPC lists it in `getSignaturesForAddress`'s `memo` field. */
-const OPEN_MEMO = "perc:fb1:";
-
 /**
- * Council r10 round 2 review: a cheap check that needs no transaction reads, for when the walk cannot reach back far enough. Lists the
- * portfolio's signatures newer than `untilSig` (the newest fill a record includes), from the top or from just below `fromSig`, and looks at
- * their memo field: every open from flat by this app carries the funding memo, so a same-size close + reopen made by the app on another device
- * shows up there, however long ago. "memo": such an open landed after the record (it is stale; `sig` names it). "none": `untilSig` was reached
- * with no such open in between. "unknown": `untilSig` not reached within `maxPages` pages of 1,000, or the read failed.
- * What it cannot see: a reopen without the memo (another client, an older app, a memo dropped as too large) or an add + reduce elsewhere.
+ * Council r10 round 2 review: the check for when the portfolio walk cannot reach back far enough (a long hold: keeper cranks fill the
+ * portfolio's own list). Every trade on a portfolio, from any client, is signed by its owner wallet and keeper cranks are not, so the WALLET's
+ * signature list since the record's newest fill holds every trade that could have changed the position without changing its size (a
+ * close + reopen, a flip and back, an add + reduce). Only those are read. A keeper REDUCE (ADL, liquidation) is not wallet-signed but changes
+ * the size (the record then no longer matches at all) unless a wallet trade evened it out, and that trade is in this list.
+ *
+ * Lists `wallet`'s signatures from the top (or from just below `fromSig`, which must be on the first page) down to `recordSig` or the first
+ * one older than its slot. "current": no transaction in between changed this position. "changed": one did (`sig`). "not-listed": `fromSig`
+ * is not listed yet. "unknown": the record's slot or a transaction could not be read, or more than `maxRead` / `maxPages` were needed.
  */
-export async function openSinceCheck(
-  connection: Pick<Connection, "getSignaturesForAddress">,
-  portfolio: PublicKey,
-  o: { untilSig: string; fromSig?: string | null; maxPages?: number },
-): Promise<{ kind: "memo"; sig: string } | { kind: "none" } | { kind: "unknown" }> {
-  const maxPages = o.maxPages ?? 10;
-  let before: string | undefined;
-  let started = !o.fromSig;
+export async function walletChangeCheck(
+  connection: Conn & Pick<Connection, "getSignatureStatuses">,
+  wrapper: PublicKey,
+  o: { wallet: PublicKey; market: PublicKey; portfolio: PublicKey; assetIndex?: number; recordSig: string; fromSig?: string | null; maxPages?: number; maxRead?: number; paceMs?: number },
+): Promise<{ kind: "current" } | { kind: "changed"; sig: string } | { kind: "not-listed" } | { kind: "unknown" }> {
+  const assetIndex = o.assetIndex ?? 0;
+  const maxPages = o.maxPages ?? 3;
+  const maxRead = o.maxRead ?? 100;
+  const unknown = { kind: "unknown" } as const;
   try {
-    for (let n = 0; n < maxPages; n++) {
-      const page = await connection.getSignaturesForAddress(portfolio, { limit: 1000, ...(before ? { before } : {}) }, "confirmed");
-      if (page.length === 0) return { kind: "unknown" };
+    const st = (await connection.getSignatureStatuses([o.recordSig], { searchTransactionHistory: true })).value[0];
+    if (!st || typeof st.slot !== "number") return unknown;
+    const recordSlot = st.slot;
+    const toRead: string[] = [];
+    let started = !o.fromSig;
+    let before: string | undefined;
+    let reached = false;
+    for (let n = 0; n < maxPages && !reached; n++) {
+      const page = await connection.getSignaturesForAddress(o.wallet, { limit: 1000, ...(before ? { before } : {}) }, "confirmed");
+      if (page.length === 0) return unknown;
       for (const s of page) {
         if (!started) {
           if (s.signature === o.fromSig) started = true;
           continue;
         }
-        if (s.signature === o.untilSig) return { kind: "none" };
-        if (s.err === null && typeof s.memo === "string" && s.memo.includes(OPEN_MEMO)) return { kind: "memo", sig: s.signature };
+        if (s.signature === o.recordSig || s.slot < recordSlot) {
+          reached = true;
+          break;
+        }
+        if (s.err === null) toRead.push(s.signature);
       }
-      if (!started || page.length < 1000) return { kind: "unknown" };
-      before = page[page.length - 1].signature;
+      if (!started) return n === 0 ? { kind: "not-listed" } : unknown;
+      if (!reached) {
+        if (page.length < 1000) return unknown;
+        before = page[page.length - 1].signature;
+      }
     }
+    if (!reached || toRead.length > maxRead) return unknown;
+    for (let i = 0; i < toRead.length; i += 10) {
+      if (i > 0 && o.paceMs) await new Promise((r) => setTimeout(r, o.paceMs));
+      const group = toRead.slice(i, i + 10);
+      const txs = await fetchTxs(connection, group, 10);
+      for (let j = 0; j < group.length; j++) {
+        const tx = txs[j];
+        if (!tx?.meta) return unknown;
+        if (tx.meta.err !== null || !txNamesProgram(tx as Parameters<typeof txNamesProgram>[0], wrapper)) continue;
+        const ds = deltasFromLogs(group[j], tx.meta.logMessages, true, wrapper, { market: o.market, portfolio: o.portfolio, assetIndex });
+        if (ds === null) return unknown;
+        if (ds === "irreconcilable" || ds.length > 0) return { kind: "changed", sig: group[j] };
+      }
+    }
+    return { kind: "current" };
   } catch {
-    /* fall through */
+    return unknown;
   }
-  return { kind: "unknown" };
 }
 
 /** True when undoing a change of `deltaQ` leaves `qBefore` on the OTHER side of flat from where the change ended: a flip, whose opening half starts the position. */

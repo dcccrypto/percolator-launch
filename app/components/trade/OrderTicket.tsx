@@ -1683,7 +1683,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const entryIdxForCheck = userAccount?.idx ?? (fundingMode ? 0 : null);
       const prevChange = (portfolio: PublicKey): Promise<string | null> =>
         (prevP ??= prevChangeBeforeFill(connection, slabProgramId as PublicKey, {
-          market: new PublicKey(slabAddress), portfolio, sig: sigKey as string,
+          market: new PublicKey(slabAddress), portfolio, sig: sigKey as string, wallet: publicKey ?? null,
           recordSig: (publicKey ? loadBook(publicKey.toBase58(), slabAddress, portfolio.toBase58())?.lastSig : null) ?? (entryIdxForCheck !== null ? getSavedEntry(slabAddress, entryIdxForCheck, publicKey?.toBase58())?.lastSig : null) ?? null,
         }).catch(() => null));
       const measured = takePositionChange(sig).then((change): PositionChange | null => {

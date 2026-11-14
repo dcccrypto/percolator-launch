@@ -13,7 +13,7 @@
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
-import { bookFromDeltas, entryFromChain, loadDeltas, openSinceCheck, storeDeltas, type ChainEntryResult, type ChainEntryVerdict, type ChainResume, type NoBusyCap, type StoredDelta } from "@/lib/entry-chain";
+import { bookFromDeltas, entryFromChain, loadDeltas, storeDeltas, walletChangeCheck, type ChainEntryResult, type ChainEntryVerdict, type ChainResume, type NoBusyCap, type StoredDelta } from "@/lib/entry-chain";
 import { loadBook, saveBook } from "@/lib/trade-book";
 import { resolveTradeFeeBps } from "@/lib/limits/trade-fee-resolve";
 import { clearEntryPrice, clearEntryUnknownMark, entryRecordCurrent, getEntryLeverage, getEntryUnknownMark, getSavedEntry, isEntryMarkedUnknown, saveEntryPrice, type SavedEntry } from "@/lib/entry-price";
@@ -31,7 +31,7 @@ export const VERIFY_MS = 60 * 1000;
 export const PACE_TX_PER_S = 10;
 /**
  * Council r10 round 2 review: a walk that ran out of budget ("incomplete") cannot finish later (the history only grows), so it is repeated at most
- * hourly; in between, a device record is checked each minute against the signature list alone (lib/entry-chain.ts openSinceCheck).
+ * hourly; in between, a device record is checked each minute against the wallet's own transactions (lib/entry-chain.ts walletChangeCheck).
  */
 export const INCOMPLETE_WALK_MS = 60 * 60 * 1000;
 
@@ -298,26 +298,33 @@ async function run(connection: Connection, t: SyncTarget, now: () => number): Pr
   // of date and cannot replace.
   if (verdict !== "chain" && verdict !== "unreadable" && stale?.chainSig) clearEntryPrice(t.slab, t.idx, t.wallet);
   else if (verdict !== "chain" && ownStale) clearEntryPrice(t.slab, t.idx, t.wallet);
-  // The walk did not reach the position's start (a long hold, an unreadable or unexplainable transaction): the signature list still shows an
-  // open from flat by the app after this device's own fill, however long ago.
+  // The walk did not reach the position's start (a long hold, an unreadable or unexplainable transaction): the wallet's own transactions since
+  // this device's fill still show any trade that changed the position, however long ago.
   if (!readToStart) await scanOwn(connection, t, atStart, now);
   writeAttempt(pk, { q: t.qNow.toString(), verdict, ts: now(), ...(verdict === "incomplete" ? { walkTs: now() } : {}), ...(verdict === "chain" && r.topSig ? { topSig: r.topSig } : {}), ...(walk ? { walk } : prior?.walk && verdict === "unreadable" ? { walk: prior.walk } : {}) });
 }
 
 /**
  * Council r10 round 2 review: when the walk cannot reach the position's start, a device record (Entry, or the trade book) is checked against
- * the signature list alone: an open from flat by the app after its newest fill means it describes an earlier position. It is then removed
- * (unknown), never shown. Nothing is removed when the list cannot be read or a trade on this device is in flight / was written meanwhile.
+ * the WALLET's own transactions since its newest fill (lib/entry-chain.ts walletChangeCheck): every trade from any client is wallet-signed.
+ * One that changed the position means the record describes an earlier one: it is removed (unknown), never shown. Nothing is removed when it
+ * cannot be told, or when a trade on this device is in flight / was written meanwhile.
  */
-async function scanOwn(connection: Pick<Connection, "getSignaturesForAddress">, t: SyncTarget, atStart: SavedEntry | null, now: () => number): Promise<void> {
+async function scanOwn(connection: Connection, t: SyncTarget, atStart: SavedEntry | null, now: () => number): Promise<void> {
   const pk = t.portfolio.toBase58();
   const own = atStart && !atStart.chainSig && entryRecordCurrent(atStart, t.qNow) ? atStart : null;
   const book = loadBook(t.wallet, t.slab, pk);
   const ownBook = book && book.q === t.qNow ? book : null;
   const sig = own?.lastSig ?? ownBook?.lastSig ?? null;
   if (!sig) return;
-  const m = await openSinceCheck(connection, t.portfolio, { untilSig: sig });
-  if (m.kind !== "memo" || chainSyncHeld(t.slab, now()) || !sameRecord(getSavedEntry(t.slab, t.idx, t.wallet), atStart)) return;
+  let wallet: PublicKey;
+  try {
+    wallet = new PublicKey(t.wallet);
+  } catch {
+    return;
+  }
+  const m = await walletChangeCheck(connection, t.wrapper, { wallet, market: new PublicKey(t.slab), portfolio: t.portfolio, assetIndex: t.assetIndex ?? 0, recordSig: sig, paceMs: 1000 / PACE_TX_PER_S * 10 });
+  if (m.kind !== "changed" || chainSyncHeld(t.slab, now()) || !sameRecord(getSavedEntry(t.slab, t.idx, t.wallet), atStart)) return;
   if (own) clearEntryPrice(t.slab, t.idx, t.wallet);
   if (ownBook && loadBook(t.wallet, t.slab, pk)?.lastSig === ownBook.lastSig) saveBook(t.wallet, t.slab, pk, null);
 }

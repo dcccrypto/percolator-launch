@@ -20,13 +20,14 @@ import { VERIFY_MS, __resetEntryChainSyncForTests, shouldSyncPosition, syncChain
 import { getSavedEntry, saveEntryPrice } from "@/lib/entry-price";
 import { loadBook, loadBookByWallet, recordFill } from "@/lib/trade-book";
 import { MEMO_PROGRAM_ID, fundingMemoIx } from "@/lib/funding-memo";
-import { openSinceCheck, prevChangeCheck, prevChangeSig } from "@/lib/entry-chain";
+import { prevChangeCheck, prevChangeSig, walletChangeCheck } from "@/lib/entry-chain";
 import { prevChangeBeforeFill } from "@/lib/entry-chain-prev";
 
 const WRAPPER = Keypair.generate().publicKey;
 const MARKET = Keypair.generate().publicKey;
 const PORTFOLIO = Keypair.generate().publicKey;
-const WALLET = Keypair.generate().publicKey.toBase58();
+const WALLET_PK = Keypair.generate().publicKey;
+const WALLET = WALLET_PK.toBase58();
 const SLAB = MARKET.toBase58();
 const PF = PORTFOLIO.toBase58();
 const T = 1_000_000n;
@@ -43,7 +44,7 @@ const P2 = 90_000_000n; // device 2 closed P1 and opened the same size at 90.00,
 const BASE1 = 400_000n;
 const BASE2 = 500_000n;
 
-const txs: Record<string, { logs: string[]; memo?: bigint }> = {};
+const txs: Record<string, { logs: string[]; memo?: bigint; wallet?: boolean }> = {};
 let order: string[] = [];
 const one = (sig: string) => {
   const t = txs[sig];
@@ -53,21 +54,25 @@ const one = (sig: string) => {
 };
 const conn = {
   getAccountInfo: vi.fn(async () => ({ data: Buffer.alloc(8) })),
-  getSignaturesForAddress: vi.fn(async (_pk: PublicKey, o: { limit?: number; before?: string; until?: string }) => {
-    const start = o.before ? order.indexOf(o.before) + 1 : 0;
-    let list = order.slice(start);
+  getSignaturesForAddress: vi.fn(async (pk: PublicKey, o: { limit?: number; before?: string; until?: string }) => {
+    // the portfolio's list holds everything; the WALLET's only what it signed (trades, not keeper cranks). Slots: newer = higher.
+    const all = pk.toBase58() === WALLET ? order.filter((x) => txs[x]?.wallet) : order;
+    const start = o.before ? all.indexOf(o.before) + 1 : 0;
+    let list = all.slice(start);
     if (o.until) {
       const u = list.indexOf(o.until);
       if (u >= 0) list = list.slice(0, u);
     }
     // the RPC lists an SPL memo's text in `memo` (as "[len] text")
-    return list.slice(0, o.limit ?? 1000).map((signature) => ({ signature, slot: 1, err: null, memo: txs[signature]?.memo !== undefined ? `[16] perc:fb1:${txs[signature].memo}` : null, blockTime: 0 }));
+    return list.slice(0, o.limit ?? 1000).map((signature) => ({ signature, slot: slotOf(signature), err: null, memo: txs[signature]?.memo !== undefined ? `[16] perc:fb1:${txs[signature].memo}` : null, blockTime: 0 }));
   }),
+  getSignatureStatuses: vi.fn(async (sigs: string[]) => ({ value: sigs.map((x) => (order.includes(x) ? { slot: slotOf(x), confirmationStatus: "confirmed", err: null } : null)) })),
   getTransaction: vi.fn(async (s: string) => one(s)),
   getTransactions: vi.fn(async (s: string[]) => s.map(one)),
 } as never;
 
-const fillTx = (q: bigint, booked: bigint, memo?: bigint) => ({ logs: fillEventLogs(WRAPPER, MARKET, [rec(q, booked)], PORTFOLIO), ...(memo !== undefined ? { memo } : {}) });
+const slotOf = (sig: string) => 1_000_000 - order.indexOf(sig);
+const fillTx = (q: bigint, booked: bigint, memo?: bigint) => ({ logs: fillEventLogs(WRAPPER, MARKET, [rec(q, booked)], PORTFOLIO), wallet: true, ...(memo !== undefined ? { memo } : {}) });
 const target = { slab: SLAB, idx: 0, wallet: WALLET, portfolio: PORTFOLIO, wrapper: WRAPPER, qNow: Q };
 const row = { slabAddress: SLAB, idx: 0, adlKnown: true, effectiveSize: Q, portfolioPk: PORTFOLIO, entryPriceSource: "cache", account: { positionSize: Q } };
 
@@ -192,6 +197,7 @@ async function drive<T>(p: Promise<T>): Promise<T> {
 }
 
 describe("Council round 2 review: beyond the walk's reach", () => {
+  const noMemo = (q: bigint, booked: bigint) => { const t = fillTx(q, booked); return t; };
   const cranks = (n: number, tag: string) => Array.from({ length: n }, (_, i) => { txs[`${tag}${i}`] = { logs: CRANK }; return `${tag}${i}`; }).reverse();
 
   it("MED-1: the reopen elsewhere is older than the walk can read (2,000 txs): device 1's old Entry and book are removed (unknown), not shown", async () => {
@@ -208,7 +214,7 @@ describe("Council round 2 review: beyond the walk's reach", () => {
     }
   });
 
-  it("MED-1: the same long history with NO reopen (only cranks since device 1's open): its Entry and book stand; the next check within the hour reads only the signature list", async () => {
+  it("MED-1: the same long history with NO reopen (only cranks since device 1's open): its Entry and book stand; the next check within the hour reads only the wallet's own list", async () => {
     vi.useFakeTimers();
     try {
       device1Opens();
@@ -220,7 +226,7 @@ describe("Council round 2 review: beyond the walk's reach", () => {
       reads.mockClear();
       expect(await drive(syncChainEntry(conn, target, () => 10_000_000 + VERIFY_MS + 1))).toBe("incomplete");
       expect(reads).not.toHaveBeenCalled(); // no second 2,000-transaction walk
-      // a reopen elsewhere lands now: the minute check (signature list only) catches it
+      // a reopen elsewhere lands now: the minute check (wallet list) catches it
       txs.close9 = fillTx(-Q, P2);
       txs.open9 = fillTx(Q, P2, BASE2);
       order = ["open9", "close9", ...order];
@@ -232,11 +238,11 @@ describe("Council round 2 review: beyond the walk's reach", () => {
     }
   });
 
-  it("MED-2: device 1's own close after a long gap with no stored walk keeps its exact result (the signature list back to its own open shows no reopen)", async () => {
+  it("MED-2: device 1's own close after a long gap with no stored walk keeps its exact result (the wallet's own transactions since its open show no other trade)", async () => {
     device1Opens();
     txs.close1x = fillTx(-Q, P1);
     order = ["close1x", ...cranks(400, "g"), "open1"];
-    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close1x", recordSig: "open1" }, { paceMs: 0 });
+    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close1x", recordSig: "open1", wallet: WALLET_PK }, { paceMs: 0 });
     expect(prev).toBe("open1");
     const r = recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P1, feeAtoms: fee(Q, P1), funding: { netPaid: BASE1 + 50n, legs: 0 }, sig: "close1x" }, Q, prev);
     expect(r).toBe(0n - 2n * fee(Q, P1) - 50n);
@@ -246,9 +252,45 @@ describe("Council round 2 review: beyond the walk's reach", () => {
     device1Opens();
     txs.close2x = fillTx(-Q, P2);
     order = ["close2x", ...cranks(400, "g"), "open2", "close1", ...cranks(5, "h"), "open1"];
-    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close2x", recordSig: "open1" }, { paceMs: 0 });
+    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close2x", recordSig: "open1", wallet: WALLET_PK }, { paceMs: 0 });
     expect(prev).toBe("open2");
     expect(recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 1n, legs: 0 }, sig: "close2x" }, Q, prev)).toBeNull();
+  });
+
+  it("review H3: a same-size reopen elsewhere WITHOUT the memo (another client), long gap: the close check names it; no result, nothing realized", async () => {
+    device1Opens();
+    txs.close2x = fillTx(-Q, P2);
+    txs.open2 = noMemo(Q, P2);
+    order = ["close2x", ...cranks(400, "g"), "open2", "close1", ...cranks(5, "h"), "open1"];
+    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close2x", recordSig: "open1", wallet: WALLET_PK }, { paceMs: 0 });
+    expect(prev).toBe("open2");
+    expect(recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 1n, legs: 0 }, sig: "close2x" }, Q, prev)).toBeNull();
+    expect(loadBook(WALLET, SLAB, PF)).toBeNull();
+  });
+
+  it("review H4: a flip to short and back to the same long size elsewhere (no open from flat, no memo), long gap: named, no result", async () => {
+    device1Opens();
+    txs.close2x = fillTx(-Q, P2);
+    txs.flip1 = fillTx(-2n * Q, 85_000_000n);
+    txs.flip2 = fillTx(2n * Q, P2);
+    order = ["close2x", ...cranks(400, "g"), "flip2", ...cranks(5, "h"), "flip1", "k0", "open1"];
+    const prev = await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close2x", recordSig: "open1", wallet: WALLET_PK }, { paceMs: 0 });
+    expect(prev).toBe("flip2");
+    expect(recordFill(WALLET, SLAB, PF, { q: -Q, bookedPriceE6: P2, feeAtoms: fee(Q, P2), funding: { netPaid: BASE2 + 1n, legs: 0 }, sig: "close2x" }, Q, prev)).toBeNull();
+  });
+
+  it("review H5: a memo-less reopen beyond the walk's reach: device 1's old Entry and book are removed, not shown", async () => {
+    vi.useFakeTimers();
+    try {
+      device1Opens();
+      txs.open2 = noMemo(Q, P2);
+      order = [...cranks(2100, "n"), "open2", "k3", "close1", "k2", "k1", "k0", "open1"];
+      expect(await drive(syncChainEntry(conn, target, () => 10_000_000))).toBe("incomplete");
+      expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
+      expect(loadBookByWallet(WALLET, SLAB)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("the check stops at the record's own fill; it is retried only while the fill is not listed yet, not after its read limit", async () => {
@@ -261,7 +303,7 @@ describe("Council round 2 review: beyond the walk's reach", () => {
     sigsCalls.mockClear();
     expect(await prevChangeBeforeFill(conn, WRAPPER, { market: MARKET, portfolio: PORTFOLIO, sig: "close1x" }, { paceMs: 0, waitMs: 0 })).toBeNull(); // no record sig: no list fallback
     expect(sigsCalls.mock.calls.length).toBeLessThanOrEqual(3); // one bounded pass, no retries
-    order = ["k1", "k0"];
-    expect(await openSinceCheck(conn, PORTFOLIO, { untilSig: "missing" })).toEqual({ kind: "unknown" }); // never reached: cannot tell
+    // the wallet check cannot place a record it cannot find on chain: unknown, never "current"
+    expect(await walletChangeCheck(conn, WRAPPER, { wallet: WALLET_PK, market: MARKET, portfolio: PORTFOLIO, recordSig: "missing" })).toEqual({ kind: "unknown" });
   });
 });
