@@ -11,7 +11,9 @@
  *   event: market     id: <slot>   data: {...snapshot...}        every SNAPSHOT_MS, one per market
  *   event: heartbeat  id: <slot>   data: {"slot","observedAt"}   every HEARTBEAT_MS
  *   event: error      data: {"code","retryable"}                 a tick failed; the stream stays open
- *   event: end        data: {"reason":"max-duration","reconnect":true,"lastEventId":"<slot>"}   then the stream closes
+ *   event: end        data: {"reason":"max-duration"|"rate-limited","reconnect":true,"lastEventId":"<slot>"}   then the stream closes
+ * Cost: admission is the route's weight; every later read (2 s) costs 1 more weight from the same budget and the global read
+ * ceiling, so a stream is metered for how long it stays open. At most MAX_OPEN_STREAMS per principal at once (anon 2, keys 5).
  * `id` is the cluster slot of the read, so Last-Event-ID is a slot: the server does not replay (each event is a full
  * snapshot) but never sends a snapshot older than the Last-Event-ID the client reconnects with.
  */
@@ -19,12 +21,41 @@ import type { NextRequest, NextResponse } from "next/server";
 import { botRoute, type Ctx, type RouteSpec } from "./handler";
 import { ApiError } from "./errors";
 import { toJson } from "./handler";
+import { checkLimit } from "./limits";
+import { getKv, type Kv } from "./kv";
+import type { Principal } from "./keys";
 
 export const RETRY_MS = 2_000;
 export const SNAPSHOT_MS = 2_000;
 export const HEARTBEAT_MS = 10_000;
 /** Serverless limit with headroom: the client reconnects with Last-Event-ID. */
 export const MAX_STREAM_MS = 55_000;
+
+/** Most streams one principal may hold open at once. A stream polls the RPC every 2 s for 55 s, so this bounds the read load per caller. */
+export const MAX_OPEN_STREAMS: Record<Principal["tier"], number> = { anon: 2, default: 5, mm: 5 };
+/** Slot expiry: a stream lives at most MAX_STREAM_MS, so a slot a dead instance never released is free again after this. */
+export const STREAM_SLOT_TTL_SEC = Math.ceil(MAX_STREAM_MS / 1000) + 15;
+
+/**
+ * Takes one of the principal's stream slots (`botapi:stream:<principal>:<n>`, set NX with an expiry, so nothing leaks if an
+ * instance dies) or returns null when all are in use. The returned function frees it (once).
+ */
+export async function acquireStreamSlot(p: Pick<Principal, "id" | "tier">, owner: string, kv: Kv = getKv()): Promise<(() => Promise<void>) | null> {
+  const cap = MAX_OPEN_STREAMS[p.tier];
+  for (let i = 0; i < cap; i++) {
+    const key = `botapi:stream:${p.id}:${i}`;
+    if (await kv.set(key, owner, { nx: true, ttlSec: STREAM_SLOT_TTL_SEC })) {
+      let freed = false;
+      return async () => {
+        if (freed) return;
+        freed = true;
+        // Only free our own slot: if it expired and someone else took it, leave it.
+        if ((await kv.get(key)) === owner) await kv.del(key);
+      };
+    }
+  }
+  return null;
+}
 
 export interface StreamTick {
   slot: number;
@@ -41,6 +72,10 @@ export interface StreamPlan {
   maxMs?: number;
   /** The request's abort signal: the client went away. */
   signal?: AbortSignal;
+  /** Called before every read after the first; false = the caller's budget is spent, the stream ends with reason "rate-limited". */
+  charge?: () => Promise<boolean>;
+  /** Called once when the stream closes for any reason (frees the principal's slot). */
+  onClose?: () => void;
 }
 
 const enc = new TextEncoder();
@@ -70,7 +105,15 @@ export function marketEventStream(plan: StreamPlan, now: () => number = Date.now
   let stop: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
   let lastSlot = plan.lastEventId ?? 0;
+  let ticks = 0;
   const clear = () => {
+    if (!closed) {
+      try {
+        plan.onClose?.();
+      } catch {
+        /* never let cleanup break the stream */
+      }
+    }
     closed = true;
     if (tick) clearInterval(tick);
     if (beat) clearInterval(beat);
@@ -91,6 +134,17 @@ export function marketEventStream(plan: StreamPlan, now: () => number = Date.now
         if (closed || reading) return;
         reading = true;
         try {
+          if (ticks++ > 0 && plan.charge && !(await plan.charge())) {
+            if (closed) return;
+            send(["event: end", data({ reason: "rate-limited", reconnect: true, lastEventId: String(lastSlot) })]);
+            clear();
+            try {
+              controller.close();
+            } catch {
+              /* already closed */
+            }
+            return;
+          }
           const t = await plan.read();
           if (closed) return;
           // Ids never go backwards: a read older than what the client already has is skipped.
@@ -149,11 +203,22 @@ const MARKER = "X-Bot-Stream";
  */
 export function sseRoute<P = Record<string, string>>(spec: RouteSpec, prepare: (ctx: Ctx<P>) => Promise<StreamPlan>) {
   const inner = botRoute<P>(spec, async (ctx) => {
-    const plan = await prepare(ctx);
-    plans.set(ctx.reqId, {
-      ...plan,
-      lastEventId: plan.lastEventId ?? parseLastEventId(ctx.req.headers.get("last-event-id")),
-    });
+    const release = await acquireStreamSlot(ctx.principal, ctx.reqId);
+    if (!release) {
+      throw new ApiError("rate_limited", `too many open streams for this caller (max ${MAX_OPEN_STREAMS[ctx.principal.tier]}); close one first`, { headers: { "Retry-After": "5" } });
+    }
+    try {
+      const plan = await prepare(ctx);
+      plans.set(ctx.reqId, {
+        ...plan,
+        lastEventId: plan.lastEventId ?? parseLastEventId(ctx.req.headers.get("last-event-id")),
+        charge: plan.charge ?? (async () => (await checkLimit(ctx.principal, 1)).allowed),
+        onClose: () => void release().catch(() => undefined),
+      });
+    } catch (e) {
+      await release().catch(() => undefined);
+      throw e;
+    }
     return { body: { stream: true }, headers: { [MARKER]: ctx.reqId } };
   });
   return async (req: NextRequest, routeCtx?: { params?: Promise<P> | P }): Promise<NextResponse | Response> => {

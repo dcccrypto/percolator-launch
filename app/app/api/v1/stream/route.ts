@@ -1,7 +1,7 @@
 /**
  * GET /api/v1/stream?markets=a,b (max 10): Server-Sent Events. A `market` snapshot per market every 2 s, a `heartbeat` every
  * 10 s, `id:` = cluster slot, `retry: 2000`; closes after 55 s with an `end` event, the client reconnects with Last-Event-ID.
- * Wire format and the wrapper that reuses botRoute's auth and limit: lib/bot-api/stream.ts.
+ * Metering: weight 5 on admission, then 1 per 2 s read; at most 2 open streams per anonymous caller, 5 per key. Wire format and the wrapper that reuses botRoute's auth and limit: lib/bot-api/stream.ts.
  */
 import { getBotConnection } from "@/lib/bot-api/rpc";
 import { ApiError } from "@/lib/bot-api/errors";

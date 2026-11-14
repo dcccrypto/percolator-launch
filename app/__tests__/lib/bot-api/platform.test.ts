@@ -325,3 +325,100 @@ describe("attacker F2 / skeptic F1: cancel during an in-flight build is not lost
     expect((await beginIdempotent("p", "key-race-2", "h", kv)).kind).toBe("replay");
   });
 });
+
+describe("attacker F1 / operator F6: stream concurrency and metering", () => {
+  const mkRoute = (maxMs = 60_000) =>
+    // a long-lived stream plan whose read is trivial
+    import("@/lib/bot-api/stream").then(({ sseRoute }) => sseRoute({ route: "/v1/stream", scope: "read", weight: 5 }, async () => ({ read: async () => ({ slot: 1, items: [] }), maxMs })));
+  const anonReq = () => req("/api/v1/stream?markets=x");
+
+  it("an anonymous caller may hold 2 streams; the third is 429 until one closes", async () => {
+    const route = await mkRoute();
+    const a = await route(anonReq());
+    const b = await route(anonReq());
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const c = await route(anonReq());
+    expect(c.status).toBe(429);
+    expect((await c.json()).error.message).toMatch(/open streams/);
+    expect(c.headers.get("Retry-After")).toBe("5");
+    await (a as Response).body!.cancel();
+    await new Promise((r) => setTimeout(r, 5));
+    expect((await route(anonReq())).status).toBe(200);
+    await (b as Response).body!.cancel();
+  });
+  it("a key may hold 5 streams, not 6; slots are per principal", async () => {
+    const route = await mkRoute();
+    const { key } = await issueKey({ scopes: ["read"] }, kv);
+    const open: Response[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = (await route(req("/api/v1/stream", { headers: { authorization: `Bearer ${key}` } }))) as Response;
+      expect(r.status).toBe(200);
+      open.push(r);
+    }
+    expect((await route(req("/api/v1/stream", { headers: { authorization: `Bearer ${key}` } }))).status).toBe(429);
+    expect((await route(anonReq())).status).toBe(200); // someone else is unaffected
+    await Promise.all(open.map((r) => r.body!.cancel()));
+  });
+  it("a rejected prepare frees the slot", async () => {
+    const { sseRoute, acquireStreamSlot, MAX_OPEN_STREAMS } = await import("@/lib/bot-api/stream");
+    const { ApiError } = await import("@/lib/bot-api/errors");
+    const bad = sseRoute({ route: "/v1/stream", scope: "read", weight: 1 }, async () => {
+      throw new ApiError("market_not_found");
+    });
+    for (let i = 0; i < MAX_OPEN_STREAMS.anon + 2; i++) expect((await bad(anonReq())).status).toBe(404);
+    expect(await acquireStreamSlot({ id: "ip:1.2.3.4", tier: "anon" }, "x", kv)).not.toBeNull();
+  });
+  it("slots expire on their own (a dead instance never frees them)", async () => {
+    const { acquireStreamSlot, STREAM_SLOT_TTL_SEC, MAX_OPEN_STREAMS } = await import("@/lib/bot-api/stream");
+    const p = { id: "ip:9.9.9.9", tier: "anon" as const };
+    for (let i = 0; i < MAX_OPEN_STREAMS.anon; i++) expect(await acquireStreamSlot(p, `o${i}`, kv)).not.toBeNull();
+    expect(await acquireStreamSlot(p, "late", kv)).toBeNull();
+    now += (STREAM_SLOT_TTL_SEC + 1) * 1000;
+    expect(await acquireStreamSlot(p, "later", kv)).not.toBeNull();
+  });
+  it("each tick after the first is charged; when the budget is gone the stream ends with reason rate-limited", async () => {
+    vi.useFakeTimers();
+    const { marketEventStream } = await import("@/lib/bot-api/stream");
+    let reads = 0;
+    let allowed = 3;
+    let closed = 0;
+    const s = marketEventStream({ read: async () => ({ slot: ++reads, items: [] }), charge: async () => allowed-- > 0, onClose: () => closed++ });
+    const r = s.getReader();
+    const dec = new TextDecoder();
+    let text = "";
+    const pump = (async () => {
+      for (;;) {
+        const x = await r.read();
+        if (x.done) break;
+        text += dec.decode(x.value);
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pump;
+    expect(reads).toBe(4); // first read free + 3 charged ticks, then refused
+    expect(text).toContain('"reason":"rate-limited"');
+    expect(closed).toBe(1);
+  });
+  it("the default charge draws on the principal's budget: a stream cannot outlive a spent anonymous budget", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    const { TIER_BUDGET } = await import("@/lib/bot-api/limits");
+    const route = await mkRoute();
+    // Leave 3 weight after the admission (5): ticks 2..4 pass, tick 5 is refused.
+    await kv.incrBy(`botapi:rl:ip:1.2.3.4:${Math.floor(Date.now() / 1000 / 60) * 60}`, TIER_BUDGET.anon - 5 - 3, 65);
+    const res = (await route(anonReq())) as Response;
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let text = "";
+    const pump = (async () => {
+      for (;;) {
+        const x = await reader.read();
+        if (x.done) break;
+        text += dec.decode(x.value);
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pump;
+    expect(text).toContain("rate-limited");
+  });
+});
