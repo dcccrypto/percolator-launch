@@ -47,6 +47,7 @@ const fits = (schema: string, body: unknown) => expect(validate(schemas[schema],
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
   vi.stubEnv("BOT_API_ENABLED", "1");
+  vi.stubEnv("BOT_API_ANON_READS", "1"); // anon reads default off (provisional); these tests use the anon tier
   vi.stubEnv("BOT_API_LOG", "0");
   __setDevnetV22ForTest(true);
   __resetDiscoveryCacheForTest();

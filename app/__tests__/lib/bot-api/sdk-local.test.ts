@@ -24,11 +24,13 @@ const localFetch: FetchLike = async (input, init) => {
 
 beforeEach(() => {
   process.env.BOT_API_ENABLED = "1";
+  process.env.BOT_API_ANON_READS = "1"; // anon reads default off (provisional)
   process.env.NEXT_PUBLIC_V22 = "1";
   process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
 });
 afterEach(() => {
   delete process.env.BOT_API_ENABLED;
+  delete process.env.BOT_API_ANON_READS;
   delete process.env.NEXT_PUBLIC_V22;
 });
 

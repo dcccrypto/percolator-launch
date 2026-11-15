@@ -1,5 +1,6 @@
 /**
- * Read the first market and quote a buy of 1 lot (1,000,000 q). Reads only, no key needed.
+ * Read the first market and quote a buy of 1 lot (1,000,000 q). Reads only. Needs BOT_API_KEY with the `read` scope unless
+ * the deployment turned anonymous reads on (BOT_API_ANON_READS=1, off by default).
  *   BOT_API_URL=http://localhost:3000 npx tsx examples/read-market.ts [marketAddress]
  */
 import { BotApiError, BotClient } from "../src/index";

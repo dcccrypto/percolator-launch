@@ -26,7 +26,7 @@ The **base URL** is the origin of a deployment that has the bot API switched on 
 
 ## Getting a key
 
-Reads work without a key at a small anonymous budget. Building transactions needs a key with the `build` scope. **Devnet keys are issued by the Percolator team** (ask them; there is no self-serve sign-up yet). A key looks like `pbk_<id>_<secret>`, is shown once, and only lets you ask for transactions: it never gives anyone control of a wallet. Keep it in an environment variable (`BOT_API_KEY`), never in code.
+Every call needs a key by default: reads need the `read` scope, building transactions needs the `build` scope. Keyless reads at a small anonymous budget exist but are off unless the deployment sets `BOT_API_ANON_READS=1` (a pending owner decision). On a deployment behind the playground waitlist, `/api/v1` is also behind it unless the deployment sets `BOT_API_GATE_EXEMPT=1` (also pending); without a waitlist session you get the gate's 401 `Playground access required`. **Devnet keys are issued by the Percolator team** (ask them; there is no self-serve sign-up yet). A key looks like `pbk_<id>_<secret>`, is shown once, and only lets you ask for transactions: it never gives anyone control of a wallet. Keep it in an environment variable (`BOT_API_KEY`), never in code.
 
 Keys live in the deployment's key store. The team issues them with `app/scripts/bot-api/keys.ts` against that store. That means:
 

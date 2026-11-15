@@ -63,6 +63,7 @@ beforeEach(() => {
   now = 1_700_000_010_000;
   vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
   vi.stubEnv("BOT_API_ENABLED", "1");
+  vi.stubEnv("BOT_API_ANON_READS", "1"); // anon reads default off (provisional); these tests use the anon tier
   vi.stubEnv("BOT_API_LOG", "0");
   vi.stubEnv("TRUSTED_PROXY_DEPTH", "1");
   __setDevnetV22ForTest(true);

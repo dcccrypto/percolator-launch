@@ -8,7 +8,7 @@
  *                     idempotency, envelope, parsing, decoding. `--rpc env` uses the RPC the env configures (public devnet).
  *                     Throwaway keys are issued in-process (`--keys N`, tier mm); they never leave the process.
  *   http              sends real HTTP requests to `--base` (a running `next start`). The server has its own key store, so
- *                     builds need a key it knows: LOADTEST_API_KEY. Without one only anonymous reads run, and the anonymous
+ *                     builds need a key it knows: LOADTEST_API_KEY. Without one only anonymous reads run (server needs BOT_API_ANON_READS=1), and the anonymous
  *                     budget (60 weight/min per address) applies: pace with --rps. `--spread-ips N` rotates X-Forwarded-For
  *                     over N addresses, which only matters when the server runs with TRUSTED_PROXY_DEPTH=1.
  *

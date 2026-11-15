@@ -34,6 +34,8 @@ const req = (path: string, init: { method?: string; body?: string; headers?: Rec
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
   vi.stubEnv("BOT_API_ENABLED", "1");
+  // Anonymous reads default OFF (provisional, doc section 8.3); these tests exercise the anon tier, so they turn it on.
+  vi.stubEnv("BOT_API_ANON_READS", "1");
   __setDevnetV22ForTest(true);
   kv = new MemoryKv();
   __setKvForTest(kv);
@@ -74,8 +76,22 @@ describe("kill switch and gating", () => {
     __setDevnetV22ForTest(false);
     expect((await echo(req("/api/v1/echo"))).status).toBe(503);
   });
-  it("playground gate: /api/v1 exempt only with the flag on; other /api stays gated", async () => {
+  it("playground gate: flag on but BOT_API_GATE_EXEMPT unset keeps /api/v1 behind the waitlist", async () => {
     const env = { PLAYGROUND_GATE_ENABLED: "true" };
+    vi.stubEnv("BOT_API_GATE_EXEMPT", "");
+    expect(await gateDecision("/api/v1/markets", "GET", undefined, env)).toBe("unauthorized");
+    expect(await gateDecision("/api/v1/orders", "POST", undefined, env)).toBe("unauthorized");
+    expect(await gateDecision("/api/v1/health", "HEAD", undefined, env)).toBe("unauthorized");
+    vi.stubEnv("BOT_API_GATE_EXEMPT", "0");
+    expect(await gateDecision("/api/v1/markets", "GET", undefined, env)).toBe("unauthorized");
+    // The exemption switch alone does nothing without the API flag.
+    vi.stubEnv("BOT_API_GATE_EXEMPT", "1");
+    vi.stubEnv("BOT_API_ENABLED", "");
+    expect(await gateDecision("/api/v1/markets", "GET", undefined, env)).toBe("unauthorized");
+  });
+  it("playground gate: /api/v1 exempt only with the flag AND the exemption on; other /api stays gated", async () => {
+    const env = { PLAYGROUND_GATE_ENABLED: "true" };
+    vi.stubEnv("BOT_API_GATE_EXEMPT", "1");
     expect(await gateDecision("/api/v1/markets", "GET", undefined, env)).toBe("pass");
     expect(await gateDecision("/api/v1/orders", "POST", undefined, env)).toBe("pass");
     expect(await gateDecision("/api/v1/../markets", "GET", undefined, env)).toBe("unauthorized");
@@ -90,7 +106,16 @@ describe("kill switch and gating", () => {
 });
 
 describe("auth and scopes", () => {
-  it("anonymous reads work at the anon budget; builds need a key", async () => {
+  it("anonymous reads are OFF by default: a read without a key is 401", async () => {
+    vi.stubEnv("BOT_API_ANON_READS", "");
+    const r = await echo(req("/api/v1/echo"));
+    expect(r.status).toBe(401);
+    expect((await r.json()).error.code).toBe("unauthorized");
+    vi.stubEnv("BOT_API_ANON_READS", "true");
+    expect((await echo(req("/api/v1/echo"))).status).toBe(401);
+  });
+  it("BOT_API_ANON_READS=1: anonymous reads work at the anon budget; builds need a key", async () => {
+    vi.stubEnv("BOT_API_ANON_READS", "1");
     const r = await echo(req("/api/v1/echo"));
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ who: "anon", big: (2n ** 70n).toString() });
@@ -100,7 +125,7 @@ describe("auth and scopes", () => {
     expect(b.status).toBe(401);
     expect((await b.json()).error.code).toBe("unauthorized");
   });
-  it("BOT_API_ANON_READS=0 turns anonymous reads off", async () => {
+  it("BOT_API_ANON_READS=0 keeps anonymous reads off", async () => {
     vi.stubEnv("BOT_API_ANON_READS", "0");
     expect((await echo(req("/api/v1/echo"))).status).toBe(401);
   });

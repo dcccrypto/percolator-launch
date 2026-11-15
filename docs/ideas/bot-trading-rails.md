@@ -89,7 +89,7 @@ One versioned HTTP API inside the existing Next.js app at `/api/v1/*`, deployed 
 bot / agent / SDK
    |  HTTPS, Authorization: Bearer pbk_<id>_<secret>, Idempotency-Key
    v
-middleware (gate exemption for /api/v1 only when BOT_API_ENABLED=1; the route authenticates itself)
+middleware (gate exemption for /api/v1 only when BOT_API_ENABLED=1 AND BOT_API_GATE_EXEMPT=1; the route authenticates itself)
    v
 /api/v1 handler wrapper: request id -> kill switch -> auth (key, scopes) -> weighted rate limit (key, ip, global)
    -> body size + schema validation -> idempotency lookup -> handler -> envelope + metrics + JSON log line
@@ -137,7 +137,7 @@ Every builder: validates, applies caps (3.5), builds, sets blockhash/CU/priority
 - Anonymous: read-only at a low per-IP limit. Builders require a key with `build` (they cost RPC scans and simulations).
 - Issue/revoke in v1: an ops script (`app/scripts/bot-api/keys.ts`). Self-serve keys via a wallet-signed message (SIWS) are later.
 - A key never grants wallet authority. Anyone can build an unsigned tx for any public wallet; only that wallet's signature makes it land. The server holds no keys.
-- Gate: `/api/v1` is exempt from the playground cookie only while `BOT_API_ENABLED=1`, and then each route requires its own auth (same rule as the existing exemptions in `lib/playground-gate.ts:79`). Whether the preview should let bots past the waitlist gate at all is Khubair's call (section 8).
+- Gate: `/api/v1` is exempt from the playground cookie only while BOTH `BOT_API_ENABLED=1` and `BOT_API_GATE_EXEMPT=1` (the exemption has its own switch, default off), and then each route requires its own auth (same rule as the existing exemptions in `lib/playground-gate.ts`). With only `BOT_API_ENABLED=1`, `/api/v1` answers but stays behind the waitlist gate like every other `/api` route. Whether the preview should let bots past the waitlist gate at all is Khubair's call (section 8.1).
 - Not in v1: on-chain delegated trade-only keys (Velocity's model). Needs program work.
 
 ### 3.5 Safety
@@ -188,7 +188,7 @@ Error envelope: `{"error":{"code","message","retryable","onchain":{"code","name"
 | Fee rose between build and sign | simulation would fail; on chain 98 | build again with `maxFeeBps` |
 | Layout / program change | `not_v22` / `market_unreadable` | wait for release |
 | Maintenance flag | 503 `maintenance` (`lib/maintenance`) | wait |
-| Abuse | weighted limits per key and per address (anonymous IPv6 by /56, so one customer delegation is one budget; unrelated subscribers sharing a /56 share it, and can take a key); global build ceiling (3000/min, a sliding two-window estimate so it cannot be doubled across a minute boundary) with at most 25% (750) per principal; global read/stream ceiling (6000/min, fixed clock minutes: a caller can burst up to 2x its own budget across a boundary) with anonymous callers together capped at 25% (1500) and any one principal at 25% (1500), so keyed bots always keep headroom; history costs 3 + 1 per portfolio scanned; at most 2 open streams per anonymous caller and 5 per key, each stream tick charged, a stream whose setup outlives the deadline frees its slot at once; 4 KB body cap enforced while reading; failed-key throttle per address (a valid key is verified first and never refused for others' failures; a junk key costs one store read and, until the address is locked, one counter write; a key id found missing is not looked up again for 5 s on that instance). `BOT_API_ANON_READS=0` removes the anonymous lever entirely | — |
+| Abuse | weighted limits per key and per address (anonymous IPv6 by /56, so one customer delegation is one budget; unrelated subscribers sharing a /56 share it, and can take a key); global build ceiling (3000/min, a sliding two-window estimate so it cannot be doubled across a minute boundary) with at most 25% (750) per principal; global read/stream ceiling (6000/min, fixed clock minutes: a caller can burst up to 2x its own budget across a boundary) with anonymous callers together capped at 25% (1500) and any one principal at 25% (1500), so keyed bots always keep headroom; history costs 3 + 1 per portfolio scanned; at most 2 open streams per anonymous caller and 5 per key, each stream tick charged, a stream whose setup outlives the deadline frees its slot at once; 4 KB body cap enforced while reading; failed-key throttle per address (a valid key is verified first and never refused for others' failures; a junk key costs one store read and, until the address is locked, one counter write; a key id found missing is not looked up again for 5 s on that instance). anonymous reads are off unless `BOT_API_ANON_READS=1` (default off removes the anonymous lever entirely) | — |
 | Client address unknown (`TRUSTED_PROXY_DEPTH` does not match the deployment) | on a deployed build anonymous callers get 503 `client_ip_unknown`; keyed callers are limited per key only and no per-address state is kept; `/v1/health` shows `clientIp.resolved:false` and status `degraded` | operator fixes `TRUSTED_PROXY_DEPTH` |
 | Upstream RPC 429 | bot routes do not retry 429 (`disableRetryOnRateLimit`): 503 `rpc_unavailable`, Retry-After 2; handler deadline 20 s | back off |
 | Deployed build without the shared KV | the API refuses to enable (503 `disabled`, reason names the missing Upstash variables); `/v1/health` flags a memory backend on a deployed build | operator sets `UPSTASH_REDIS_REST_URL` and `_TOKEN` |
@@ -222,7 +222,7 @@ Later:
 | Two copies of the money path drift | Builders move out of hooks into lib and the hooks call them (as #3836 did for `resolveLpTradeAccounts`) |
 | RPC cost / abuse: simulations are expensive | Builds need a key; weighted limits; global build ceiling; LP cache; kill switch |
 | Key leak | Hashed with pepper, shown once, revocable, keyId in logs only; a key cannot move funds |
-| Opening the gate to bots on the preview | Exemption only for `/api/v1` and only with the flag on; Khubair decides |
+| Opening the gate to bots on the preview | Exemption only for `/api/v1`, only with the flag on AND its own switch `BOT_API_GATE_EXEMPT=1` (default off); Khubair decides |
 | Serverless limits (no long-lived WebSocket) | SSE with bounded lifetime + resume; polling is first-class |
 | Per-instance metrics/idempotency on Vercel | Upstash for idempotency; metrics per instance documented; shared metrics later |
 | Freshness claims on free devnet RPC | Publish measured numbers, stamp slots, mark stale; no SLA in v1 |
@@ -283,9 +283,9 @@ Then a full Council on A-D.
 
 None of these has been decided. The code ships with the defaults below only so it can be tested on devnet; changing any of them is a one-line edit.
 
-1. Whether `/api/v1` may bypass the playground waitlist gate on the v2.2 preview when `BOT_API_ENABLED=1` (default: off, so no change). Provisional: the exemption is tied to `BOT_API_ENABLED` and has no switch of its own, so today "API on" means "bypass on"; if the answer is "API on but behind the waitlist", a separate setting has to be added first. Not approved.
+1. Whether `/api/v1` may bypass the playground waitlist gate on the v2.2 preview. PENDING OWNER DECISION. The exemption has its own switch, `BOT_API_GATE_EXEMPT=1`, read only together with `BOT_API_ENABLED=1` (`app/lib/bot-api/config.ts` `botApiGateExemptOn`, `app/lib/playground-gate.ts`). Code default: OFF, so "API on" alone keeps `/api/v1` behind the waitlist (only callers with a waitlist session reach it); setting the exemption is the separate "bots may skip the waitlist" choice. `/v1/health` reports it as `switches.gateExempt`. Not approved.
 2. Default caps for devnet: 100 bps slippage, 5,000 USD notional per order, 10x leverage.
-3. Who issues keys in v1 (ops script) and whether anonymous reads are allowed (code default today: allowed, `BOT_API_ANON_READS=0` turns them off). Provisional, not approved. `BOT_API_ANON_READS=0` is also the first lever against an anonymous flood.
+3. Who issues keys in v1 (ops script) and whether anonymous reads are allowed. PENDING OWNER DECISION. Code default: anonymous reads OFF, every read needs a key with the `read` scope (401 `unauthorized` without one); `BOT_API_ANON_READS=1` turns them on at the anonymous budget. `/v1/health` reports it as `switches.anonReads`. Provisional, not approved. Leaving it off is also the first lever against an anonymous flood.
 4. Whether #3836's `/api/v22/trade` stays as a public alias or is folded into `/v1/orders`. Note: this stack changes two error answers of that held route, because it shares `buildV22Trade` (pinned in `app/__tests__/api/v22-trade-route-codes.test.ts`): an LP scan that fails on RPC now answers 503 `rpc` (was 503 `no_lp`), and the owner's account is checked before the LP, so a wallet with no portfolio now answers 409 `no_portfolio` (was 503 `no_lp` on a market without an LP). Both are improvements, but the route was put on hold, so the owner should see them. Otherwise `/api/v22/trade` output is unchanged.
 
 ### What the equity, fee and error figures do and do not count

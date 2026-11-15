@@ -1,6 +1,6 @@
 /** GET /api/v1/health: RPC slot and block height, KV backend, and whether the bot API is on. For uptime checks. */
 import { getBotConnection } from "@/lib/bot-api/rpc";
-import { anonReadsAllowed, memoryKvOnDeployedBuild } from "@/lib/bot-api/config";
+import { anonReadsAllowed, botApiGateExemptOn, memoryKvOnDeployedBuild } from "@/lib/bot-api/config";
 import { trustedProxyDepth } from "@/lib/trusted-proxy-depth";
 import { getClientIp } from "@/lib/get-client-ip";
 import { botRoute } from "@/lib/bot-api/handler";
@@ -43,9 +43,10 @@ export const GET = botRoute({ route: "/v1/health", scope: "read", weight: 1 }, a
       // When the address cannot be resolved on a deployed build, anonymous callers are refused (client_ip_unknown).
       clientIp: { resolved: clientIpResolved, trustedProxyDepth: trustedProxyDepth() },
       writesPaused: getMaintenanceConfig().blockWrites,
-      // Switch state an operator needs at a glance: the API answering means BOT_API_ENABLED is on; anonymous reads and the
-      // app-wide write pause are the other two levers.
-      switches: { botApiEnabled: true, anonReads: anonReadsAllowed(), writesPaused: getMaintenanceConfig().blockWrites },
+      // Switch state an operator needs at a glance: the API answering means BOT_API_ENABLED is on; the waitlist-gate exemption,
+      // anonymous reads and the app-wide write pause are the other levers. gateExempt and anonReads are PROVISIONAL owner
+      // decisions (doc section 8) and default off.
+      switches: { botApiEnabled: true, gateExempt: botApiGateExemptOn(), anonReads: anonReadsAllowed(), writesPaused: getMaintenanceConfig().blockWrites },
     },
   };
 });
