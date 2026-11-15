@@ -10,6 +10,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
 
+// The first test cold-imports the whole route module graph, which can pass the 10 s default on a loaded CI box.
+vi.setConfig({ testTimeout: 60_000 });
+
 const j = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "fixtures", "5bVTTMRc.ansem.market.json"), "utf8")) as { market: string; dataBase64: string };
 const SLAB = j.market;
 const DATA = Buffer.from(j.dataBase64, "base64");

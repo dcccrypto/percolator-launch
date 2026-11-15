@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import fixture from "../fixtures/v22-stake-pools-2026-10-11.json";
 
+// The first test cold-imports the whole route module graph, which can pass the 10 s default on a loaded CI box.
+vi.setConfig({ testTimeout: 60_000 });
+
 const STAKE = "7JrgAUHi4PxaRv5JKHoGAxodDFbozYexpERei66Xgq4V";
 const MARKETS = [
   { slab: "BYFuWyuoUGhP1n8wpD8gXH2ciDsegyF1UJCQvBiVx7T5", symbol: "SOL" },
