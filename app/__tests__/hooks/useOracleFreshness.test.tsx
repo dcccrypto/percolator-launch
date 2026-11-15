@@ -38,7 +38,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-describe("lead 1: SLOT_MS fixed at 400", () => {
+describe("lead 1: push age vs real slot time (was fixed 400 ms)", () => {
   // Push is `slots` behind the cluster slot; true slot time is `slotSec`.
   // true age = slots * slotSec; hook age = slots * 0.4.
   const cases: Array<[number, number]> = [
@@ -52,8 +52,6 @@ describe("lead 1: SLOT_MS fixed at 400", () => {
       const { result } = renderHook(() => useOracleFreshness({ trackSeconds: true }));
       const trueAge = slots * slotSec;
       const hookAge = result.current.elapsedSecs;
-      // eslint-disable-next-line no-console
-      console.log(`slot=${slotSec}s slots=${slots} true=${trueAge.toFixed(1)}s hook=${hookAge}s err=${(trueAge - hookAge).toFixed(1)}s level=${result.current.level}`);
       expect(hookAge).toBe(60); // 150 * 400ms
     });
   }
