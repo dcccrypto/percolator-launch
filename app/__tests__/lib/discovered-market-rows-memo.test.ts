@@ -31,7 +31,7 @@ vi.mock("@/lib/lp-portfolio", () => ({
 vi.mock("@/lib/config", () => ({ getConfig: () => ({ network: "devnet", programId: "11111111111111111111111111111111" }) }));
 
 import { PublicKey } from "@solana/web3.js";
-import { loadDiscoveredMarketRows, resetDiscoveredMarketRowsCache } from "@/lib/discovered-market-rows";
+import { loadDiscoveredMarketRows, resetDiscoveredMarketRowsCache, registerPlaygroundSlab } from "@/lib/discovered-market-rows";
 
 const slabs = [A, B];
 const mk = (slab: string) => ({ slabAddress: new PublicKey(slab), programId: new PublicKey("11111111111111111111111111111111"), config: {}, params: {}, configV17: null });
@@ -74,5 +74,27 @@ describe("loadDiscoveredMarketRows memo", () => {
     await loadDiscoveredMarketRows();
     await loadDiscoveredMarketRows();
     expect(state.discoverCalls).toBe(2);
+  });
+
+  it("registering a slab drops the memo so the next read sees it", async () => {
+    await loadDiscoveredMarketRows();
+    registerPlaygroundSlab(A);
+    await loadDiscoveredMarketRows();
+    expect(state.discoverCalls).toBe(2);
+  });
+
+  it("maxAgeMs (?fresh=) rejects a copy older than it", async () => {
+    await loadDiscoveredMarketRows();
+    await new Promise((r) => setTimeout(r, 20));
+    await loadDiscoveredMarketRows({ maxAgeMs: 10 });
+    expect(state.discoverCalls).toBe(2);
+    await loadDiscoveredMarketRows({ maxAgeMs: 60000 });
+    expect(state.discoverCalls).toBe(2);
+  });
+
+  it("callers get their own array", async () => {
+    const a = await loadDiscoveredMarketRows();
+    a.pop();
+    expect((await loadDiscoveredMarketRows()).length).toBe(2);
   });
 });

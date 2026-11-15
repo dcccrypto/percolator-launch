@@ -208,7 +208,9 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
       null;
     const searchTrimmed = searchParam?.trim().toLowerCase() ?? null;
 
+    // ?fresh= (sent right after a registration lands on this device): accept a copy at most FRESH_MAX_AGE_MS old.
     const rows = await loadDiscoveredMarketRows({
+      maxAgeMs: request?.nextUrl?.searchParams?.has("fresh") ? FRESH_MAX_AGE_MS : undefined,
       filter: (m) => {
         if (programIdParam && m.program_id !== programIdParam) return false;
         if (!listable(m)) return false;

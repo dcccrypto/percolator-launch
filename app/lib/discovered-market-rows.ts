@@ -69,6 +69,7 @@ function getPlaygroundAllowedSlabs(): Set<string> {
  */
 export function registerPlaygroundSlab(slabAddress: string): void {
   _playgroundAllowedSlabs.add(slabAddress);
+  resetDiscoveredMarketRowsCache(); // the next GET must list the new market, not a copy read before it
   try {
     // Write only the user-created addresses (not the curated seeds, which come from
     // PLAYGROUND_SLAB_META at startup — no need to duplicate them in the JSON file).
@@ -348,9 +349,10 @@ export function resetDiscoveredMarketRowsCache(): void {
  * nothing or fails; an empty result is never memoized, so a transient RPC failure is retried next call.
  */
 export async function loadDiscoveredMarketRows(
-  opts: { filter?: (row: Record<string, unknown>) => boolean } = {},
+  opts: { filter?: (row: Record<string, unknown>) => boolean; maxAgeMs?: number } = {},
 ): Promise<Record<string, unknown>[]> {
-  const ttl = discoveryMemoTtlMs();
+  // maxAgeMs (the route's ?fresh=) lowers the accepted age of the shared copy, never raises it past the TTL.
+  const ttl = Math.min(discoveryMemoTtlMs(), opts.maxAgeMs ?? Infinity);
   let rows: Record<string, unknown>[];
   if (ttl === 0) {
     rows = await loadDiscoveredMarketRowsUncached();
@@ -369,7 +371,7 @@ export async function loadDiscoveredMarketRows(
     }
     rows = await discoveryInflight;
   }
-  return opts.filter ? rows.filter(opts.filter) : rows;
+  return opts.filter ? rows.filter(opts.filter) : rows.slice();
 }
 
 async function loadDiscoveredMarketRowsUncached(): Promise<Record<string, unknown>[]> {
