@@ -70,6 +70,8 @@ Every order and close is checked against server caps. **These are provisional de
 | Leverage after the order | 10x (or the market max if lower) | lower (`maxLeverage`) |
 | Reduce-only | off | `reduceOnly: true` |
 
+**Reduce-only is a build-time + in-flight-reservation guarantee, not an on-chain one.** v2.2's trade instruction has no reduce-only flag. The server checks a reduce-only order (or a close) against your position when it builds it, then reserves its size until the transaction lands, expires or is cancelled. A further reduce-only build that would go past the position while others are in flight gets `reduce_only_inflight` (retryable, with `details.remainingQ`). Poll `txStatus(signature, { lastValidBlockHeight, messageHash })` (or `waitForTx` with both) so a landed or expired order frees its reservation; otherwise it ends after 120 s. Never send bytes you cancelled: they can still land until their `lastValidBlockHeight`. Orders sent without `reduceOnly` are not reserved.
+
 ## Fees and slippage
 
 A fill costs the **base fee** (`baseFeeBps`, the market's configured fee) plus the **spread** the matcher quotes (`totalSpreadBps`: its base spread, an adaptive fee, inventory skew and size impact, all inside that one number).

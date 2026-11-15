@@ -148,7 +148,7 @@ Every builder: validates, applies caps (3.5), builds, sets blockhash/CU/priority
 | Order notional | 5,000 USD-equivalent per order (devnet) | lower via `maxNotional` | `notional_cap_exceeded` |
 | Size | market `maxTradeSizePerSide` (`lib/limits/risk-limits.ts:277`) | — | `size_cap_exceeded` |
 | Leverage after the trade | min(market max, 10x) | lower via `maxLeverage` | `leverage_cap_exceeded` |
-| Reduce-only | off | `reduceOnly:true` | `reduce_only_violation` if the order would grow or flip |
+| Reduce-only | off | `reduceOnly:true` | `reduce_only_violation` if the order would grow or flip; `reduce_only_inflight` (409, retryable) if reduce-only orders already in flight for the position plus this one exceed it. Build-time + in-flight reservation, NOT on-chain: TradeCpi has no reduce-only flag (`app/lib/trade-ix.ts`), so the server reserves each reduce-only / close size per (owner, market, account) in the bot-API KV (memory fallback) for 120 s (longer than a blockhash lives), released on cancel, when `GET /v1/tx` sees it land, or with `?messageHash=` once past its `lastValidBlockHeight` (`app/lib/bot-api/reduce-reservations.ts`). Cancelled bytes can still land until their height. An on-chain position-sequence guard is future work |
 | Fee | the market's current cap; a rise needs `maxFeeBps` (#3836) | `maxFeeBps` | `fee_raise_required`, `fee_above_max` |
 | Oracle staleness | refuse when stale | — | `market_stale` |
 | Retired market (the app's blocklist, `lib/blocklist.ts` `isBlockedSlab`, same list and rule as `hooks/useDeposit.ts`) | deposits and orders that add risk refused; reduce-only orders, closes and withdrawals allowed so funds can leave; `GET /v1/markets` leaves retired markets out (counted in `retired`), a direct `GET /v1/markets/{market}` answers with `retired: true` | — | `market_retired` (409) |
@@ -211,7 +211,7 @@ Later:
 - Fills/history from the lot-aware indexer (#218) once deployed.
 - Multi-asset markets, splits over the per-fill cap, lot markets.
 - Durable nonces; versioned v0 txs with address lookup tables.
-- On-chain features that need the program: resting/limit orders, TP/SL, dead-man cancel, delegated trade-only keys.
+- On-chain features that need the program: an on-chain reduce-only / position-sequence guard (a stale reduce fails instead of flipping), resting/limit orders, TP/SL, dead-man cancel, delegated trade-only keys.
 - MCP server over the SDK, read-only by default.
 - Mainnet: only after launch, its own review, and Khubair's go.
 
@@ -219,7 +219,7 @@ Later:
 
 | Risk | Mitigation |
 |---|---|
-| The API builds a tx that trades worse than asked | Limit price always set (0 refused), slippage capped, reduce-only checked server-side, exact-bytes simulation, parity tests against the app builder |
+| The API builds a tx that trades worse than asked | Limit price always set (0 refused), slippage capped, reduce-only checked server-side at build time plus an in-flight reservation per position (not on-chain; a position-sequence guard in the program is future work), exact-bytes simulation, parity tests against the app builder |
 | Two copies of the money path drift | Builders move out of hooks into lib and the hooks call them (as #3836 did for `resolveLpTradeAccounts`) |
 | RPC cost / abuse: simulations are expensive | Builds need a key; weighted limits; global build ceiling; LP cache; kill switch |
 | Key leak | Hashed with pepper, shown once, revocable, keyId in logs only; a key cannot move funds |

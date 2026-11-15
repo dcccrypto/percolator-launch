@@ -11,6 +11,7 @@ import { findOwnerPortfolio } from "@/lib/owner-portfolio";
 import { parsePortfolio } from "@/lib/v22/layout";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { explainNoLp } from "../reads/no-lp";
+import { reserveReduce } from "../reduce-reservations";
 import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, MAX_SLIPPAGE_BPS, CAPS_PROVISIONAL_NOTE } from "./caps";
 import {
   finalizeTx,
@@ -120,6 +121,9 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
   let seen: { positionBeforeQ: bigint | null; reducing: boolean } | null = null;
   let fees: Awaited<ReturnType<typeof checkOpenMarketGuards>> = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null };
   let r: Awaited<ReturnType<typeof buildV22Trade>>;
+  // A reduce-only order (and a close) reserves its size against the position until it lands or expires (../reduce-reservations.ts),
+  // so two built from the same position cannot both land and flip it.
+  let reservation: Awaited<ReturnType<typeof reserveReduce>> | null = null;
   try {
     meta.rpcCalls += 8; // market, LP (cached), portfolio scan, identities, fee, lev guard, blockhash, priority fee
     meta.sims += 1;
@@ -136,10 +140,19 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       preflight: async (p) => {
         seen = { positionBeforeQ: p.positionBeforeQ, reducing: p.reducing };
         applied = checkOrderCaps(caps, p);
+        if (caps.reduceOnly && p.positionBeforeQ !== null) {
+          const abs = (n: bigint) => (n < 0n ? -n : n);
+          reservation = await reserveReduce(
+            { owner: input.owner.toBase58(), market: input.market.toBase58(), account: (p.account ?? input.portfolio)?.toBase58() ?? "-" },
+            abs(p.positionBeforeQ),
+            abs(p.size),
+          );
+        }
         fees = await checkOpenMarketGuards(connection, p);
       },
     });
   } catch (e) {
+    await (reservation as Awaited<ReturnType<typeof reserveReduce>> | null)?.release().catch(() => undefined);
     if (e instanceof ApiError) throw e;
     if (e instanceof TradeBuildRefusal) {
       // No LP: say whether a retry could ever help (a dormant or unsupported market cannot be traded, whatever the retry).
@@ -149,7 +162,19 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     throw new ApiError("rpc_unavailable");
   }
   const transactions: ReturnedTx[] = [];
-  for (const t of r.transactions) transactions.push(await finalizeTx(connection, t.transaction, t.purpose, meta));
+  const held = reservation as Awaited<ReturnType<typeof reserveReduce>> | null;
+  try {
+    for (const t of r.transactions) transactions.push(await finalizeTx(connection, t.transaction, t.purpose, meta));
+  } catch (e) {
+    await held?.release().catch(() => undefined);
+    throw e;
+  }
+  if (held) {
+    // Only an order transaction reduces the position; a crank-only answer (resubmitAfter) frees the reservation.
+    const orderTx = transactions.find((t) => t.purpose === "order");
+    if (orderTx) await held.attach(orderTx.messageHash, r.lastValidBlockHeight);
+    else await held.release();
+  }
   const a = applied as ReturnType<typeof checkOrderCaps> | null;
   return {
     transactions,

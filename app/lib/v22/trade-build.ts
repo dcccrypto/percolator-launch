@@ -120,6 +120,8 @@ export interface TradePreflight {
   market: PublicKey;
   /** The market's LP side the order trades against. */
   lp: { accountB: PublicKey; matcherCtx: PublicKey };
+  /** The taker's trading account (portfolio) the order trades from. */
+  account?: PublicKey;
 }
 
 /**
@@ -409,6 +411,7 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
         programId,
         market: slabPk,
         lp: { accountB: lp.accountB, matcherCtx: lp.matcherCtx },
+        account: accountA,
       });
     } catch (e) {
       throw new PreflightThrow(e);

@@ -155,6 +155,8 @@ import { POST as withdrawals } from "@/app/api/v1/withdrawals/route";
 import { GET as tx } from "@/app/api/v1/tx/[signature]/route";
 import { buildOpenApi } from "@/lib/bot-api/openapi";
 import { validate } from "../lib/bot-api/openapi-validate";
+import bs58 from "bs58";
+const bs58encode = (b: Uint8Array) => bs58.encode(b);
 
 let key: string;
 const post = (h: (r: NextRequest) => Promise<Response>, path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -450,7 +452,8 @@ describe("retired markets (the app's blocklist): no new money or risk in, exits 
     m.position = 7_000_000n;
     m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
     expect((await post(orders, "/api/v1/orders", order({ side: "sell", size: "1000000", reduceOnly: true }))).status).toBe(200);
-    expect((await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() })).status).toBe(200);
+    // The reduce-only order above reserves 1M of the 7M in flight, so the close takes the rest.
+    expect((await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58(), size: "6000000" })).status).toBe(200);
   });
   it("withdrawals still build", async () => {
     expect((await post(withdrawals, "/api/v1/withdrawals", dep())).status).toBe(200);
@@ -459,6 +462,79 @@ describe("retired markets (the app's blocklist): no new money or risk in, exits 
     m.blocked.clear();
     expect((await post(deposits, "/api/v1/deposits", dep())).status).toBe(200);
     expect((await post(orders, "/api/v1/orders", order())).status).toBe(200);
+  });
+});
+
+describe("risk seat: in-flight reduce-only reservations (two reduce-only orders cannot flip a position)", () => {
+  const long10 = () => {
+    m.position = 10_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 10_000_000n, reducing: true };
+  };
+  const sell = (size: string, headers: Record<string, string> = {}) => post(orders, "/api/v1/orders", order({ side: "sell", size, reduceOnly: true }), headers);
+  it("long 10, two reduce-only sells of 6: the second is refused with reduce_only_inflight and the remaining size", async () => {
+    long10();
+    expect((await sell("6000000")).status).toBe(200);
+    const r = await sell("6000000");
+    const e = (await r.json()).error;
+    expect([r.status, e.code, e.retryable]).toEqual([409, "reduce_only_inflight", true]);
+    expect(e.details).toMatchObject({ positionQ: "10000000", reservedQ: "6000000", remainingQ: "4000000", sizeQ: "6000000" });
+    expect(m.simTxs).toHaveLength(1); // the refused one was never simulated
+  });
+  it("sells of 6 then 4 both build (exactly the position)", async () => {
+    long10();
+    expect((await sell("6000000")).status).toBe(200);
+    expect((await sell("4000000")).status).toBe(200);
+    expect((await (await sell("1")).json()).error.code).toBe("reduce_only_inflight");
+  });
+  it("a second full close while the first is in flight is refused", async () => {
+    long10();
+    expect((await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() })).status).toBe(200);
+    const r = await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() });
+    expect((await r.json()).error).toMatchObject({ code: "reduce_only_inflight", details: { remainingQ: "0" } });
+  });
+  it("an order without reduceOnly is not reserved and not blocked by reservations", async () => {
+    long10();
+    expect((await sell("6000000")).status).toBe(200);
+    expect((await post(orders, "/api/v1/orders", order({ side: "sell", size: "6000000" }))).status).toBe(200);
+  });
+  it("cancel releases the reservation", async () => {
+    long10();
+    expect((await sell("6000000", { "idempotency-key": "reduce-a-1" })).status).toBe(200);
+    expect((await sell("6000000")).status).toBe(409);
+    const c = await (await post(cancel, "/api/v1/orders/cancel", { idempotencyKey: "reduce-a-1" })).json();
+    expect(c).toMatchObject({ cancelled: true, reservationsReleased: 1 });
+    expect((await sell("6000000")).status).toBe(200);
+  });
+  it("a refused or failed build frees its reservation", async () => {
+    long10();
+    m.finalSims = [{ err: { InstructionError: [3, { Custom: 49 }] }, logs: [WRAPPER_FAILED("31")] }];
+    expect((await sell("6000000")).status).toBe(422);
+    expect((await sell("6000000")).status).toBe(200);
+  });
+  it("tx status: a landed order frees its reservation", async () => {
+    long10();
+    const b = await (await sell("6000000")).json();
+    const msg = Transaction.from(Buffer.from(b.transactions[0].transaction, "base64")).compileMessage();
+    m.landed = { meta: { logMessages: [] }, transaction: { message: msg } } as unknown as typeof m.landed;
+    m.sigStatus = { slot: 9, confirmations: 1, err: null, confirmationStatus: "confirmed" };
+    const sig = bs58encode(new Uint8Array(64).fill(7));
+    const t = await (await tx(new NextRequest(`http://x/api/v1/tx/${sig}`, { headers: { authorization: `Bearer ${key}`, "x-forwarded-for": "1.1.1.1" } }), { params: Promise.resolve({ signature: sig }) })).json();
+    expect(t).toMatchObject({ status: "confirmed", reservationReleased: true });
+    expect((await sell("6000000")).status).toBe(200);
+  });
+  it("tx status: an expired order frees it with ?messageHash= only once past its lastValidBlockHeight", async () => {
+    long10();
+    const b = await (await sell("6000000")).json();
+    const hash = b.transactions[0].messageHash as string;
+    const sig = bs58encode(new Uint8Array(64).fill(8));
+    const ask = async () =>
+      (await tx(new NextRequest(`http://x/api/v1/tx/${sig}?lastValidBlockHeight=${b.lastValidBlockHeight}&messageHash=${hash}`, { headers: { authorization: `Bearer ${key}`, "x-forwarded-for": "1.1.1.1" } }), { params: Promise.resolve({ signature: sig }) })).json();
+    m.blockHeight = b.lastValidBlockHeight; // still able to land
+    expect(await ask()).toMatchObject({ status: "pending", reservationReleased: false });
+    expect((await sell("6000000")).status).toBe(409);
+    m.blockHeight = b.lastValidBlockHeight + 1;
+    expect(await ask()).toMatchObject({ status: "expired", reservationReleased: true });
+    expect((await sell("6000000")).status).toBe(200);
   });
 });
 

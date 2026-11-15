@@ -8,6 +8,7 @@ import { API_VERSION, MAX_BODY_BYTES } from "./config";
 import { ERROR_CATALOG, type ErrorCode } from "./errors";
 import { TIER_BUDGET, GLOBAL_BUILD_BUDGET, GLOBAL_READ_BUDGET, PRINCIPAL_BUILD_CAP, ANON_READ_POOL, PRINCIPAL_READ_CAP, WINDOW_SEC, AUTH_FAIL_LIMIT } from "./limits";
 import { TTL_SEC } from "./idempotency";
+import { RESERVATION_TTL_SEC } from "./reduce-reservations";
 import { DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS, DEFAULT_MAX_NOTIONAL_USD, DEFAULT_MAX_LEVERAGE, CAPS_PROVISIONAL_NOTE } from "./builders/caps";
 import { DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT } from "./reads/history";
 import { DEPTH_LADDER_USD } from "./reads/quote";
@@ -273,7 +274,7 @@ function schemas(): Obj {
         market: pubkey,
         side: { type: "string", enum: ["buy", "sell"] },
         size: uint("Engine q, a positive decimal string, no sign (a negative size is refused). `side` sets the direction; this is NOT the signed `size` the quote takes."),
-        reduceOnly: bool("Refuse unless the order shrinks the position without flipping it"),
+        reduceOnly: bool(`Refuse unless the order shrinks the position without flipping it. A BUILD-TIME plus in-flight-reservation guarantee, NOT an on-chain one: v2.2's trade instruction has no reduce-only flag, so the program itself would let a stale reduce flip the position. The server checks the order against the position read now, then reserves its size per (owner, market, trading account) until the transaction lands (seen by GET /tx/{signature}), expires (GET /tx/{signature}?messageHash= after its lastValidBlockHeight, or after ${RESERVATION_TTL_SEC} s), or is cancelled (POST /orders/cancel). A further reduce-only build is refused with reduce_only_inflight (details positionQ, reservedQ, remainingQ) when the reserved sizes plus its own exceed the position. Only reduce-only orders and closes are reserved; bytes you were handed and then cancel can still land until their lastValidBlockHeight, so do not send cancelled bytes. An on-chain position-sequence guard is future work.`),
         slippageBps: int(`Default ${DEFAULT_SLIPPAGE_BPS}, min 1, max ${MAX_SLIPPAGE_BPS} (both a ${CAPS_PROVISIONAL_NOTE}). Not with limitPriceE6. Measured from the MARK (the effective price), not from the expected fill: it must cover the spread, fee and size impact (quote.totalSpreadBps and allInCostBps). A value below the expected fill is refused before simulating with slippage_cap_exceeded and details {limitPriceE6, estExecPriceE6, minSlippageBps}; reducing orders are not pre-checked. 0 is refused (a limit at the effective price cannot fill).`, { minimum: 1, maximum: MAX_SLIPPAGE_BPS }),
         limitPriceE6: uint("Explicit limit, positive; may not be more than the max slippage worse than the effective price. Not with slippageBps."),
         maxFeeBps: int("The highest fee CAP (feeCapBps, bps) you accept. A build whose cap would be higher is refused with fee_above_max. Without it the cap the market requires now is signed (it is shown as summary.feeCapBps, and is well above the expected fee), and a later utilisation-fee raise needs it (fee_raise_required).", { minimum: 0, maximum: 10000 }),
@@ -369,7 +370,7 @@ function schemas(): Obj {
       ["transactions", "blockhash", "lastValidBlockHeight", "resubmitAfter", "summary"],
     ),
     CancelResponse: obj(
-      { idempotencyKey: str(), cancelled: bool(), alreadyCancelled: bool(), lastValidBlockHeight: nullable(int()), onchain: str() },
+      { idempotencyKey: str(), cancelled: bool(), alreadyCancelled: bool(), lastValidBlockHeight: nullable(int()), reservationsReleased: int("Reduce-only reservations this cancel released (see OrderRequest.reduceOnly)"), onchain: str() },
       ["idempotencyKey", "cancelled", "alreadyCancelled", "lastValidBlockHeight"],
     ),
     TxStatus: obj(
@@ -382,6 +383,7 @@ function schemas(): Obj {
         blockHeight: nullable(int()),
         lastValidBlockHeight: nullable(int()),
         observedAt: str(undefined, { format: "date-time" }),
+        reservationReleased: bool("true when this call ended the reduce-only reservation the transaction held (it landed, or it expired and messageHash was given)"),
       },
       ["signature", "status", "observedAt"],
     ),
@@ -565,7 +567,7 @@ function paths(): Obj {
       scope: "build",
       weight: 10,
       idempotent: true,
-      description: "A reduce-only order for the whole position (or `size` of it), unsigned and simulated.",
+      description: "A reduce-only order for the whole position (or `size` of it), unsigned and simulated. Same build-time + in-flight-reservation guarantee as OrderRequest.reduceOnly (not an on-chain one): a second close while the first is in flight is refused with reduce_only_inflight.",
       body: "CloseRequest",
       ok: json(ref("BuildResponse")),
       errors: [400, 404, 409, 413, 422],
@@ -597,8 +599,8 @@ function paths(): Obj {
       tag: "Trading",
       scope: "read",
       weight: 1,
-      description: "`expired` means not seen and the chain is past lastValidBlockHeight: the tx can never land, rebuilding is safe. Without lastValidBlockHeight an unseen tx is `unknown`.",
-      parameters: [pathParam("signature", "Base58 transaction signature"), q("lastValidBlockHeight", int(undefined, { minimum: 0 }), "From the build response")],
+      description: "Also ends the in-flight reduce-only reservation a landed or expired order held (see OrderRequest.reduceOnly). `expired` means not seen and the chain is past lastValidBlockHeight: the tx can never land, rebuilding is safe. Without lastValidBlockHeight an unseen tx is `unknown`.",
+      parameters: [pathParam("signature", "Base58 transaction signature"), q("lastValidBlockHeight", int(undefined, { minimum: 0 }), "From the build response"), q("messageHash", str(undefined, { pattern: "^[0-9a-f]{64}$" }), "Optional: transactions[].messageHash from the build response. Lets an expired reduce-only order free its in-flight reservation early (only once the chain is past that build's lastValidBlockHeight); a landed one is freed without it")],
       ok: json(ref("TxStatus")),
       errors: [400, 503],
     }),

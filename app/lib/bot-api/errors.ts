@@ -42,6 +42,7 @@ export const ERROR_CATALOG = {
   size_cap_exceeded: { status: 422, retryable: false, message: "order size is above the market's per-side maximum" },
   leverage_cap_exceeded: { status: 422, retryable: false, message: "leverage after this order would be above the cap" },
   reduce_only_violation: { status: 422, retryable: false, message: "a reduce-only order would grow or flip the position" },
+  reduce_only_inflight: { status: 409, retryable: true, message: "reduce-only orders already in flight for this position leave too little to reduce; wait for them to land or expire, or cancel one" },
   no_position: { status: 409, retryable: false, message: "there is no open position to close" },
   insufficient_margin: { status: 422, retryable: false, message: "not enough margin for this order" },
   insufficient_funds: { status: 422, retryable: false, message: "not enough funds for this transfer" },

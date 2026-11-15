@@ -49,6 +49,8 @@ export interface BuildOptions extends CallOptions {
 export interface WaitForTxOptions extends CallOptions {
   /** From the build response; lets the API tell `expired` from `unknown`. */
   lastValidBlockHeight?: number;
+  /** transactions[].messageHash from the build: lets an expired reduce-only order free its in-flight reservation on the server. */
+  messageHash?: string;
   /** Stop at `confirmed` (default) or wait for `finalized`. */
   until?: "confirmed" | "finalized";
   intervalMs?: number;
@@ -146,7 +148,7 @@ export class BotClient {
   history(wallet: string, q: { limit?: number; before?: string } = {}, o?: CallOptions) {
     return this.get<History>(`/accounts/${seg(wallet)}/history`, q, o);
   }
-  txStatus(signature: string, q: { lastValidBlockHeight?: number } = {}, o?: CallOptions) {
+  txStatus(signature: string, q: { lastValidBlockHeight?: number; messageHash?: string } = {}, o?: CallOptions) {
     return this.get<TxStatus>(`/tx/${seg(signature)}`, q, o);
   }
 
@@ -175,7 +177,7 @@ export class BotClient {
     const deadline = Date.now() + (o.timeoutMs ?? 90_000);
     const done = new Set<TxState>(o.until === "finalized" ? ["finalized", "failed", "expired"] : ["confirmed", "finalized", "failed", "expired"]);
     for (;;) {
-      const s = await this.txStatus(signature, { lastValidBlockHeight: o.lastValidBlockHeight }, { signal: o.signal });
+      const s = await this.txStatus(signature, { lastValidBlockHeight: o.lastValidBlockHeight, ...(o.messageHash ? { messageHash: o.messageHash } : {}) }, { signal: o.signal });
       o.onUpdate?.(s);
       if (done.has(s.status)) return s;
       if (Date.now() + interval > deadline) {

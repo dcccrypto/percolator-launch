@@ -128,9 +128,9 @@ describe("idempotency", () => {
   it("cancel blocks any replay and reports lastValidBlockHeight", async () => {
     await beginIdempotent("k", "key-0002", "h", kv);
     await finishIdempotent("k", "key-0002", "h", { status: 200, body: { lastValidBlockHeight: 4242 } }, kv);
-    expect(await cancelIdempotent("k", "key-0002", kv)).toEqual({ found: true, alreadyCancelled: false, lastValidBlockHeight: 4242 });
+    expect(await cancelIdempotent("k", "key-0002", kv)).toEqual({ found: true, alreadyCancelled: false, lastValidBlockHeight: 4242, messageHashes: [] });
     expect(await beginIdempotent("k", "key-0002", "h", kv)).toEqual({ kind: "cancelled" });
-    expect(await cancelIdempotent("k", "key-0002", kv)).toEqual({ found: true, alreadyCancelled: true, lastValidBlockHeight: 4242 });
+    expect(await cancelIdempotent("k", "key-0002", kv)).toEqual({ found: true, alreadyCancelled: true, lastValidBlockHeight: 4242, messageHashes: [] });
     expect(await cancelIdempotent("k", "nope-0000", kv)).toEqual({ found: false });
   });
   it("validates the header", () => {

@@ -11,7 +11,7 @@ export type ErrorCode =
   | "no_portfolio" | "bad_portfolio" | "no_lp" | "slippage_cap_exceeded" | "notional_cap_exceeded" | "size_cap_exceeded"
   | "leverage_cap_exceeded" | "reduce_only_violation" | "no_position" | "insufficient_margin" | "insufficient_funds"
   | "fee_raise_required" | "fee_above_max" | "fee_unreadable" | "too_large" | "simulation_failed" | "bad_signature"
-  | "market_retired";
+  | "market_retired" | "reduce_only_inflight";
 
 /** Codes the SDK itself raises when there was no API envelope. */
 export type ClientErrorCode = "network_error" | "bad_response" | "timeout";
@@ -345,6 +345,8 @@ export interface CancelResponse {
   cancelled: boolean;
   alreadyCancelled: boolean;
   lastValidBlockHeight: number | null;
+  /** Reduce-only reservations the cancel released. */
+  reservationsReleased?: number;
   onchain: string;
 }
 
@@ -359,6 +361,8 @@ export interface TxStatus {
   blockHeight: number | null;
   lastValidBlockHeight: number | null;
   observedAt: string;
+  /** This call ended the reduce-only reservation the transaction held. */
+  reservationReleased?: boolean;
 }
 
 export interface Health {
