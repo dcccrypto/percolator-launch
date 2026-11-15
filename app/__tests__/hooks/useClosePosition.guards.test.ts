@@ -15,6 +15,7 @@ const H = vi.hoisted(() => ({
   fetchFails: false,
   wallet: null as unknown,
   prewarm: vi.fn(),
+  raw: null as Uint8Array | null,
 }));
 
 vi.mock("@/hooks/useTrade", () => ({ useTrade: () => ({ trade: H.trade }), prewarmTradeSubmission: H.prewarm }));
@@ -25,7 +26,7 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: () => H.user }));
 vi.mock("@/hooks/useMarketHealth", () => ({ useSingleMarketHealth: () => null }));
 vi.mock("@/components/providers/SlabProvider", () => ({
-  useSlabState: () => ({ accounts: [], raw: null, programId: null }),
+  useSlabState: () => ({ accounts: [], raw: H.raw, programId: null }),
 }));
 vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => H.mock }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => true }));
@@ -48,6 +49,8 @@ import { useClosePosition } from "@/hooks/useClosePosition";
 import { seedLotExp0 } from "../helpers/v22-fixtures";
 import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { TARGET_COPY } from "@/lib/portfolio-target";
+import { V22_COPY } from "@/lib/v22/copy";
 import { Keypair } from "@solana/web3.js";
 
 const SLAB = "AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr";
@@ -61,6 +64,7 @@ beforeEach(() => {
   H.pos = 100n;
   H.fetchFails = false;
   H.wallet = null;
+  H.raw = null;
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -145,8 +149,8 @@ describe("useClosePosition — guards (lots known)", () => {
     H.pos = 0n;
     const { result } = renderHook(() => useClosePosition(SLAB));
     const { thrown } = await close(result.current, 100);
-    expect(thrown).toBeInstanceOf(Error);
-    expect(result.current.error).toBeTruthy();
+    expect((thrown as Error).message).toBe(TARGET_COPY.flat);
+    expect(result.current.error).toBe(TARGET_COPY.flat);
     expect(H.trade).not.toHaveBeenCalled();
   });
 
@@ -154,8 +158,8 @@ describe("useClosePosition — guards (lots known)", () => {
     H.pos = 1n;
     const { result } = renderHook(() => useClosePosition(SLAB));
     const { thrown } = await close(result.current, 10);
-    expect(thrown).toBeInstanceOf(Error);
-    expect(result.current.error).toBeTruthy();
+    expect((thrown as Error).message).toBe(TARGET_COPY.tooSmall);
+    expect(result.current.error).toBe(TARGET_COPY.tooSmall);
     expect(H.trade).not.toHaveBeenCalled();
   });
 
@@ -169,10 +173,11 @@ describe("useClosePosition — guards (lots known)", () => {
   });
 
   it("a named account on a legacy (non-v17) market: not matched, nothing sent", async () => {
-    // raw is null in this harness, so the market-not-loaded refusal fires first; both are calm refusals.
+    H.raw = new Uint8Array(8); // loaded, but not a v17/v18 wrapper account
     const { result } = renderHook(() => useClosePosition(SLAB));
     const { thrown } = await close(result.current, 100, { portfolioPk: Keypair.generate().publicKey });
-    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(TARGET_COPY.unmatched);
+    expect(result.current.error).toBe(TARGET_COPY.unmatched);
     expect(H.trade).not.toHaveBeenCalled();
   });
 
@@ -212,11 +217,15 @@ describe("useClosePosition — lot market with unknown exponent", () => {
   it("refuses to close and sends nothing", async () => {
     __setDevnetV22ForTest(true);
     __setUnknownLotExpForTest(null);
-    const { result } = renderHook(() => useClosePosition(SLAB));
-    const { thrown } = await close(result.current, 100);
-    __setDevnetV22ForTest(null);
-    expect(thrown).toBeInstanceOf(Error);
-    expect(result.current.error).toBeTruthy();
-    expect(H.trade).not.toHaveBeenCalled();
+    try {
+      const { result } = renderHook(() => useClosePosition(SLAB));
+      const { thrown } = await close(result.current, 100);
+      expect((thrown as Error).message).toBe(V22_COPY.lot.unitsUnknown);
+      expect(result.current.error).toBe(V22_COPY.lot.unitsUnknown);
+      expect(H.trade).not.toHaveBeenCalled();
+    } finally {
+      __setDevnetV22ForTest(null);
+      __setUnknownLotExpForTest(null);
+    }
   });
 });
