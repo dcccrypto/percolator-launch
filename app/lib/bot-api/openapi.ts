@@ -90,6 +90,7 @@ function schemas(): Obj {
         feeBps: big("The market's configured BASE trade fee in bps. A fill's expected fee is on the quote (expectedFeeBps); the cap a build signs is feeCapBps"),
         maxLeverage: nullable(num()),
         openInterest: obj({ longQ: big(), shortQ: big() }, ["longQ", "shortQ"]),
+        retired: bool("true: the market is on the app's retired-market blocklist. Deposits and orders that add risk are refused with market_retired; closes, reduce-only orders and withdrawals still work. Retired markets are left out of GET /markets and appear only on direct reads."),
       },
       ["market", "programId", "collateralMint", "collateralDecimals", "effectivePriceE6", "oracle", "feeBps", "openInterest"],
     ),
@@ -119,7 +120,7 @@ function schemas(): Obj {
       ],
     },
     MarketList: obj(
-      { slot: int(), observedAt: str(undefined, { format: "date-time" }), count: int(), skipped: int("Accounts left out: multi-asset or not v2.2"), markets: arr(ref("Market")) },
+      { slot: int(), observedAt: str(undefined, { format: "date-time" }), count: int(), skipped: int("Accounts left out: multi-asset or not v2.2"), retired: int("Retired markets left out (the app's blocklist); a direct GET /markets/{market} still answers for them with retired: true"), markets: arr(ref("Market")) },
       ["slot", "observedAt", "count", "markets"],
     ),
     MarketOne: obj({ slot: int(), observedAt: str(undefined, { format: "date-time" }), market: ref("MarketDetail") }, ["slot", "observedAt", "market"]),

@@ -10,7 +10,8 @@ export type ErrorCode =
   | "rpc_unavailable" | "internal" | "market_not_found" | "market_unsupported" | "market_unreadable" | "market_stale"
   | "no_portfolio" | "bad_portfolio" | "no_lp" | "slippage_cap_exceeded" | "notional_cap_exceeded" | "size_cap_exceeded"
   | "leverage_cap_exceeded" | "reduce_only_violation" | "no_position" | "insufficient_margin" | "insufficient_funds"
-  | "fee_raise_required" | "fee_above_max" | "fee_unreadable" | "too_large" | "simulation_failed" | "bad_signature";
+  | "fee_raise_required" | "fee_above_max" | "fee_unreadable" | "too_large" | "simulation_failed" | "bad_signature"
+  | "market_retired";
 
 /** Codes the SDK itself raises when there was no API envelope. */
 export type ClientErrorCode = "network_error" | "bad_response" | "timeout";
@@ -65,6 +66,8 @@ export interface Market {
   feeBps: string;
   maxLeverage: number | null;
   openInterest: { longQ: string; shortQ: string };
+  /** On the app's retired-market blocklist: deposits and opens are refused (market_retired); exits still work. */
+  retired?: boolean;
 }
 
 export interface MarketDetail extends Market {
@@ -74,6 +77,8 @@ export interface MarketDetail extends Market {
 export interface MarketList extends Meta {
   count: number;
   skipped: number;
+  /** Retired markets left out of the list. */
+  retired?: number;
   markets: Market[];
 }
 

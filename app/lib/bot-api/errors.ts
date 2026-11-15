@@ -35,6 +35,7 @@ export const ERROR_CATALOG = {
   no_portfolio: { status: 409, retryable: false, message: "the wallet has no trading account on this market" },
   bad_portfolio: { status: 400, retryable: false, message: "portfolio is not this wallet's trading account on this market" },
   no_lp: { status: 503, retryable: true, message: "this market has no usable LP right now" },
+  market_retired: { status: 409, retryable: false, message: "this market is retired: deposits and orders that add risk are refused; closes, reduce-only orders and withdrawals still work" },
   // safety caps
   slippage_cap_exceeded: { status: 422, retryable: false, message: "slippage is above the allowed maximum" },
   notional_cap_exceeded: { status: 422, retryable: false, message: "order notional is above the cap" },

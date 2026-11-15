@@ -151,6 +151,7 @@ Every builder: validates, applies caps (3.5), builds, sets blockhash/CU/priority
 | Reduce-only | off | `reduceOnly:true` | `reduce_only_violation` if the order would grow or flip |
 | Fee | the market's current cap; a rise needs `maxFeeBps` (#3836) | `maxFeeBps` | `fee_raise_required`, `fee_above_max` |
 | Oracle staleness | refuse when stale | — | `market_stale` |
+| Retired market (the app's blocklist, `lib/blocklist.ts` `isBlockedSlab`, same list and rule as `hooks/useDeposit.ts`) | deposits and orders that add risk refused; reduce-only orders, closes and withdrawals allowed so funds can leave; `GET /v1/markets` leaves retired markets out (counted in `retired`), a direct `GET /v1/markets/{market}` answers with `retired: true` | — | `market_retired` (409) |
 | Request deadline | none | `expiresAfter` (unix ms) | `request_expired` |
 
 Error envelope: `{"error":{"code","message","retryable","onchain":{"code","name"}?,"logs"?}}`. On-chain codes are decoded to names from the existing maps (e.g. 49 `EngineInsufficientInitialMargin` -> `insufficient_margin`, 27 `OracleStale` -> `market_stale`, 21 `EngineLockActive`, 121 `EngineLossStale`). Full catalog in the OpenAPI spec.

@@ -39,9 +39,12 @@ const m = vi.hoisted(() => ({
   sigStatus: null as null | { slot: number; confirmations: number | null; err: unknown; confirmationStatus?: string },
   blockHeight: 100,
   lamports: 1_000_000_000,
+  blocked: new Set<string>(),
   landed: null as null | { meta: { logMessages: string[] }; transaction: { message: { staticAccountKeys: PublicKey[]; compiledInstructions: Array<{ programIdIndex: number }> } } },
 }));
 
+// The app's retired-market blocklist (lib/blocklist.ts) is a module-level set built from env at import: driven per test here.
+vi.mock("@/lib/blocklist", () => ({ isBlockedSlab: (s: string | null | undefined) => !!s && m.blocked.has(s) }));
 // The wrapper whose error table names a Custom(n): only a code this program returned is named (lib/bot-api/onchain.ts).
 vi.mock("@/lib/config", async (orig) => ({
   ...(await orig<typeof import("@/lib/config")>()),
@@ -169,7 +172,7 @@ beforeEach(async () => {
   Object.assign(m, {
     pre: { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n, reducing: false }, guards: 0, guardThrow: null,
     buildCalls: 0, buildThrow: null, resubmit: false, finalSims: [], simTxs: [], gate: { err: null, logs: [] }, portfolioFound: true,
-    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null,
+    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null, blocked: new Set(),
   });
 });
 afterEach(() => {
@@ -424,6 +427,38 @@ describe("POST /api/v1/deposits and /api/v1/withdrawals", () => {
   it("a portfolio that is not this owner's on this market is refused", async () => {
     m.pf.owner = Keypair.generate().publicKey;
     expect((await (await post(withdrawals, "/api/v1/withdrawals", dep())).json()).error.code).toBe("bad_portfolio");
+  });
+});
+
+describe("retired markets (the app's blocklist): no new money or risk in, exits always allowed", () => {
+  const dep = (o: Record<string, unknown> = {}) => ({ owner: OWNER.toBase58(), market: SLAB.toBase58(), amount: "25000000", ...o });
+  beforeEach(() => {
+    m.blocked.add(SLAB.toBase58());
+  });
+  it("POST /v1/deposits is refused with market_retired before any read or simulation", async () => {
+    const r = await post(deposits, "/api/v1/deposits", dep());
+    const e = (await r.json()).error;
+    expect([r.status, e.code, e.retryable]).toEqual([409, "market_retired", false]);
+    expect(m.simTxs).toHaveLength(0);
+  });
+  it("POST /v1/orders that add risk are refused with market_retired; nothing is simulated", async () => {
+    const r = await post(orders, "/api/v1/orders", order());
+    expect([r.status, (await r.json()).error.code]).toEqual([409, "market_retired"]);
+    expect(m.simTxs).toHaveLength(0);
+  });
+  it("reduce-only orders and closes still build, so a holder can exit", async () => {
+    m.position = 7_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
+    expect((await post(orders, "/api/v1/orders", order({ side: "sell", size: "1000000", reduceOnly: true }))).status).toBe(200);
+    expect((await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() })).status).toBe(200);
+  });
+  it("withdrawals still build", async () => {
+    expect((await post(withdrawals, "/api/v1/withdrawals", dep())).status).toBe(200);
+  });
+  it("a market not on the list is unaffected", async () => {
+    m.blocked.clear();
+    expect((await post(deposits, "/api/v1/deposits", dep())).status).toBe(200);
+    expect((await post(orders, "/api/v1/orders", order())).status).toBe(200);
   });
 });
 

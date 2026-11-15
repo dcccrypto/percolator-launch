@@ -7,6 +7,7 @@
  * when it is set; many markets leave it 0 (keeper-pushed AUTH_MARK mode), and then the documented default
  * DEFAULT_STALE_SECS applies and `staleBoundSource` says "default". Slots are converted at 400 ms.
  */
+import { isBlockedSlab } from "@/lib/blocklist";
 import { PublicKey } from "@solana/web3.js";
 import { parseAssetOracleProfileV17, parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { ApiError } from "../errors";
@@ -56,6 +57,8 @@ export interface MarketView {
   feeBps: bigint;
   maxLeverage: number | null;
   openInterest: { longQ: bigint; shortQ: bigint };
+  /** On the app's retired-market blocklist (lib/blocklist.ts). */
+  retired: boolean;
 }
 
 export interface MarketDetail extends MarketView {
@@ -143,6 +146,8 @@ export function decodeMarket(raw: Uint8Array, at: { market: PublicKey; programId
     feeBps: cfg.tradeFeeBps,
     maxLeverage: maxLeverageFromSlab(raw),
     openInterest: { longQ: engine.oiEffLongQ, shortQ: engine.oiEffShortQ },
+    // The app's retired-market blocklist (lib/blocklist.ts): deposits and opens are refused with market_retired; exits still work.
+    retired: isBlockedSlab(at.market.toBase58()),
   };
 }
 

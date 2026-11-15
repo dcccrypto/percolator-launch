@@ -27,6 +27,7 @@ import { decodePortfolioRisk } from "@/lib/limits/decode";
 import { maxLeverageFromSlab } from "@/lib/slab-max-leverage";
 import type { Connection } from "@solana/web3.js";
 import { requireValuedCollateral } from "./collateral";
+import { isRetiredMarket, retiredMarket } from "./retired";
 import { conservativeEquity } from "./equity";
 import { openLegsValuePnl } from "../reads/account";
 import { decodeMarket } from "../reads/market";
@@ -97,6 +98,8 @@ export function checkOrderCaps(caps: OrderCaps, p: TradePreflight): { notionalUs
   if (caps.reduceOnly && !p.reducing) {
     throw new ApiError(before === 0n ? "no_position" : "reduce_only_violation");
   }
+  // A retired market (the app's blocklist, ./retired.ts): only orders that shrink the position, so a user can always exit.
+  if (!p.reducing && isRetiredMarket(p.market.toBase58())) throw retiredMarket("orders that add risk are refused");
 
   if (caps.explicitLimit) {
     // Adverse side: a buy pays up to the limit, a sell receives down to it.
