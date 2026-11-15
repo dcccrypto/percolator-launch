@@ -75,9 +75,9 @@ describe("Close tab", () => {
     expect(screen.queryByText(/No open position/)).toBeNull();
   });
 
-  it("with a wallet: shows the close form", () => {
+  it("with a wallet: shows the close form", async () => {
     setup(true);
-    expect(screen.getByTestId("close-panel")).toBeTruthy();
+    expect(await screen.findByTestId("close-panel")).toBeTruthy();
     expect(screen.queryByTestId("connect-wallet")).toBeNull();
   });
 });

@@ -170,7 +170,7 @@ const OrderTicketClosePanel = dynamic(
     ssr: false,
     loading: () => (
       <div
-        data-testid="close-panel-loading"
+        data-testid="close-panel-chunk-loading"
         role="status"
         className="min-h-[260px] rounded-none border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-8 text-center"
       >

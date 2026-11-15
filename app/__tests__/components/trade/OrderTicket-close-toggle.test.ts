@@ -16,7 +16,9 @@ const SRC = RAW.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$
 
 describe("OrderTicket — Open/Close toggle", () => {
   it("delegates Close mode to OrderTicketClosePanel and does not mount the close hook itself", () => {
-    expect(SRC).toContain('import { OrderTicketClosePanel } from "@/components/trade/OrderTicketClosePanel"');
+    // loaded on first use (next/dynamic), so the close tab's code stays out of the /trade first load
+    expect(SRC).toMatch(/const OrderTicketClosePanel = dynamic\(\s*\(\) => import\("@\/components\/trade\/OrderTicketClosePanel"\)/);
+    expect(SRC).not.toContain('import { OrderTicketClosePanel }');
     expect(SRC).toMatch(/<OrderTicketClosePanel[\s\S]*onClosed=\{handleClosed\}/);
     // the open form must not pay for useClosePosition / a reactive price
     expect(SRC).not.toMatch(/useClosePosition\(/);

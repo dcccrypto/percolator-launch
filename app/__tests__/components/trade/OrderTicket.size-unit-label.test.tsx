@@ -102,6 +102,6 @@ describe("position size is labelled with the base asset", () => {
     mocks.market = null;
     render(<OrderTicket slabAddress={SLAB} />);
     fireEvent.click(screen.getAllByTestId("trade-mode-tab").find((b) => b.getAttribute("data-mode") === "close")!);
-    expect(mocks.closeSymbol.at(-1)).toBe("TOKEN");
+    await waitFor(() => expect(mocks.closeSymbol.at(-1)).toBe("TOKEN"));
   });
 });

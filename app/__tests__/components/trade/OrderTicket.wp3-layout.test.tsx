@@ -277,7 +277,7 @@ describe("WP-3 states: at most one status line, the button names the state", () 
   it("AC3 close-only (ADL): starts on Close; the Open tab can't submit and shows no max", async () => {
     mocks.adl = true;
     render(<OrderTicket slabAddress={SLAB} />);
-    expect(screen.getByTestId("close-panel")).toBeTruthy();
+    expect(await screen.findByTestId("close-panel")).toBeTruthy();
     const closeNotes = within(ticket()).queryAllByTestId("status-line");
     expect(closeNotes.length).toBeLessThanOrEqual(1);
     expect(ticket().textContent).not.toMatch(/RebalanceReduce|unilateral/i);
