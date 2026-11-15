@@ -49,7 +49,7 @@ vi.mock("@/lib/v22/trade-build", async (orig) => {
 });
 
 import { buildOrder, buildClose, orderSummary } from "@/lib/bot-api/builders/order";
-import { checkOpenMarketGuards, checkOrderCaps, minSlippageBpsFor, resolveCaps } from "@/lib/bot-api/builders/caps";
+import { checkOpenMarketGuards, checkOrderCaps, mapReducingSlippage, minSlippageBpsFor, resolveCaps } from "@/lib/bot-api/builders/caps";
 import { ApiError } from "@/lib/bot-api/errors";
 import { marketOffsets } from "@/lib/v22/market-offsets";
 import { A_A_SHORT } from "@/lib/limits/constants";
@@ -142,6 +142,24 @@ describe("trader-1: slippage below the matcher's estimate is refused before simu
   });
   it("a reducing order is never refused on the estimate (it does not model the close exemption)", async () => {
     await expect(checkOpenMarketGuards(conn(), pre(25_000n, 1n, { reducing: true, positionBeforeQ: -555_540n }))).resolves.toBeDefined();
+  });
+  it("trader (round 1): a reducing order with a too-tight limit keeps the miss; a failed InvalidInstruction simulation becomes slippage_cap_exceeded with minSlippageBps", async () => {
+    const g = await checkOpenMarketGuards(conn(), pre(25_000n, 1n, { reducing: true, positionBeforeQ: -555_540n }));
+    expect(g.limitMiss).toMatchObject({ minSlippageBps: expect.any(Number) });
+    expect(g.limitMiss!.minSlippageBps).toBeGreaterThan(1);
+    const sim = new ApiError("simulation_failed", "simulation failed: InvalidInstruction", { onchain: { code: 9, name: "InvalidInstruction", program: "w", instructionIndex: 2 }, logs: ["x"] });
+    const mapped = mapReducingSlippage(sim, g.limitMiss, true);
+    expect([mapped.code, mapped.status, mapped.retryable]).toEqual(["slippage_cap_exceeded", 422, false]);
+    expect(mapped.extra.details).toMatchObject({ minSlippageBps: g.limitMiss!.minSlippageBps, limitPriceE6: g.limitMiss!.limitPriceE6, estExecPriceE6: g.limitMiss!.estExecPriceE6 });
+    expect(mapped.message).toContain(`slippageBps >= ${g.limitMiss!.minSlippageBps}`);
+    // Unchanged: a limit the estimate says fills, another program's code 9, or another wrapper code.
+    expect(mapReducingSlippage(sim, null, true)).toBe(sim);
+    const other = new ApiError("simulation_failed", "x", { onchain: { code: 9, name: null, program: "sys" } });
+    expect(mapReducingSlippage(other, g.limitMiss, true)).toBe(other);
+    const margin = new ApiError("insufficient_margin", "x", { onchain: { code: 49, name: "EngineInsufficientInitialMargin" } });
+    expect(mapReducingSlippage(margin, g.limitMiss, true)).toBe(margin);
+    // A generous limit: no miss recorded.
+    expect((await checkOpenMarketGuards(conn(), pre(25_000n, 1000n, { reducing: true, positionBeforeQ: -555_540n }))).limitMiss).toBeNull();
   });
   it("minSlippageBpsFor: smallest whole bps whose builder limit accepts the fill", () => {
     const mark = 2_000_000n;

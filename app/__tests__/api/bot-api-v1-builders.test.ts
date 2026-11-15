@@ -40,6 +40,7 @@ const m = vi.hoisted(() => ({
   blockHeight: 100,
   lamports: 1_000_000_000,
   blocked: new Set<string>(),
+  limitMiss: null as null | { limitPriceE6: string; estExecPriceE6: string; markE6: string; minSlippageBps: number },
   landed: null as null | { meta: { logMessages: string[] }; transaction: { message: { staticAccountKeys: PublicKey[]; compiledInstructions: Array<{ programIdIndex: number }> } } },
 }));
 
@@ -69,7 +70,7 @@ vi.mock("@/lib/bot-api/builders/caps", async (orig) => ({
       m.guards++;
       if (m.guardThrow) throw m.guardThrow;
     }
-    return { expectedFeeBps: 65, expectedFeeAtoms: 130_000n };
+    return { expectedFeeBps: 65, expectedFeeAtoms: 130_000n, limitMiss: p.reducing ? m.limitMiss : null };
   },
 }));
 vi.mock("@/lib/slab-max-leverage", () => ({ maxLeverageFromSlab: () => 20 }));
@@ -174,7 +175,7 @@ beforeEach(async () => {
   Object.assign(m, {
     pre: { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n, reducing: false }, guards: 0, guardThrow: null,
     buildCalls: 0, buildThrow: null, resubmit: false, finalSims: [], simTxs: [], gate: { err: null, logs: [] }, portfolioFound: true,
-    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null, blocked: new Set(),
+    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null, blocked: new Set(), limitMiss: null,
   });
 });
 afterEach(() => {
@@ -462,6 +463,28 @@ describe("retired markets (the app's blocklist): no new money or risk in, exits 
     m.blocked.clear();
     expect((await post(deposits, "/api/v1/deposits", dep())).status).toBe(200);
     expect((await post(orders, "/api/v1/orders", order())).status).toBe(200);
+  });
+});
+
+describe("trader (round 1): a reduce-only order with a tight slippage gets slippage_cap_exceeded, not an opaque InvalidInstruction", () => {
+  it("the final simulation's wrapper InvalidInstruction is mapped when the limit is tighter than the expected fill", async () => {
+    m.position = 7_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
+    m.limitMiss = { limitPriceE6: "1999800", estExecPriceE6: "1995000", markE6: "2000000", minSlippageBps: 25 };
+    m.finalSims = [{ err: { InstructionError: [2, { Custom: 9 }] }, logs: [WRAPPER_FAILED("9")] }];
+    const r = await post(orders, "/api/v1/orders", order({ side: "sell", size: "1000000", reduceOnly: true, slippageBps: 1 }));
+    const e = (await r.json()).error;
+    expect([r.status, e.code, e.retryable]).toEqual([422, "slippage_cap_exceeded", false]);
+    expect(e.details).toMatchObject({ minSlippageBps: 25, estExecPriceE6: "1995000" });
+    // The reservation the failed build took is freed again.
+    m.finalSims = [];
+    expect((await post(orders, "/api/v1/orders", order({ side: "sell", size: "7000000", reduceOnly: true }))).status).toBe(200);
+  });
+  it("without a limit miss the InvalidInstruction stays simulation_failed (the limit was not the cause)", async () => {
+    m.position = 7_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
+    m.finalSims = [{ err: { InstructionError: [2, { Custom: 9 }] }, logs: [WRAPPER_FAILED("9")] }];
+    expect((await (await post(orders, "/api/v1/orders", order({ side: "sell", size: "1000000", reduceOnly: true }))).json()).error.code).toBe("simulation_failed");
   });
 });
 

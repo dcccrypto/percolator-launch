@@ -169,8 +169,40 @@ export interface MarketGuardResult {
   /** The whole cost against the mark (base fee + the quoted spread, once); see reads/quote.ts expectedFee. */
   allInCostBps: number | null;
   allInCostAtoms: bigint | null;
+  /**
+   * A REDUCING order whose limit is tighter than the matcher's estimated fill (never refused up front: the estimate does not
+   * model the close exemption, so the real fill can be better). If the simulation then fails with the program's opaque
+   * InvalidInstruction, the order builder reports slippage_cap_exceeded with these numbers instead (mapReducingSlippage).
+   */
+  limitMiss?: { limitPriceE6: string; estExecPriceE6: string; markE6: string; minSlippageBps: number } | null;
 }
-const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null };
+const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null, limitMiss: null };
+
+/** The program's code for a fill past the limit (and other malformed trades): wrapper Custom(9) InvalidInstruction. */
+const INVALID_INSTRUCTION = 9;
+
+/** The slippage refusal for a limit tighter than the expected fill, with the smallest slippageBps that would pass. */
+function slippageRefusal(limitPriceE6: bigint, execE6: bigint, markE6: bigint, buy: boolean, minSlippageBps: number, reducing: boolean): ApiError {
+  return new ApiError(
+    "slippage_cap_exceeded",
+    `the limit ${limitPriceE6} is ${buy ? "below" : "above"} the matcher's estimated fill price ${execE6}; slippage is measured from the mark (${markE6}), so it must also cover the spread, fee and size impact: ${minSlippageBps <= MAX_SLIPPAGE_BPS ? `use slippageBps >= ${minSlippageBps} or a looser limitPriceE6` : `the fill needs ${minSlippageBps} bps, above the ${MAX_SLIPPAGE_BPS} bps maximum; try a smaller size`}${reducing ? " (this reducing order failed simulation at its limit)" : ""}`,
+    { details: { limitPriceE6: limitPriceE6.toString(), estExecPriceE6: execE6.toString(), minSlippageBps } },
+  );
+}
+
+/**
+ * A reducing order that failed simulation with the wrapper's InvalidInstruction while its limit was tighter than the matcher's
+ * estimated fill: the limit is the cause, so the caller gets slippage_cap_exceeded with minSlippageBps (as an open does up
+ * front), not an opaque simulation_failed. Any other error, or a limit the estimate says fills, is returned unchanged.
+ */
+export function mapReducingSlippage(e: ApiError, miss: MarketGuardResult["limitMiss"], buy: boolean): ApiError {
+  if (!miss || e.code !== "simulation_failed" || e.extra.onchain?.code !== INVALID_INSTRUCTION || e.extra.onchain?.name === null) return e;
+  const r = slippageRefusal(BigInt(miss.limitPriceE6), BigInt(miss.estExecPriceE6), BigInt(miss.markE6), buy, miss.minSlippageBps, true);
+  return new ApiError("slippage_cap_exceeded", r.message, {
+    details: { limitPriceE6: miss.limitPriceE6, estExecPriceE6: miss.estExecPriceE6, minSlippageBps: miss.minSlippageBps, onchain: e.extra.onchain },
+    ...(e.extra.logs ? { logs: e.extra.logs } : {}),
+  });
+}
 
 /**
  * Checks that need a fresh read of the market, the LP and the matcher, for orders that add risk:
@@ -200,18 +232,17 @@ export async function checkOpenMarketGuards(connection: Pick<Connection, "getMul
     }
     const src = buildQuoteSource(md, new Uint8Array(c.data), new Uint8Array(pf.data), p.lp.accountB, at, p.positionBeforeQ ?? 0n);
     const mq = matcherQuote(src, p.size);
-    if (enforce && mq && mq.fillQ > 0n && mq.quotePriceE6 !== null) {
+    let limitMiss: MarketGuardResult["limitMiss"] = null;
+    if (mq && mq.fillQ > 0n && mq.quotePriceE6 !== null) {
       // The program refuses a fill past the limit (buy: exec <= limit; sell: exec >= limit) with an opaque InvalidInstruction. The
       // matcher's own estimate (the quote's estExecPriceE6) is checked first, so the caller gets the number that would pass. Not
-      // applied to a reducing order: the estimate does not model the close exemption, so it can only be worse than the real fill.
+      // enforced on a reducing order: the estimate does not model the close exemption, so it can only be worse than the real fill.
+      // For a reducing order the miss is kept, and mapped onto a failed simulation afterwards (mapReducingSlippage).
       const buy = p.size > 0n;
       if (quoteFailsLimit(mq.quotePriceE6, p.limitPriceE6, buy)) {
         const minSlippageBps = minSlippageBpsFor(src.effectivePriceE6, mq.quotePriceE6, buy);
-        throw new ApiError(
-          "slippage_cap_exceeded",
-          `the limit ${p.limitPriceE6} is ${buy ? "below" : "above"} the matcher's estimated fill price ${mq.quotePriceE6}; slippage is measured from the mark (${src.effectivePriceE6}), so it must also cover the spread, fee and size impact: ${minSlippageBps <= MAX_SLIPPAGE_BPS ? `use slippageBps >= ${minSlippageBps} or a looser limitPriceE6` : `the fill needs ${minSlippageBps} bps, above the ${MAX_SLIPPAGE_BPS} bps maximum; try a smaller size`}`,
-          { details: { limitPriceE6: p.limitPriceE6.toString(), estExecPriceE6: mq.quotePriceE6.toString(), minSlippageBps } },
-        );
+        if (enforce) throw slippageRefusal(p.limitPriceE6, mq.quotePriceE6, src.effectivePriceE6, buy, minSlippageBps, false);
+        limitMiss = { limitPriceE6: p.limitPriceE6.toString(), estExecPriceE6: mq.quotePriceE6.toString(), markE6: src.effectivePriceE6.toString(), minSlippageBps };
       }
     }
     if (enforce) {
@@ -224,7 +255,7 @@ export async function checkOpenMarketGuards(connection: Pick<Connection, "getMul
       }
     }
     const f = expectedFee(src, mq, (abs(p.size) * src.effectivePriceE6) / 1_000_000n);
-    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms, allInCostBps: f.allInBps, allInCostAtoms: f.allInAtoms };
+    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms, allInCostBps: f.allInBps, allInCostAtoms: f.allInAtoms, limitMiss };
   } catch (e) {
     if (enforce) throw e;
     return NO_FEE;

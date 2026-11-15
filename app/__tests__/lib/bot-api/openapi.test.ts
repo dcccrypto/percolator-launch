@@ -79,6 +79,19 @@ describe("openapi spec", () => {
   });
 });
 
+describe("fill-price docs say one thing (trader, round 1)", () => {
+  it("estExecPriceE6 includes the spread on every market and is what the limit checks; feeChargedInPrice never claims the spread is not in it", () => {
+    const q = (buildOpenApi() as { components: { schemas: { Quote: { properties: Record<string, { description?: string; oneOf?: Array<{ description?: string }> }> } } } }).components.schemas.Quote.properties;
+    const est = q.estExecPriceE6.oneOf?.[0]?.description ?? q.estExecPriceE6.description ?? "";
+    expect(est).toContain("on EVERY market");
+    expect(est).toContain("checks against your limit");
+    const flag = q.feeChargedInPrice.description ?? "";
+    expect(flag).not.toMatch(/not also paid in the price/);
+    expect(flag).toContain("counted once");
+    expect(flag).toContain("booked at the mark");
+  });
+});
+
 describe("GET /api/v1/openapi.json", () => {
   beforeEach(() => {
     process.env.BOT_API_ENABLED = "1";

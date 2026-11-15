@@ -134,7 +134,7 @@ export interface Quote {
   /** The fee cap a build signs (the MOST a fill may charge), bps. Far above expectedFeeBps by design. */
   feeCapBps: number | null;
   baseFeeBps: number;
-  /** true: fee channel on (settles at the mark, the quoted spread is charged as a fee); false: the spread is paid in the price. */
+  /** How the spread is collected. true: fee channel on, the position is booked at the mark and the spread is charged as a fee (inside expectedFeeBps). false: booked at estExecPriceE6. estExecPriceE6 includes the spread either way and is what the limit is checked against; the spread is paid once (allInCostBps). */
   feeChargedInPrice: boolean;
   maxSizePerSide: { long: SideLimit | null; short: SideLimit | null };
   /** |sizeQ| is above maxSizePerSide: the price and fee figures are then for fillableQ. */

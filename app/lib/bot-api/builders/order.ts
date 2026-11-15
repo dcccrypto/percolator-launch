@@ -12,7 +12,7 @@ import { parsePortfolio } from "@/lib/v22/layout";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { explainNoLp } from "../reads/no-lp";
 import { reserveReduce } from "../reduce-reservations";
-import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, MAX_SLIPPAGE_BPS, CAPS_PROVISIONAL_NOTE } from "./caps";
+import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, mapReducingSlippage, MAX_SLIPPAGE_BPS, CAPS_PROVISIONAL_NOTE } from "./caps";
 import {
   finalizeTx,
   refusalToApi,
@@ -153,11 +153,13 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     });
   } catch (e) {
     await (reservation as Awaited<ReturnType<typeof reserveReduce>> | null)?.release().catch(() => undefined);
-    if (e instanceof ApiError) throw e;
+    // A reducing order that failed at its limit: slippage_cap_exceeded with minSlippageBps, not an opaque InvalidInstruction.
+    const buy = input.size > 0n;
+    if (e instanceof ApiError) throw mapReducingSlippage(e, fees.limitMiss, buy);
     if (e instanceof TradeBuildRefusal) {
       // No LP: say whether a retry could ever help (a dormant or unsupported market cannot be traded, whatever the retry).
       if (e.code === "no_lp") throw await explainNoLpFor(connection, input.market, meta);
-      throw refusalToApi(e);
+      throw mapReducingSlippage(refusalToApi(e), fees.limitMiss, buy);
     }
     throw new ApiError("rpc_unavailable");
   }
@@ -167,7 +169,7 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     for (const t of r.transactions) transactions.push(await finalizeTx(connection, t.transaction, t.purpose, meta));
   } catch (e) {
     await held?.release().catch(() => undefined);
-    throw e;
+    throw e instanceof ApiError ? mapReducingSlippage(e, fees.limitMiss, input.size > 0n) : e;
   }
   if (held) {
     // Only an order transaction reduces the position; a crank-only answer (resubmitAfter) frees the reservation.
