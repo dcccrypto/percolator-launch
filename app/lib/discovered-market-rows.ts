@@ -336,9 +336,13 @@ function discoveryMemoTtlMs(): number {
 
 let discoveryMemo: { at: number; rows: Record<string, unknown>[] } | null = null;
 let discoveryInflight: Promise<Record<string, unknown>[]> | null = null;
+// Bumped by every reset. A read started before a reset (e.g. a registration) must not save its rows —
+// they can predate the just-registered slab — so it only writes the memo if the generation is unchanged.
+let discoveryGeneration = 0;
 
-/** Test hook: forget the memo and any in-flight read. */
+/** Forget the memo and any in-flight read (registerPlaygroundSlab; also a test hook). */
 export function resetDiscoveredMarketRowsCache(): void {
+  discoveryGeneration += 1;
   discoveryMemo = null;
   discoveryInflight = null;
 }
@@ -361,12 +365,13 @@ export async function loadDiscoveredMarketRows(
   } else {
     if (!discoveryInflight) {
       const startedAt = Date.now();
+      const generation = discoveryGeneration;
       const p: Promise<Record<string, unknown>[]> = loadDiscoveredMarketRowsUncached()
         .then((r) => {
-          if (r.length > 0) discoveryMemo = { at: startedAt, rows: r };
+          if (r.length > 0 && generation === discoveryGeneration) discoveryMemo = { at: startedAt, rows: r };
           return r;
         })
-        .finally(() => { if (discoveryInflight === p) discoveryInflight = null; });
+        .finally(() => { if (generation === discoveryGeneration && discoveryInflight === p) discoveryInflight = null; });
       discoveryInflight = p;
     }
     rows = await discoveryInflight;

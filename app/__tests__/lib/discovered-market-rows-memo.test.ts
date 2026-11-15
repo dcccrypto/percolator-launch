@@ -13,8 +13,9 @@ const state = vi.hoisted(() => ({ discoverCalls: 0, found: [] as unknown[] }));
 vi.mock("@/lib/v22/discovery", () => ({
   discoverMarkets: async () => {
     state.discoverCalls += 1;
+    const found = state.found; // what the chain held when the read STARTED
     await new Promise((r) => setTimeout(r, 5));
-    return state.found;
+    return found;
   },
 }));
 vi.mock("@/lib/playground-registered-markets", () => ({
@@ -80,6 +81,18 @@ describe("loadDiscoveredMarketRows memo", () => {
     await loadDiscoveredMarketRows();
     registerPlaygroundSlab(A);
     await loadDiscoveredMarketRows();
+    expect(state.discoverCalls).toBe(2);
+  });
+
+  it("a read in flight when a slab registers does not save its stale rows into the memo", async () => {
+    state.found = [mk(A)];
+    const stale = loadDiscoveredMarketRows(); // started before B exists on chain
+    while (state.discoverCalls === 0) await new Promise((r) => setImmediate(r)); // the chain read is now under way
+    state.found = slabs.map(mk);
+    registerPlaygroundSlab(B);
+    expect((await stale).length).toBe(1);
+    const next = await loadDiscoveredMarketRows();
+    expect(next.map((m) => m.slab_address).sort()).toEqual([...slabs].sort());
     expect(state.discoverCalls).toBe(2);
   });
 
