@@ -89,10 +89,9 @@ export function quantizeQToLots(q: bigint, lotExp: number): { q: bigint; remaind
 /** The tokens a Q (in lots) is worth, as a Q-scaled bigint (POS_SCALE per token). Same as qToTokenQ. */
 export const lotQToTokenQ = qToTokenQ;
 
-/** USD price per TOKEN from the per-lot USD price (a float, for display / typed-size maths). Identity at lotExp = 0. */
-export function tokenUsdOfLotUsd(perLotUsd: number, lotExp: number): number {
-  return lotExp === 0 ? perLotUsd : perLotUsd / 10 ** lotExp;
-}
+// Lives in ./lot-display (imports nothing) so the landing page can use it without the SDK; re-exported for every other caller.
+export { tokenUsdOfLotUsd } from "./lot-display";
+import { tokenUsdOfLotUsd } from "./lot-display";
 
 /** Display a per-lot e6 mark/entry/liquidation price per token. Byte-identical to formatUsdPriceE6 at lotExp = 0. */
 export function formatLotPriceE6(perLotE6: bigint | null | undefined, lotExp: number, fallback = "—"): string {
