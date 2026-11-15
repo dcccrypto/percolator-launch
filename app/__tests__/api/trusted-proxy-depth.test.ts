@@ -90,11 +90,11 @@ describe("getClientIp", () => {
   });
 
   it("depth 0 (no proxy) trusts neither forwarded header", async () => {
-    expect(await ip("0", `${SPOOF}, ${REAL}`, SPOOF)).toBe("unknown");
+    expect(await ip("0", `${SPOOF}, ${REAL}`, SPOOF)).toBe("unknown-ip");
   });
 
-  it("behind a proxy with no X-Forwarded-For, x-real-ip is still the fallback (#2194)", async () => {
-    expect(await ip(undefined, null, REAL)).toBe(REAL);
+  it("behind a proxy with no X-Forwarded-For, x-real-ip is NOT trusted (caller-settable)", async () => {
+    expect(await ip(undefined, null, REAL)).toBe("unknown-ip");
   });
 });
 
