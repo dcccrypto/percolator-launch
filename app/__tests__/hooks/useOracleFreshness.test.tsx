@@ -11,7 +11,7 @@ let observation: { slot: bigint; observedAtMs: number } | null = null;
 vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: () => slabState }));
 vi.mock("@/hooks/useClusterSlot", () => ({ useClusterSlotObservation: () => observation }));
 
-import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { measureSlotMs, useOracleFreshness } from "@/hooks/useOracleFreshness";
 
 const NOW = 1_800_000_000_000;
 const PUSH_SLOT = 1_000_000n;
@@ -58,10 +58,45 @@ describe("lead 1: SLOT_MS fixed at 400", () => {
     });
   }
 
-  it("a push 150 slots old at 0.55 s/slot (82 s) is STALE, not aging", () => {
-    observation = { slot: PUSH_SLOT + 150n, observedAtMs: NOW };
-    const { result } = renderHook(() => useOracleFreshness({ trackSeconds: true }));
+  it("a push 150 slots old at 0.55 s/slot (82 s) is STALE once the slot rate is measured", () => {
+    observation = { slot: PUSH_SLOT + 95n, observedAtMs: NOW - 30_000 };
+    const { result, rerender } = renderHook(() => useOracleFreshness({ trackSeconds: true }));
+    observation = { slot: PUSH_SLOT + 150n, observedAtMs: NOW }; // 55 slots / 30 s = 545 ms
+    rerender();
+    expect(result.current.elapsedSecs).toBeGreaterThanOrEqual(81);
     expect(result.current.level).toBe("stale");
+  });
+
+  it("0.45 s/slot: 150 slots (67.5 s) is STALE once measured", () => {
+    observation = { slot: PUSH_SLOT + 95n, observedAtMs: NOW - 24_750 };
+    const { result, rerender } = renderHook(() => useOracleFreshness({ trackSeconds: true }));
+    observation = { slot: PUSH_SLOT + 150n, observedAtMs: NOW }; // 55 slots / 24.75 s = 450 ms
+    rerender();
+    expect(result.current.level).toBe("stale");
+  });
+
+  it("0.40 s/slot is unchanged: 150 slots reads 60 s", () => {
+    observation = { slot: PUSH_SLOT + 95n, observedAtMs: NOW - 22_000 };
+    const { result, rerender } = renderHook(() => useOracleFreshness({ trackSeconds: true }));
+    observation = { slot: PUSH_SLOT + 150n, observedAtMs: NOW };
+    rerender();
+    expect(result.current.elapsedSecs).toBe(60);
+  });
+
+  it("measureSlotMs clamps to [400, 600] and refuses short windows", () => {
+    const o = (slot: number, ms: number) => ({ slot: BigInt(slot), observedAtMs: ms });
+    expect(measureSlotMs(o(0, 0), o(100, 30_000))).toBe(400); // 300 ms -> clamp up
+    expect(measureSlotMs(o(0, 0), o(100, 90_000))).toBe(600); // 900 ms -> clamp down
+    expect(measureSlotMs(o(0, 0), o(10, 30_000))).toBeNull(); // < 50 slots
+    expect(measureSlotMs(o(0, 0), o(100, 5_000))).toBeNull(); // < 20 s
+  });
+
+  it("a cluster slot that moves backwards re-anchors the rate instead of corrupting it", () => {
+    observation = { slot: PUSH_SLOT + 100n, observedAtMs: NOW - 30_000 };
+    const { result, rerender } = renderHook(() => useOracleFreshness({ trackSeconds: true }));
+    observation = { slot: PUSH_SLOT + 50n, observedAtMs: NOW };
+    rerender();
+    expect(result.current.elapsedSecs).toBe(20); // 50 * 400
   });
 });
 

@@ -47,6 +47,24 @@ export interface OracleFreshnessState {
 const FRESH_THRESHOLD = 30;
 const AGING_THRESHOLD = 60;
 const SLOT_MS = 400;
+/** Real cluster slot time drifts above the 400 ms ideal; clamp the measured rate. */
+const SLOT_MS_MAX = 600;
+/** Minimum span between two cluster observations before a rate is trusted. */
+const RATE_MIN_SLOTS = 50n;
+const RATE_MIN_MS = 20_000;
+/** Roll the rate anchor forward so the estimate follows recent cluster speed. */
+const RATE_WINDOW_MS = 120_000;
+
+/** ms per slot between two cluster observations, clamped to [400, 600]; null if too close to trust. */
+export function measureSlotMs(
+  from: { slot: bigint; observedAtMs: number },
+  to: { slot: bigint; observedAtMs: number },
+): number | null {
+  const dSlots = to.slot - from.slot;
+  const dMs = to.observedAtMs - from.observedAtMs;
+  if (dSlots < RATE_MIN_SLOTS || dMs < RATE_MIN_MS) return null;
+  return Math.min(SLOT_MS_MAX, Math.max(SLOT_MS, dMs / Number(dSlots)));
+}
 
 /**
  * BUG 20 fix: previously every `useOracleFreshness()` call created its OWN
@@ -146,6 +164,8 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
   const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
   const prevPriceRef = useRef<bigint | null>(null);
   const prevSlotRef = useRef<bigint | null>(null);
+  const rateAnchorRef = useRef<{ slot: bigint; observedAtMs: number } | null>(null);
+  const slotMsRef = useRef<number>(SLOT_MS);
 
   // Guard: detectOracleMode requires both PublicKey fields — skip if either is missing
   // (e.g. partial mock configs in test environments).
@@ -245,9 +265,24 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
           // the keeper's estimated push timestamp.
           const slotDelta =
             clusterSlotObservation.slot - pushSlot;
+          // Real slots run 400-600 ms; a fixed 400 under-reports the age of an
+          // old push (150 slots at 0.55 s is 82 s, not 60 s). Measure the rate
+          // from consecutive cluster observations, falling back to 400.
+          const anchor = rateAnchorRef.current;
+          if (anchor === null || clusterSlotObservation.slot < anchor.slot) {
+            rateAnchorRef.current = clusterSlotObservation;
+          } else {
+            const measured = measureSlotMs(anchor, clusterSlotObservation);
+            if (measured !== null) {
+              slotMsRef.current = measured;
+              if (clusterSlotObservation.observedAtMs - anchor.observedAtMs > RATE_WINDOW_MS) {
+                rateAnchorRef.current = clusterSlotObservation;
+              }
+            }
+          }
           const derived =
             clusterSlotObservation.observedAtMs -
-            Number(slotDelta) * SLOT_MS;
+            Number(slotDelta) * slotMsRef.current;
 
           // Both slab updates and cluster-slot polling can rerun this effect.
           // Keep the timestamp stable when the newly derived value is
