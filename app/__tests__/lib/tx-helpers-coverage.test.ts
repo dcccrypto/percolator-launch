@@ -38,7 +38,7 @@ import { resolveDevnetProgramIds } from "@/lib/program-ids";
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe("clampPriorityFee / priorityFeeFallback", () => {
@@ -78,11 +78,13 @@ describe("getPriorityFee", () => {
     await tx.getPriorityFee(c);
     expect(c.getRecentPrioritizationFees).toHaveBeenCalledTimes(1);
   });
-  it("caps a huge spike", async () => {
+  it("caps a huge spike at 10x the fallback (below the hard ceiling)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PRIORITY_FEE", "1000");
     const tx = await fresh();
+    expect(tx.priorityFeeFallback()).toBe(1000);
     const c = conn(async () => [{ slot: 1, prioritizationFee: 9e12 }]);
     const fee = await tx.getPriorityFee(c);
-    expect(fee).toBe(Math.min(tx.priorityFeeFallback() * 10, PRIORITY_FEE_MAX_MICRO_LAMPORTS));
+    expect(fee).toBe(10_000);
   });
   it("falls back on an empty list, an all-zero list and an RPC error", async () => {
     for (const impl of [async () => [], async () => [{ slot: 1, prioritizationFee: 0 }], async () => { throw new Error("rpc down"); }]) {
@@ -128,7 +130,8 @@ describe("extractTxErrorMessage", () => {
     for (let i = 5; i >= 0; i--) e = Object.assign(new Error(`level ${i}`), { cause: e });
     const msg = extractTxErrorMessage(e);
     expect(msg).toContain("level 0");
-    expect(msg).not.toContain("level 6");
+    expect(msg).toContain("level 4");
+    expect(msg).not.toContain("level 5");
   });
   it("reads log arrays carried on the error", () => {
     const e = Object.assign(new Error("Simulation failed"), { logs: ["Program X failed: custom program error: 0x1"] });
@@ -150,6 +153,7 @@ describe("markNotBroadcast / isNotBroadcast", () => {
   });
   it("wraps a string and a non-Error object", () => {
     expect(markNotBroadcast("plain").message).toBe("plain");
+    expect(markNotBroadcast({ message: "obj msg" }).message).toContain("obj msg");
     const w = markNotBroadcast({ message: "obj msg" });
     expect(w).toBeInstanceOf(Error);
     expect(isNotBroadcast(w)).toBe(true);
@@ -194,6 +198,9 @@ describe("buildBatchTx", () => {
     const tx = buildBatchTx({ instructions: [lighthouse, transfer], computeUnits: 300_000, priorityFeeMicroLamports: 777, blockhash: "11111111111111111111111111111111", feePayer: payer });
     expect(tx.instructions).toHaveLength(4);
     const budget = ComputeBudgetProgram.programId.toBase58();
+    expect(ComputeBudgetProgram.programId.equals(tx.instructions[1].programId)).toBe(true);
+    expect(tx.instructions[1].data.readUInt32LE(1)).toBe(300_000);
+    expect(Number(tx.instructions[2].data.readBigUInt64LE(1))).toBe(777);
     expect(tx.instructions.slice(0, 3).every((i) => i.programId.toBase58() === budget)).toBe(true);
     expect(tx.instructions[3]).toBe(transfer);
     expect(tx.recentBlockhash).toBe("11111111111111111111111111111111");
@@ -203,6 +210,8 @@ describe("buildBatchTx", () => {
 
 describe("signAllCompat", () => {
   const txs = [new Transaction(), new Transaction()];
+  txs[0].recentBlockhash = "A";
+  txs[1].recentBlockhash = "B";
   beforeEach(() => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -218,8 +227,10 @@ describe("signAllCompat", () => {
     const order: Transaction[] = [];
     const signOne = vi.fn(async (t: Transaction) => { order.push(t); return t; });
     const out = await signAllCompat({ signTransaction: signOne }, txs);
-    expect(out).toEqual(txs);
-    expect(order).toEqual(txs);
+    expect(out[0]).toBe(txs[0]);
+    expect(out[1]).toBe(txs[1]);
+    expect(order[0]).toBe(txs[0]);
+    expect(order[1]).toBe(txs[1]);
   });
   it("throws when the wallet can sign nothing", async () => {
     await expect(signAllCompat({}, txs)).rejects.toThrow("does not support signAllTransactions or signTransaction");
@@ -230,6 +241,7 @@ describe("confirmSignatureByPolling", () => {
   it("resolves once the signature is confirmed", async () => {
     const conn = { getSignatureStatuses: vi.fn(async () => ({ value: [{ confirmationStatus: "confirmed", err: null }] })) } as any;
     await expect(confirmSignatureByPolling(conn, "sig")).resolves.toBeUndefined();
+    expect(conn.getSignatureStatuses).toHaveBeenCalledWith(["sig"], expect.anything());
   });
 });
 
