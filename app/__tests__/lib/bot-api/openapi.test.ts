@@ -100,4 +100,19 @@ describe("GET /api/v1/openapi.json", () => {
     expect(body.openapi).toBe("3.1.0");
     expect(body.paths["/api/v1/openapi.json"]).toBeDefined();
   });
+  it("the served spec labels the section 8 defaults provisional (info, cap fields, build caps)", async () => {
+    const { GET } = await import("@/app/api/v1/openapi.json/route");
+    const res = await GET(new NextRequest("http://localhost/api/v1/openapi.json"));
+    const text = await res.text();
+    expect(text).toContain("provisional");
+    expect(text).toContain("provisional devnet default, not owner-approved (design doc section 8)");
+    const spec = JSON.parse(text) as { info: { description: string }; components: { schemas: Record<string, { properties: Record<string, { description?: string; properties?: Record<string, unknown> }> }> } };
+    expect(spec.info.description).toMatch(/^PROVISIONAL:/);
+    const order = spec.components.schemas.OrderRequest.properties;
+    for (const f of ["slippageBps", "maxNotionalUsd", "maxLeverage"]) expect(order[f].description).toContain("provisional");
+    expect(spec.components.schemas.BuildResponse.properties.caps.properties).toHaveProperty("provisional");
+    // The two pending gate switches are documented as such.
+    expect(spec.info.description).toContain("BOT_API_GATE_EXEMPT");
+    expect(spec.info.description).toContain("BOT_API_ANON_READS");
+  });
 });

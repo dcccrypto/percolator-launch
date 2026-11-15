@@ -305,7 +305,8 @@ export interface BuildResponse {
   /** true: the only tx is a maintenance crank; send it, then build again. */
   resubmitAfter: boolean;
   summary: BuildSummary;
-  caps?: Record<string, unknown>;
+  /** The caps applied to an order or close. `provisional: true`: the defaults are provisional devnet values, not owner-approved (design doc section 8). */
+  caps?: Record<string, unknown> & { provisional?: boolean; note?: string };
 }
 
 export interface BuildSummary {

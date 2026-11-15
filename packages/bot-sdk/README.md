@@ -26,7 +26,7 @@ The **base URL** is the origin of a deployment that has the bot API switched on 
 
 ## Getting a key
 
-Every call needs a key by default: reads need the `read` scope, building transactions needs the `build` scope. Keyless reads at a small anonymous budget exist but are off unless the deployment sets `BOT_API_ANON_READS=1` (a pending owner decision). On a deployment behind the playground waitlist, `/api/v1` is also behind it unless the deployment sets `BOT_API_GATE_EXEMPT=1` (also pending); without a waitlist session you get the gate's 401 `Playground access required`. **Devnet keys are issued by the Percolator team** (ask them; there is no self-serve sign-up yet). A key looks like `pbk_<id>_<secret>`, is shown once, and only lets you ask for transactions: it never gives anyone control of a wallet. Keep it in an environment variable (`BOT_API_KEY`), never in code.
+Every call needs a key by default: reads need the `read` scope, building transactions needs the `build` scope. Keyless reads at a small anonymous budget exist but are off unless the deployment sets `BOT_API_ANON_READS=1` (a pending owner decision). On a deployment behind the playground waitlist, `/api/v1` is also behind it unless the deployment sets `BOT_API_GATE_EXEMPT=1` (also pending); without a waitlist session you get the gate's 401 `Playground access required`. **Devnet keys are issued by the Percolator team** (ask them; there is no self-serve sign-up yet; who issues keys is a provisional devnet default, not owner-approved, design doc section 8). A key looks like `pbk_<id>_<secret>`, is shown once, and only lets you ask for transactions: it never gives anyone control of a wallet. Keep it in an environment variable (`BOT_API_KEY`), never in code.
 
 Keys live in the deployment's key store. The team issues them with `app/scripts/bot-api/keys.ts` against that store. That means:
 
@@ -58,6 +58,17 @@ Everything the API takes or returns is an integer in one of these units. Get the
 **Order size versus quote size.** The quote takes a *signed* `size` (negative = sell). `POST /orders` takes an *unsigned* `size` and a `side`: `size: "1000000", side: "sell"` is the quote's `size=-1000000`. A negative order size is refused.
 
 **Collateral the API can price.** The notional cap is in USD, so the API only builds risk-adding orders on markets whose collateral it knows to be a USD stable (the devnet Sim-USDC). Any other collateral is refused with `market_unsupported`; reducing orders and closes are never blocked by that.
+
+## Safety caps (provisional)
+
+Every order and close is checked against server caps. **These are provisional devnet defaults, not owner-approved (design doc section 8)**, and can change: read the `caps` object echoed in each build response (it carries `provisional: true` and a `note`).
+
+| Cap | Provisional default | You can |
+|---|---|---|
+| Slippage | 100 bps from the mark, max 1000 | lower or raise within the max (`slippageBps`) |
+| Notional per order | 5,000 USD | lower (`maxNotionalUsd`) |
+| Leverage after the order | 10x (or the market max if lower) | lower (`maxLeverage`) |
+| Reduce-only | off | `reduceOnly: true` |
 
 ## Fees and slippage
 

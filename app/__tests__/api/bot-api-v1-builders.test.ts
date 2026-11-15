@@ -310,6 +310,8 @@ describe("POST /api/v1/positions/close", () => {
     expect(r.status).toBe(200);
     expect(b.summary.size).toBe("-7000000");
     expect(b.caps.reduceOnly).toBe(true);
+    expect(b.caps.provisional).toBe(true);
+    expect(b.caps.note).toContain("not owner-approved");
   });
   it("partial close, oversize refused, no position refused", async () => {
     m.position = -7_000_000n;

@@ -11,7 +11,7 @@ import { findOwnerPortfolio } from "@/lib/owner-portfolio";
 import { parsePortfolio } from "@/lib/v22/layout";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { explainNoLp } from "../reads/no-lp";
-import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, MAX_SLIPPAGE_BPS } from "./caps";
+import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, MAX_SLIPPAGE_BPS, CAPS_PROVISIONAL_NOTE } from "./caps";
 import {
   finalizeTx,
   refusalToApi,
@@ -47,7 +47,17 @@ export interface OrderResponse {
   lastValidBlockHeight: number;
   resubmitAfter: boolean;
   summary: Record<string, unknown>;
-  caps: { reduceOnly: boolean; slippageBps: number | null; maxNotionalUsd: number; maxLeverage: number; notionalUsd: number | null; leverageAfter: number | null };
+  caps: {
+    reduceOnly: boolean;
+    slippageBps: number | null;
+    maxNotionalUsd: number;
+    maxLeverage: number;
+    notionalUsd: number | null;
+    leverageAfter: number | null;
+    /** The cap defaults are not owner-approved (design doc section 8): always true for now. */
+    provisional: true;
+    note: string;
+  };
 }
 
 const ORDER_FIELDS = ["owner", "market", "side", "size", "reduceOnly", "slippageBps", "limitPriceE6", "maxFeeBps", "maxNotionalUsd", "maxLeverage", "portfolio", "expiresAfter"] as const;
@@ -152,6 +162,8 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       maxLeverage: caps.maxLeverage,
       notionalUsd: a?.notionalUsd ?? null,
       leverageAfter: a?.leverageAfter ?? null,
+      provisional: true,
+      note: CAPS_PROVISIONAL_NOTE,
     },
   };
 }

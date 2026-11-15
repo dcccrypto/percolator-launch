@@ -8,7 +8,7 @@ import { API_VERSION, MAX_BODY_BYTES } from "./config";
 import { ERROR_CATALOG, type ErrorCode } from "./errors";
 import { TIER_BUDGET, GLOBAL_BUILD_BUDGET, GLOBAL_READ_BUDGET, PRINCIPAL_BUILD_CAP, ANON_READ_POOL, PRINCIPAL_READ_CAP, WINDOW_SEC, AUTH_FAIL_LIMIT } from "./limits";
 import { TTL_SEC } from "./idempotency";
-import { DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS, DEFAULT_MAX_NOTIONAL_USD, DEFAULT_MAX_LEVERAGE } from "./builders/caps";
+import { DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS, DEFAULT_MAX_NOTIONAL_USD, DEFAULT_MAX_LEVERAGE, CAPS_PROVISIONAL_NOTE } from "./builders/caps";
 import { DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT } from "./reads/history";
 import { DEPTH_LADDER_USD } from "./reads/quote";
 import { HEARTBEAT_MS, MAX_OPEN_STREAMS, MAX_STREAM_MS, SNAPSHOT_MS } from "./stream";
@@ -273,11 +273,11 @@ function schemas(): Obj {
         side: { type: "string", enum: ["buy", "sell"] },
         size: uint("Engine q, a positive decimal string, no sign (a negative size is refused). `side` sets the direction; this is NOT the signed `size` the quote takes."),
         reduceOnly: bool("Refuse unless the order shrinks the position without flipping it"),
-        slippageBps: int(`Default ${DEFAULT_SLIPPAGE_BPS}, min 1, max ${MAX_SLIPPAGE_BPS}. Not with limitPriceE6. Measured from the MARK (the effective price), not from the expected fill: it must cover the spread, fee and size impact (quote.totalSpreadBps and allInCostBps). A value below the expected fill is refused before simulating with slippage_cap_exceeded and details {limitPriceE6, estExecPriceE6, minSlippageBps}; reducing orders are not pre-checked. 0 is refused (a limit at the effective price cannot fill).`, { minimum: 1, maximum: MAX_SLIPPAGE_BPS }),
+        slippageBps: int(`Default ${DEFAULT_SLIPPAGE_BPS}, min 1, max ${MAX_SLIPPAGE_BPS} (both a ${CAPS_PROVISIONAL_NOTE}). Not with limitPriceE6. Measured from the MARK (the effective price), not from the expected fill: it must cover the spread, fee and size impact (quote.totalSpreadBps and allInCostBps). A value below the expected fill is refused before simulating with slippage_cap_exceeded and details {limitPriceE6, estExecPriceE6, minSlippageBps}; reducing orders are not pre-checked. 0 is refused (a limit at the effective price cannot fill).`, { minimum: 1, maximum: MAX_SLIPPAGE_BPS }),
         limitPriceE6: uint("Explicit limit, positive; may not be more than the max slippage worse than the effective price. Not with slippageBps."),
         maxFeeBps: int("The highest fee CAP (feeCapBps, bps) you accept. A build whose cap would be higher is refused with fee_above_max. Without it the cap the market requires now is signed (it is shown as summary.feeCapBps, and is well above the expected fee), and a later utilisation-fee raise needs it (fee_raise_required).", { minimum: 0, maximum: 10000 }),
-        maxNotionalUsd: { type: "number", exclusiveMinimum: 0, maximum: 1e12, description: `USD notional of THIS order, in the market's collateral (|size| x effective price). Per order, not per position: the leverage cap is the exposure limit. Can only lower the server cap (default ${DEFAULT_MAX_NOTIONAL_USD}). Fractions are honoured.` },
-        maxLeverage: { type: "number", exclusiveMinimum: 0, maximum: 1000, description: `Leverage AFTER the order: |position after| x price / leverageEquity (capital less unrealized loss, see Portfolio.leverageEquity). Can only lower the server cap (default ${DEFAULT_MAX_LEVERAGE}, or the market maximum if lower).` },
+        maxNotionalUsd: { type: "number", exclusiveMinimum: 0, maximum: 1e12, description: `USD notional of THIS order, in the market's collateral (|size| x effective price). Per order, not per position: the leverage cap is the exposure limit. Can only lower the server cap (default ${DEFAULT_MAX_NOTIONAL_USD}: a ${CAPS_PROVISIONAL_NOTE}). Fractions are honoured.` },
+        maxLeverage: { type: "number", exclusiveMinimum: 0, maximum: 1000, description: `Leverage AFTER the order: |position after| x price / leverageEquity (capital less unrealized loss, see Portfolio.leverageEquity). Can only lower the server cap (default ${DEFAULT_MAX_LEVERAGE}, or the market maximum if lower; the default is a ${CAPS_PROVISIONAL_NOTE}).` },
         portfolio: { ...pubkey, description: "Your existing trading account on this market (the address returned by GET /accounts/{wallet} or by your first deposit). Optional: left out, the API finds the wallet's account itself. Send it to pin the order to one account; it must be this owner's own trading account on this market, otherwise bad_portfolio (400, not retryable). A wallet with no account at all gets no_portfolio." },
         expiresAfter: int("Unix ms. A request older than this is refused with request_expired.", { minimum: 1 }),
       },
@@ -358,9 +358,11 @@ function schemas(): Obj {
             maxLeverage: num(),
             notionalUsd: nullable(num()),
             leverageAfter: nullable(num()),
+            provisional: { type: "boolean", const: true, description: `The cap values are a ${CAPS_PROVISIONAL_NOTE}; they can change. Always true for now.` },
+            note: str(`"${CAPS_PROVISIONAL_NOTE}"`),
           },
           [],
-          { description: "Orders and closes only" },
+          { description: `Orders and closes only. The caps applied to this build; the defaults are a ${CAPS_PROVISIONAL_NOTE}.` },
         ),
       },
       ["transactions", "blockhash", "lastValidBlockHeight", "resubmitAfter", "summary"],
@@ -626,6 +628,8 @@ export function buildOpenApi(): Obj {
       version: API_VERSION,
       summary: "Read markets and accounts, quote, and build unsigned v2.2 transactions. Devnet only.",
       description: [
+        `PROVISIONAL: the safety-cap defaults in this document (slippage default ${DEFAULT_SLIPPAGE_BPS} bps and max ${MAX_SLIPPAGE_BPS} bps, ${DEFAULT_MAX_NOTIONAL_USD} USD per order, ${DEFAULT_MAX_LEVERAGE}x leverage), the waitlist-gate exemption, anonymous reads and team-issued keys are each a ${CAPS_PROVISIONAL_NOTE}. They can change; read the caps echoed in every build response (\`caps\`, with \`provisional: true\`).`,
+        "",
         "The API never signs and never sends. Builders return unsigned transactions that were simulated on their exact bytes; the caller signs with its own wallet and sends them.",
         "",
         "Availability: devnet v2.2 builds only, and only when the deployment has BOT_API_ENABLED=1. Otherwise every route answers 503 `disabled`, except that on a deployment behind the playground waitlist gate the gate answers first with 401 `{\"error\":\"Playground access required\"}` (not this document's error envelope).",
@@ -638,7 +642,7 @@ export function buildOpenApi(): Obj {
         "",
         `Idempotency: send \`Idempotency-Key\` (8 to 128 chars of A-Za-z0-9_.:-) on every build. The same key and body inside ${TTL_SEC} s returns the same bytes (header \`Idempotent-Replayed: true\`), so a retried signature is identical and the cluster dedupes it. Same key, different body: 409 idempotency_conflict. Still running: 409 idempotency_in_progress.`,
         "",
-        "Getting a key: devnet keys are issued by the Percolator team (ask them); there is no self-serve sign-up yet. Reads need a key too unless the deployment turned anonymous reads on (BOT_API_ANON_READS=1, off by default). A key needs the `build` scope to get transactions built. Keys are stored in the deployment's key store, so a key issued for one deployment does not work on another or on a local server that uses the in-memory store (see the SDK README for local development).",
+        "Getting a key: devnet keys are issued by the Percolator team (ask them; provisional, not owner-approved, design doc section 8.3); there is no self-serve sign-up yet. Reads need a key too unless the deployment turned anonymous reads on (BOT_API_ANON_READS=1, off by default). A key needs the `build` scope to get transactions built. Keys are stored in the deployment's key store, so a key issued for one deployment does not work on another or on a local server that uses the in-memory store (see the SDK README for local development).",
         "",
         "Units. `size`/`sizeQ` is engine q: 1,000,000 q is one LOT of the market's base asset, and a lot is 10^lotExp tokens (lotExp is on every market and varies: the live Sim-USDC markets have 0, 3 and 4, so read it per market). Prices end in E6: `effectivePriceE6` is the price of ONE LOT times 1e6. Collateral amounts are atoms of the market's collateral token: atoms = tokens x 10^decimals (Market.collateralMint, Market.collateralDecimals; the devnet Sim-USDC is 6 decimals). So the notional of an order in collateral atoms is |size| x effectivePriceE6 / 1e6, and in USD (for a USD stable) notionalAtoms / 10^decimals. Worked example: effectivePriceE6 = 980974 (0.980974 USD per lot), you want 25 USD: atoms = 25 x 10^6 = 25,000,000; size = atoms x 1e6 / effectivePriceE6 = 25,000,000 x 1,000,000 / 980,974 = 25,484,875 q. A size too small to be worth one atom is accepted by the quote with notionalAtoms 0: size what you mean in USD. Basis points (bps) are 1/100 of a percent. The API can value only collateral it knows to be a USD stable (the devnet Sim-USDC); another collateral is refused with market_unsupported for orders that add risk.",
         "",

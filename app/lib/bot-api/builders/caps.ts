@@ -1,4 +1,7 @@
 /**
+ * PROVISIONAL: every default below (100 bps slippage, 1000 bps max, 5,000 USD per order, 10x leverage) is a provisional devnet
+ * default, not owner-approved (docs/ideas/bot-trading-rails.md section 8.2). Build responses say so in `caps.provisional`.
+ *
  * Safety caps for bot orders, checked inside the builder (TradeBuildRequest.preflight) once the market, the limit and the
  * owner's position are known and before anything is simulated. Defaults are deliberately tighter than the app's:
  * a refused order is safe, an overfilled one is not.
@@ -31,6 +34,9 @@ import { buildQuoteSource, expectedFee, matcherQuote } from "../reads/quote";
 import { quoteFailsLimit } from "@/lib/limits/matcher-quote";
 import { computeLimitPriceE6 } from "@/lib/slippage";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
+
+/** One wording for every surface a bot reads (OpenAPI, build responses, README). */
+export const CAPS_PROVISIONAL_NOTE = "provisional devnet default, not owner-approved (design doc section 8)";
 
 export const DEFAULT_SLIPPAGE_BPS = 100;
 export const MAX_SLIPPAGE_BPS = 1000;
