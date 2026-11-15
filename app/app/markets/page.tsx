@@ -1,9 +1,8 @@
 "use client";
 
-import { resolveDiscoveredPriceE6 } from "@/lib/discovered-price";
+import { resolveDiscoveredPriceUsd } from "@/lib/discovered-price";
 import { useMarketLotExps } from "@/hooks/useMarketLotExp";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { lotPriceToTokenE6 } from "@/lib/v22/lot";
 import { baseSymbol, isPlaceholderMarketName, isPlaceholderMarketSymbol } from "@/lib/symbol-utils";
 import { getConfig } from "@/lib/config";
 import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
@@ -41,7 +40,7 @@ import { MarketHealthBadges } from "@/components/market/MarketHealthBadges";
 import { useMarketHealth } from "@/hooks/useMarketHealth";
 import { liveHealthLevel } from "@/lib/market-health-overlay";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { detectOracleMode, resolveMarketPriceE6, priceE6ToUsd, sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
+import { detectOracleMode, resolveMarketPriceE6, sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
 import { LiveRowPrice } from "@/components/market/LiveRowPrice";
 import { formatStatValue } from "@/lib/format";
 import { qToUsd, Q_DECIMALS, rowVolumeUsd } from "@/lib/q-usd";
@@ -473,8 +472,8 @@ function MarketsPageInner() {
     // Markets with no valid price return 0 so they sort to the bottom in USD mode.
     // Fixes #1327: no-price markets with huge raw token OI were floating above real USD markets.
     const getOIUsdSortKey = (m: MergedMarket): number => {
-      const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain)) : 0n;
-      const rawPrice = m.supabase?.last_price ?? priceE6ToUsd(onChainPriceE6);
+      const onChainPriceUsd = m.onChain ? resolveDiscoveredPriceUsd(m.onChain, lotOf(m.onChain)) : null;
+      const rawPrice = m.supabase?.last_price ?? onChainPriceUsd;
       const price = rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_USD ? rawPrice : null;
       if (price == null) return 0; // no price → sort to bottom
       // OI is engine Q (POS_SCALE 1e6), not mint-decimals — same as the display path.
@@ -555,9 +554,9 @@ function MarketsPageInner() {
               return false;
             }
             if (m.onChain) {
-              const priceE6 = resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain));
+              const priceUsd = resolveDiscoveredPriceUsd(m.onChain, lotOf(m.onChain));
               // Primary: on-chain price is 0 → keeper not cranking
-              if (priceE6 === 0n) return true;
+              if (priceUsd === null) return true;
               // GH#1646: Secondary: Supabase shows no mark_price + no index_price.
               // A non-zero authorityPriceE6 may be stale (last pushed before oracle stopped).
               // If the Supabase indexer also hasn't recorded any oracle prices for this market,
@@ -934,7 +933,7 @@ function MarketsPageInner() {
 
                   // Price: prefer Supabase, fall back to oracle-mode-aware on-chain price
                   // Cap bogus prices (corrupted on-chain data can produce $4.2T values)
-                  const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain)) : 0n;
+                  const onChainPriceUsd = m.onChain ? resolveDiscoveredPriceUsd(m.onChain, lotOf(m.onChain)) : null;
 
                   // GH#1631: Override health to "oracle-down" for ALL markets without a valid
                   // oracle price — regardless of whether we have on-chain capital/insurance data.
@@ -975,7 +974,7 @@ function MarketsPageInner() {
                     // On-chain market: use resolveMarketPriceE6 as oracle-availability signal.
                     // If the resolved price is 0n the keeper has not cranked or oracle is unavailable.
                     if (m.onChain) {
-                      return onChainPriceE6 === 0n;
+                      return onChainPriceUsd === null;
                     }
                     // GH#1644: Supabase-only market: last_price=null MUST force "No Oracle" badge.
                     // Previously only mark_price+index_price were checked — but markets like
@@ -994,7 +993,7 @@ function MarketsPageInner() {
                   const effectiveHealth = isOracleDown
                     ? { level: "oracle-down" as const, label: "No Oracle", insuranceRatio: 0, capitalRatio: 0 }
                     : { ...health, level: liveHealthLevel(health.level, marketHealth[m.slabAddress]) };
-                  const rawPrice = m.supabase?.last_price ?? priceE6ToUsd(onChainPriceE6);
+                  const rawPrice = m.supabase?.last_price ?? onChainPriceUsd;
                   const lastPrice = rawPrice != null && rawPrice > MAX_SANE_PRICE_USD ? null : rawPrice;
                   
                   // Token amounts: prefer on-chain, fall back to Supabase

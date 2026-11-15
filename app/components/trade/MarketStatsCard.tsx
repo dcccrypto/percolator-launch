@@ -1,13 +1,13 @@
 "use client";
 
-import { lotExpOf, lotPriceToTokenE6, qToTokenQ } from "@/lib/v22/lot";
+import { formatLotPriceE6, lotExpOf, lotPriceToTokenE6, qToTokenQ } from "@/lib/v22/lot";
 import { FC, useMemo } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
-import { formatTokenAmount, formatCompactTokenAmount, formatSpreadUsd, formatUsdPriceE6, formatBps } from "@/lib/format";
+import { formatTokenAmount, formatCompactTokenAmount, formatSpreadUsd, formatBps } from "@/lib/format";
 import { sanitizeOnChainValue, sanitizeAccountCount, sanitizeBps, sanitizeFundingRateBps } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { resolveMarketPriceE6, computeMarketSpread } from "@/lib/oraclePrice";
@@ -141,6 +141,12 @@ export const MarketStatsCard: FC = () => {
     if (!showSpread || spreadAbs === null || spreadBps === null) return "—";
     const sign = spreadAbs >= 0n ? "+" : "−";
     const pctPart = spreadBps === 0 ? "0.00%" : `${sign}${Math.abs(spreadBps / 100).toFixed(2)}%`;
+    if (lotExp > 0 && markPriceE6 !== null && indexPriceE6 !== null) {
+      // Per-lot difference shown per token: a spread under $0.000001 per token must not floor to "$0.00".
+      const lotDiff = markPriceE6 - indexPriceE6;
+      if (lotDiff === 0n) return `$0.00 (${pctPart})`;
+      return `${lotDiff > 0n ? "+" : "−"}${formatLotPriceE6(lotDiff < 0n ? -lotDiff : lotDiff, lotExp)} (${pctPart})`;
+    }
     return `${formatSpreadUsd(spreadAbs)} (${pctPart})`;
   })();
   // Color spread amber if abs spread > 0.5% (50 bps)
@@ -176,12 +182,12 @@ export const MarketStatsCard: FC = () => {
     // Row 1 — Pricing signals
     {
       label: "Mark",
-      value: markPriceE6 !== null ? formatUsdPriceE6(lotPriceToTokenE6(markPriceE6, lotExp)) : formatUsdPriceE6(lotPriceToTokenE6(livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n), lotExp)),
+      value: formatLotPriceE6(markPriceE6 !== null ? markPriceE6 : (livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n)), lotExp),
       tooltip: "EMA mark price used for liquidations and PnL",
     },
     {
       label: "Index",
-      value: indexPriceE6 !== null ? formatUsdPriceE6(lotPriceToTokenE6(indexPriceE6, lotExp)) : "—",
+      value: indexPriceE6 !== null ? formatLotPriceE6(indexPriceE6, lotExp) : "—",
       tooltip: "On-chain oracle index price",
     },
     {

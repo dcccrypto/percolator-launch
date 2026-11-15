@@ -151,7 +151,11 @@ export function toE6(value: number): bigint {
  */
 export function formatUsdFromNumber(priceUsd: number | null | undefined, fallback = "—"): string {
   if (priceUsd == null || !Number.isFinite(priceUsd)) return fallback;
-  return formatUsdPriceE6(toE6(priceUsd), fallback);
+  const e6 = toE6(priceUsd);
+  // A per-token price under half a micro-dollar (v2.2 lot markets) rounds to 0 here: show it with significant
+  // figures instead of "—". Every price that rounds to >= 1 e6 keeps the old 6-decimal text.
+  if (e6 === 0n && priceUsd > 0) return formatMarkPrice(priceUsd, fallback);
+  return formatUsdPriceE6(e6, fallback);
 }
 
 /**
