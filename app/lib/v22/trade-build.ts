@@ -90,6 +90,13 @@ export interface TradeBuildRequest {
    * it a buy failed non-retryably where a sell got the crank (council trader seat). Off for POST /api/v22/trade.
    */
   crankOnLossStale?: boolean;
+  /**
+   * A caller-named `portfolio` is read and checked BEFORE the identity fetches, so a missing or wrong account answers 400
+   * bad_portfolio (the caller's input). Off (POST /api/v22/trade, owner-held): the route keeps its earlier answers, i.e. a
+   * missing / unreadable named account fails in the identity fetch as a retryable 503 rpc, and only an account that reads as
+   * a portfolio but is not the owner's taker portfolio on this market is 400 bad_portfolio. Only the /v1 builders set it.
+   */
+  strictNamedPortfolio?: boolean;
 }
 
 export interface TradePreflight {
@@ -317,18 +324,22 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
   const beforeFull = readBeforeTradeFull(connection, accountA, slabPk).catch(() => null);
   // A caller-named portfolio is checked BEFORE anything reads its identity: a wrong or missing account is the caller's input
   // (bad_portfolio, 400), not an RPC problem. It must be the owner's own taker portfolio on THIS market (same fields the scan selects on).
-  let namedInfo: Awaited<ReturnType<Connection["getAccountInfo"]>> | undefined;
-  if (req.portfolio) {
-    namedInfo = await connection.getAccountInfo(accountA, "confirmed");
+  // Off (POST /api/v22/trade): the same check runs AFTER the identity fetches, as it always did there (see strictNamedPortfolio).
+  const checkNamed = (info: Awaited<ReturnType<Connection["getAccountInfo"]>>) => {
     let pf: ReturnType<typeof parsePortfolio> | null = null;
     try {
-      pf = namedInfo && namedInfo.owner.equals(programId) ? parsePortfolio(new Uint8Array(namedInfo.data)) : null;
+      pf = info && info.owner.equals(programId) ? parsePortfolio(new Uint8Array(info.data)) : null;
     } catch {
       pf = null;
     }
     if (!pf || !pf.owner.equals(owner) || !pf.marketGroupId.equals(slabPk) || pf.matcherEnabled) {
       throw new TradeBuildRefusal("bad_portfolio", "portfolio is not this owner's taker portfolio on this market", 400);
     }
+  };
+  let namedInfo: Awaited<ReturnType<Connection["getAccountInfo"]>> | undefined;
+  if (req.portfolio && req.strictNamedPortfolio) {
+    namedInfo = await connection.getAccountInfo(accountA, "confirmed");
+    checkNamed(namedInfo);
   }
   const [takerId, lpId, marketId, portInfo] = await Promise.all([
     fetchPortfolioIdentity(connection, accountA),
@@ -336,6 +347,7 @@ async function buildInner(connection: Connection, req: TradeBuildRequest): Promi
     fetchAssetMarketId(connection, slabPk, 0),
     namedInfo !== undefined ? Promise.resolve(namedInfo) : connection.getAccountInfo(accountA, "confirmed"),
   ]);
+  if (req.portfolio && !req.strictNamedPortfolio) checkNamed(portInfo);
 
   let feeBps = await fetchTradeFeeBps(connection, slabPk, lp.matcherCtx, { fallback: cfg.tradeFeeBps, strict: true }).catch(() => {
     throw new TradeBuildRefusal("fee_unreadable", "market fee terms unreadable; nothing built", 503);

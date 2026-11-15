@@ -131,6 +131,8 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       ...(input.maxFeeBps !== undefined ? { maxFeeBps: input.maxFeeBps } : {}),
       ...(input.portfolio ? { portfolio: input.portfolio } : {}),
       crankOnLossStale: true,
+      // A wrong or missing named portfolio is the caller's input: 400 bad_portfolio (POST /api/v22/trade keeps its 503 rpc).
+      strictNamedPortfolio: true,
       preflight: async (p) => {
         seen = { positionBeforeQ: p.positionBeforeQ, reducing: p.reducing };
         applied = checkOrderCaps(caps, p);

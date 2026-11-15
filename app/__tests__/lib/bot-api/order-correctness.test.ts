@@ -183,6 +183,15 @@ describe("first-timer-6: a wrong or missing `portfolio` is bad_portfolio, not re
     const e = await err(buildOrder(conn({ [LP.toBase58()]: { owner: WRAPPER, data: Buffer.from(LP_DATA) } }), { owner: OWNER, market: SOL, size: 1_000n, portfolio: LP }, meta()));
     expect(e.code).toBe("bad_portfolio");
   });
+  it("the shared builder WITHOUT strictNamedPortfolio (how POST /api/v22/trade calls it) keeps the old 503 rpc for a missing named portfolio", async () => {
+    const { buildV22Trade, TradeBuildRefusal } = await import("@/lib/v22/trade-build");
+    const e = await buildV22Trade(conn(), { owner: OWNER, slab: SOL, size: 1_000n, portfolio: nowhere }).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(TradeBuildRefusal);
+    expect([(e as InstanceType<typeof TradeBuildRefusal>).code, (e as InstanceType<typeof TradeBuildRefusal>).status]).toEqual(["rpc", 503]);
+    // With it (what /v1 sets): 400 bad_portfolio before any identity read.
+    const e2 = await buildV22Trade(conn(), { owner: OWNER, slab: SOL, size: 1_000n, portfolio: nowhere, strictNamedPortfolio: true }).catch((x: unknown) => x);
+    expect([(e2 as InstanceType<typeof TradeBuildRefusal>).code, (e2 as InstanceType<typeof TradeBuildRefusal>).status]).toEqual(["bad_portfolio", 400]);
+  });
   it("close naming a portfolio that does not exist: bad_portfolio (not no_portfolio, not rpc_unavailable)", async () => {
     const e = await err(buildClose(conn(), { owner: OWNER.toBase58(), market: SOL.toBase58(), portfolio: nowhere.toBase58() }, meta()));
     expect(e.code).toBe("bad_portfolio");
