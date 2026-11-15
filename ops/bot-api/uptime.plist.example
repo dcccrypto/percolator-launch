@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TEMPLATE ONLY. Nothing installs or loads this file. See docs/bot-api/uptime.md before using it.
+
+  Runs the bot API uptime check (app/scripts/bot-api/uptime.ts) every 60 s on a Mac and appends one block of lines per run
+  to a log. The script exits 1 when any check fails; launchd records the exit status, and the log has the reason.
+
+  Replace before use:
+    __REPO__        absolute path of a percolator-launch checkout (with `pnpm install` done)
+    __BASE_URL__    the deployment to check, e.g. https://<preview-host>
+    __LOG_DIR__     absolute path of a folder for the logs
+  The key (read + ops scopes) is read from the macOS keychain at run time, never written in this file:
+    security add-generic-password -s percolator-bot-api-uptime -a uptime -w     (prompts for the key)
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>trade.percolator.bot-api-uptime</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd "__REPO__/app" &amp;&amp; date -u +%FT%TZ &amp;&amp; UPTIME_API_KEY="$(security find-generic-password -s percolator-bot-api-uptime -w)" pnpm --silent bot-api:uptime --base "__BASE_URL__" --max-ms 3000 --timeout-ms 10000</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/bot-api-uptime.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/bot-api-uptime.err</string>
+</dict>
+</plist>

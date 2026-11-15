@@ -11,7 +11,8 @@
     "test:unit": "vitest run --reporter=verbose --coverage",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "dev:price-ws": "tsx scripts/local-price-ws-server.ts"
+    "dev:price-ws": "tsx scripts/local-price-ws-server.ts",
+    "bot-api:uptime": "tsx scripts/bot-api/uptime.ts"
   },
   "dependencies": {
     "@noble/curves": "^1.9.7",

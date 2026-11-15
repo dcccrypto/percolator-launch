@@ -24,7 +24,11 @@ export const TIER_BUDGET: Record<Principal["tier"], number> = {
   default: 600,
   mm: 3000,
 };
-/** Weight of builds from all callers together per window. */
+/**
+ * Weight of builds from all callers together per window (3000 = 300 builds/min at weight 10). A build costs about 12 RPC
+ * calls (measured, docs/bot-api/load/README.md), so the ceiling allows about 3,600 RPC calls/min from builds alone on the
+ * app's RPC. It is not derived from an RPC quota yet: set it from the RPC plan's quota / 12 minus headroom before real traffic.
+ */
 export const GLOBAL_BUILD_BUDGET = 3000;
 /**
  * No one principal may take more than this share of GLOBAL_BUILD_BUDGET in a window (750 weight = 75 builds/min), so one

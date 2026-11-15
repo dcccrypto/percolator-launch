@@ -1,0 +1,77 @@
+{
+  "label": "e2 build-only unpaced burst 280 (under the 300/min global build budget)",
+  "mode": "inproc",
+  "rpc": "mock",
+  "target": "in-process handlers",
+  "concurrency": 32,
+  "mix": {
+    "read": 0,
+    "quote": 0,
+    "account": 0,
+    "build": 100
+  },
+  "pacingRps": null,
+  "keys": 20,
+  "wallSeconds": 1.77,
+  "throughputRps": 157.9,
+  "mockRpcRequests": 3378,
+  "requests": 280,
+  "status": {
+    "200": 280
+  },
+  "errorCodes": {},
+  "errorRate": 0,
+  "non2xxRate": 0,
+  "latencyMs": {
+    "count": 280,
+    "min": 90.93,
+    "p50": 185.38,
+    "p95": 452.57,
+    "p99": 618.34,
+    "max": 745.81,
+    "mean": 198.79
+  },
+  "latencyServedMs": {
+    "count": 280,
+    "min": 90.93,
+    "p50": 185.38,
+    "p95": 452.57,
+    "p99": 618.34,
+    "max": 745.81,
+    "mean": 198.79
+  },
+  "byClass": {
+    "build": {
+      "requests": 280,
+      "status": {
+        "200": 280
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 280,
+        "min": 90.93,
+        "p50": 185.38,
+        "p95": 452.57,
+        "p99": 618.34,
+        "max": 745.81,
+        "mean": 198.79
+      },
+      "latencyServedMs": {
+        "count": 280,
+        "min": 90.93,
+        "p50": 185.38,
+        "p95": 452.57,
+        "p99": 618.34,
+        "max": 745.81,
+        "mean": 198.79
+      }
+    }
+  },
+  "notes": [
+    "errorRate = transport failures + 5xx; non2xxRate also counts 4xx (rate limits, coded refusals).",
+    "latencyServedMs leaves out 429s, which are answered before any work.",
+    "mock RPC answers simulateTransaction cleanly and serves a flat taker account for MOCK_OWNER: build requests run the whole build path (reads, caps, LP selection, simulations) and measure the API's own cost, not the program or a real RPC's latency. Builds draw on the global build budget (300 per minute), so an unpaced run is mostly 429 on builds; pace with --rps to measure served builds."
+  ]
+}

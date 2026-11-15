@@ -67,3 +67,24 @@ describe("uptime.ts", () => {
     expect(bad.out).toContain("error kv_unavailable");
   });
 });
+
+describe("uptime scheduling wiring (operator, round 1): a script and a template, nothing installed", () => {
+  it("app/package.json runs it as bot-api:uptime", async () => {
+    const { readFileSync } = await import("node:fs");
+    const pkg = JSON.parse(readFileSync(join(__dirname, "../../../package.json"), "utf8")) as { scripts: Record<string, string> };
+    expect(pkg.scripts["bot-api:uptime"]).toBe("tsx scripts/bot-api/uptime.ts");
+  });
+  it("the launchd template runs it every 60 s, takes the key from the keychain and holds none itself", async () => {
+    const { readFileSync } = await import("node:fs");
+    const plist = readFileSync(join(__dirname, "../../../../ops/bot-api/uptime.plist.example"), "utf8");
+    expect(plist).toContain("bot-api:uptime");
+    expect(plist).toMatch(/<key>StartInterval<\/key>\s*<integer>60<\/integer>/);
+    expect(plist).toContain("find-generic-password");
+    expect(plist).not.toMatch(/pbk_[A-Za-z0-9]/);
+  });
+  it("the script header says the key needs read AND ops", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(join(__dirname, "../../../scripts/bot-api/uptime.ts"), "utf8");
+    expect(src).toMatch(/BOTH the `read` scope[\s\S]*AND the `ops` scope/);
+  });
+});
