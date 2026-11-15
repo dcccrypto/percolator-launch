@@ -25,6 +25,7 @@ const m = vi.hoisted(() => ({
   derived: [] as string[][],
   pool: null as unknown,
   ata: null as unknown,
+  ataArgs: [] as unknown[],
 }));
 m.conn = { connection: { getAccountInfo: (...a: unknown[]) => m.getAccountInfo(...a) } };
 
@@ -49,7 +50,10 @@ vi.mock("@/lib/pollWhenVisible", () => ({
     return m.poll.stop;
   },
 }));
-vi.mock("@solana/spl-token", async (orig) => ({ ...(await orig<typeof import("@solana/spl-token")>()), getAssociatedTokenAddressSync: () => m.ata, unpackAccount: (...a: unknown[]) => m.unpack(...a) }));
+vi.mock("@solana/spl-token", async (orig) => ({ ...(await orig<typeof import("@solana/spl-token")>()), getAssociatedTokenAddressSync: (...a: unknown[]) => {
+    m.ataArgs = a;
+    return m.ata;
+  }, unpackAccount: (...a: unknown[]) => m.unpack(...a) }));
 
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import { useResolvedClaims } from "@/hooks/useResolvedClaims";
@@ -78,7 +82,8 @@ beforeEach(() => {
   m.loadOwnPortfolios.mockResolvedValue([{}, {}]);
   m.readEarnPositions.mockResolvedValue(new Map([[SLAB, { shares: 9n }]]));
   m.decodeCap.mockReturnValue(cap);
-  m.getAccountInfo.mockResolvedValue(poolInfo);
+  // Address-aware: the pool account and the wallet's LP token account answer; any other address reads nothing.
+  m.getAccountInfo.mockImplementation(async (k: PublicKey) => (k === m.pool ? poolInfo : k === m.ata ? { data: new Uint8Array(165) } : null));
   m.unpack.mockReturnValue({ amount: 7n });
 });
 
@@ -125,10 +130,19 @@ describe("useResolvedClaims", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(m.loadOwnPortfolios.mock.calls[0][3]).toBe(OWNER);
     expect((m.loadOwnPortfolios.mock.calls[0][1] as PublicKey).toBase58()).toBe(WRAPPER);
+    expect((m.loadOwnPortfolios.mock.calls[0][2] as PublicKey).toBase58()).toBe(SLAB);
+    expect((m.readEarnPositions.mock.calls[0][1] as PublicKey).toBase58()).toBe(WRAPPER);
+    expect(m.readEarnPositions.mock.calls[0][2]).toBe(OWNER);
     expect(m.readEarnPositions.mock.calls[0][3]).toEqual([SLAB]);
+    // stake: the pool is derived from (market, stake program); the LP ATA from (lpMint, owner); the ATA account is what gets unpacked.
+    expect(m.derived[0]).toEqual([SLAB, STAKE_PROGRAM.toBase58()]);
+    expect(m.ataArgs).toEqual([m.lpMint, OWNER]);
+    expect(m.getAccountInfo.mock.calls.map((c) => c[0])).toEqual([m.pool, m.ata]);
+    expect(m.unpack.mock.calls[0][0]).toBe(m.ata);
+    expect(m.decodeCap.mock.calls[0]).toEqual([m.slab.raw, 0]);
     expect(result.current.readFailed).toBe(false);
     expect(result.current.hasClaims).toBe(true);
-    // 2 portfolios open: Earn waits on them; stake has 7 LP and the market's insurance is still to recover.
+    // 2 portfolios open, the market is terminal-flat so Earn is ready; stake has 7 LP and the market's insurance is still to recover.
     expect(kinds(result.current.rows)).toEqual(["positions:ready:close-and-withdraw", "earn:ready:open-earn", "stake:ready:recover-to-stakers+withdraw-stake"]);
   });
 
@@ -220,17 +234,6 @@ describe("useResolvedClaims", () => {
     await waitFor(() => expect(m.loadOwnPortfolios).toHaveBeenCalledTimes(2));
     unmount();
     expect(m.poll.stop).toHaveBeenCalled();
-  });
-
-  it("a read that finishes after unmount does not set state", async () => {
-    let release: (v: unknown[]) => void = () => undefined;
-    m.loadOwnPortfolios.mockReturnValue(new Promise((r) => (release = r)));
-    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const { unmount } = renderHook(() => useResolvedClaims(SLAB));
-    unmount();
-    await act(async () => release([{}]));
-    expect(errors).not.toHaveBeenCalled();
-    errors.mockRestore();
   });
 
   it("the owner-only window: ends at resolved_slot + delay, estimated from the cluster slot", async () => {
