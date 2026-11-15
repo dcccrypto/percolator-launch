@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { V17_PORTFOLIO_IDENTITY_TRAILER_LEN, deriveMatcherDelegate } from "@percolatorct/sdk";
-import { selectMarketLp, ctxAddressesToFetch, type CtxRow, type PortfolioRow } from "@/lib/market-lp";
+import { resolveMarketLp, selectMarketLp, ctxAddressesToFetch, type CtxRow, type PortfolioRow } from "@/lib/market-lp";
 import { assetProfileOff } from "@/lib/v18-wire";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { blankMarket, blankPortfolio } from "../helpers/v22-fixtures";
@@ -125,5 +125,93 @@ describe("selectMarketLp: the LP is chosen by on-chain identity", () => {
   it("a partial list (curated fast path) never uses the launch-portfolio fallback", () => {
     const attacker = portfolio({ owner: Keypair.generate().publicKey, id: 1n });
     expect(select([attacker], null, false)).toBeNull();
+  });
+});
+
+describe("resolveMarketLp: the optional prefetched reads (server detail route) vs the default (client trading hooks)", () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const lp = portfolio({ owner: CREATOR, id: 1n });
+  const mkt = marketData(CREATOR);
+
+  /** A fake connection that counts every RPC it is asked for. */
+  function fakeConn() {
+    const calls = { getAccountInfo: [] as string[], gpa: 0, gma: 0 };
+    const connection = {
+      getAccountInfo: async (pk: PublicKey) => {
+        calls.getAccountInfo.push(pk.toBase58());
+        if (pk.equals(MARKET)) return { data: Buffer.from(mkt), owner: PROGRAM };
+        if (pk.equals(lp.row.pubkey)) return { data: Buffer.from(lp.row.data), owner: PROGRAM };
+        return null;
+      },
+      getProgramAccounts: async () => {
+        calls.gpa++;
+        return [{ pubkey: lp.row.pubkey, account: { data: Buffer.from(lp.row.data) } }];
+      },
+      getMultipleAccountsInfo: async (keys: PublicKey[]) => {
+        calls.gma++;
+        return keys.map((k) => (k.equals(lp.ctx) ? { data: Buffer.from(lp.ctxRow.data), owner: MATCHER } : null));
+      },
+    };
+    return { connection: connection as never, calls };
+  }
+
+  it("DEFAULT (no prefetched, as client hooks call it): reads the market itself, then the known LP", async () => {
+    const { connection, calls } = fakeConn();
+    const r = await resolveMarketLp(connection, PROGRAM, MARKET, lp.row.pubkey);
+    expect(r?.pubkey.equals(lp.row.pubkey)).toBe(true);
+    expect(calls.getAccountInfo).toEqual([MARKET.toBase58(), lp.row.pubkey.toBase58()]);
+    expect(calls.gpa).toBe(0);
+  });
+
+  it("DEFAULT without a known LP: reads the market, then scans", async () => {
+    const { connection, calls } = fakeConn();
+    const r = await resolveMarketLp(connection, PROGRAM, MARKET);
+    expect(r?.pubkey.equals(lp.row.pubkey)).toBe(true);
+    expect(calls.getAccountInfo).toEqual([MARKET.toBase58()]);
+    expect(calls.gpa).toBe(1);
+  });
+
+  it("DEFAULT: a missing market resolves null without scanning", async () => {
+    const { connection, calls } = fakeConn();
+    expect(await resolveMarketLp(connection, PROGRAM, Keypair.generate().publicKey)).toBeNull();
+    expect(calls.gpa).toBe(0);
+  });
+
+  it("PREFETCHED market + known LP: same LP, and neither account is read again (only the ctx batch is)", async () => {
+    const { connection, calls } = fakeConn();
+    const r = await resolveMarketLp(connection, PROGRAM, MARKET, lp.row.pubkey, {
+      marketData: mkt,
+      knownLpInfo: { data: Buffer.from(lp.row.data), owner: PROGRAM } as never,
+    });
+    expect(r?.pubkey.equals(lp.row.pubkey)).toBe(true);
+    expect(r?.reason).toBe("asset-admin");
+    expect(calls.getAccountInfo).toEqual([]);
+    expect(calls.gma).toBe(1); // the ctx
+    expect(calls.gpa).toBe(0);
+  });
+
+  it("PREFETCHED market only: no market re-read, the scan still runs", async () => {
+    const { connection, calls } = fakeConn();
+    const r = await resolveMarketLp(connection, PROGRAM, MARKET, null, { marketData: mkt });
+    expect(r?.pubkey.equals(lp.row.pubkey)).toBe(true);
+    expect(calls.getAccountInfo).toEqual([]);
+    expect(calls.gpa).toBe(1);
+  });
+
+  it("PREFETCHED known LP that does not exist (null): falls back to the scan instead of re-reading it", async () => {
+    const { connection, calls } = fakeConn();
+    const r = await resolveMarketLp(connection, PROGRAM, MARKET, lp.row.pubkey, { marketData: mkt, knownLpInfo: null });
+    expect(r?.pubkey.equals(lp.row.pubkey)).toBe(true);
+    expect(calls.getAccountInfo).toEqual([]);
+    expect(calls.gpa).toBe(1);
+  });
+
+  it("a prefetched known LP still has to pass the identity rules (foreign owner -> scan)", async () => {
+    const { connection, calls } = fakeConn();
+    await resolveMarketLp(connection, PROGRAM, MARKET, lp.row.pubkey, {
+      marketData: mkt,
+      knownLpInfo: { data: Buffer.from(lp.row.data), owner: Keypair.generate().publicKey } as never,
+    });
+    expect(calls.gpa).toBe(1);
   });
 });

@@ -19,7 +19,7 @@ import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 import { qToUsd } from "@/lib/q-usd";
 import { maxLeverageFromSlab } from "@/lib/slab-max-leverage";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
-import { getKnownLpPortfolioAddress, getMarketLpCapital } from "@/lib/lp-portfolio";
+import { getMarketLpCapital } from "@/lib/lp-portfolio";
 import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import { verifyKeeperSignature } from "@/lib/keeper-hmac";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
@@ -140,8 +140,8 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     const connection = getServerConnection("confirmed");
     // Round trip 1: the slab, plus (curated market) its known LP account in the same call, and the registration
     // Blob beside it. The slab bytes / LP account are then handed to the LP resolve below instead of re-read there.
-    const knownLp = getKnownLpPortfolioAddress(slab);
     const playgroundMetaEarly = PLAYGROUND_SLAB_META[slab];
+    const knownLp = playgroundMetaEarly?.lp_portfolio_address ?? null; // same source as getKnownLpPortfolioAddress
     const [infos, registeredRows] = await Promise.all([
       knownLp
         ? getMultipleAccountsInfoChunked(connection, [slabPk, new PublicKey(knownLp)], "confirmed")

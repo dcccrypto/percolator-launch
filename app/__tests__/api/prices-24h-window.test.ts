@@ -8,6 +8,8 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
+// The pool lookup is a direct call to the market-detail handler (no loopback fetch).
+vi.mock("@/app/api/markets/[slab]/route", () => ({ GET: async () => Response.json({ market: { dex_pool_address: "POOL1" } }) }));
 
 const NOW = 1_800_000_000;
 const H = 3600;
@@ -20,7 +22,6 @@ function stubGecko(bars: Bar[]) {
   seenUrls = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     seenUrls.push(String(url));
-    if (String(url).includes("/api/markets/")) return Response.json({ market: { dex_pool_address: "POOL1" } });
     return Response.json({ data: { attributes: { ohlcv_list: bars } } });
   }));
 }
