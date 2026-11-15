@@ -19,7 +19,8 @@ import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 import { qToUsd } from "@/lib/q-usd";
 import { maxLeverageFromSlab } from "@/lib/slab-max-leverage";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
-import { getMarketLpCapital } from "@/lib/lp-portfolio";
+import { getKnownLpPortfolioAddress, getMarketLpCapital } from "@/lib/lp-portfolio";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import { verifyKeeperSignature } from "@/lib/keeper-hmac";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { parseMarketOI, isWrapperAccount, isUnknownWrapperVersion, unsupportedLayoutBody } from "@/lib/v22/layout";
@@ -137,7 +138,18 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
   try {
     const slabPk = new PublicKey(slab);
     const connection = getServerConnection("confirmed");
-    const info = await connection.getAccountInfo(slabPk);
+    // Round trip 1: the slab, plus (curated market) its known LP account in the same call, and the registration
+    // Blob beside it. The slab bytes / LP account are then handed to the LP resolve below instead of re-read there.
+    const knownLp = getKnownLpPortfolioAddress(slab);
+    const playgroundMetaEarly = PLAYGROUND_SLAB_META[slab];
+    const [infos, registeredRows] = await Promise.all([
+      knownLp
+        ? getMultipleAccountsInfoChunked(connection, [slabPk, new PublicKey(knownLp)], "confirmed")
+        : connection.getAccountInfo(slabPk).then((i) => [i, undefined] as const),
+      playgroundMetaEarly ? Promise.resolve([]) : readRegisteredMarkets().catch(() => []),
+    ]);
+    const info = infos[0];
+    const knownLpInfo = knownLp ? (infos[1] ?? null) : undefined;
 
     if (!info) {
       return NextResponse.json({ error: "Market not found" }, { status: 404 });
@@ -170,8 +182,7 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     // token and renders every user-created market as "USDC/USD".
     const registered = playgroundMeta
       ? null
-      : (await readRegisteredMarkets().catch(() => []))
-          .find((rm) => rm.slabAddress === slab) ?? null;
+      : registeredRows.find((rm) => rm.slabAddress === slab) ?? null;
 
     // Live engine stats from the same raw bytes (mirrors the list route's
     // v17 enrichment). If the parse throws, OI degrades to zeros and insurance to null (unknown).
@@ -243,7 +254,7 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     // getConfig().programId.
     let marketWithLp: Record<string, unknown> = market;
     try {
-      const capital = await getMarketLpCapital(connection, info.owner, slab);
+      const capital = await getMarketLpCapital(connection, info.owner, slab, { marketData: data, knownLpInfo });
       if (capital != null) {
         marketWithLp = { ...market, vault_balance: Number(capital) };
       }

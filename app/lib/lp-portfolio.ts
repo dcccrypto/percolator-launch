@@ -4,7 +4,7 @@ import {
 } from "@percolatorct/sdk";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
-import { resolveMarketLp, selectMarketLpsFromScan } from "@/lib/market-lp";
+import { resolveMarketLp, selectMarketLpsFromScan, type ResolveMarketLpPrefetched } from "@/lib/market-lp";
 import { parsePortfolio, portfolioGpaFilters } from "@/lib/v22/layout";
 
 /**
@@ -138,9 +138,10 @@ export async function discoverMarketLpCapital(
   connection: Connection,
   programId: PublicKey,
   marketPk: PublicKey,
+  prefetched?: Pick<ResolveMarketLpPrefetched, "marketData">,
 ): Promise<bigint | null> {
   try {
-    const lp = await resolveMarketLp(connection, programId, marketPk);
+    const lp = await resolveMarketLp(connection, programId, marketPk, undefined, prefetched);
     if (lp) return readCapitalSafe(Buffer.from(lp.data));
   } catch {
     // Discovery failed (RPC error, unsupported on this cluster, etc.) — caller
@@ -152,12 +153,14 @@ export async function discoverMarketLpCapital(
 /**
  * Real Market-LP lookup for a single market: known-address fast path first
  * (one getAccountInfo call for curated seeds), full getProgramAccounts scan
- * otherwise (wizard-launched markets). Used by /api/markets/[slab].
+ * otherwise (wizard-launched markets). Used by /api/markets/[slab], which passes the reads it already made
+ * (`prefetched`: the slab bytes, and the known LP account) so they are not repeated.
  */
 export async function getMarketLpCapital(
   connection: Connection,
   programId: PublicKey,
   slab: string,
+  prefetched?: ResolveMarketLpPrefetched,
 ): Promise<bigint | null> {
   let marketPk: PublicKey;
   try {
@@ -169,11 +172,11 @@ export async function getMarketLpCapital(
   if (known) {
     try {
       // The curated address must still pass every identity rule (lib/market-lp.ts).
-      const lp = await resolveMarketLp(connection, programId, marketPk, new PublicKey(known));
+      const lp = await resolveMarketLp(connection, programId, marketPk, new PublicKey(known), prefetched);
       if (lp) return readCapitalSafe(Buffer.from(lp.data));
     } catch {
       // Fall through to the discovery scan below.
     }
   }
-  return discoverMarketLpCapital(connection, programId, marketPk);
+  return discoverMarketLpCapital(connection, programId, marketPk, prefetched);
 }

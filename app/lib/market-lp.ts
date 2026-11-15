@@ -243,6 +243,16 @@ async function fetchCtxs(connection: Connection, rows: PortfolioRow[]): Promise<
 }
 
 /**
+ * Optional, SERVER-side reads the caller already made, so `resolveMarketLp` does not repeat them. Both are the
+ * `confirmed` reads of the same accounts; omit them (client trading hooks do) and the function reads for itself.
+ * `knownLpInfo` is only used when `knownLp` is passed; `null` = the caller read it and it does not exist.
+ */
+export interface ResolveMarketLpPrefetched {
+  marketData?: Uint8Array;
+  knownLpInfo?: AccountInfo<Buffer> | null;
+}
+
+/**
  * Resolve the market's LP on-chain. `knownLp` (a curated address) is tried first with a
  * cheap fetch; it must still pass every rule. Falls back to the full market scan.
  * Throws only on RPC failure of the scan; null = no qualifying LP.
@@ -252,14 +262,20 @@ export async function resolveMarketLp(
   programId: PublicKey,
   market: PublicKey,
   knownLp?: PublicKey | null,
+  prefetched?: ResolveMarketLpPrefetched,
 ): Promise<MarketLp | null> {
-  const marketInfo = await connection.getAccountInfo(market, "confirmed");
-  if (!marketInfo) return null;
-  const marketData = new Uint8Array(marketInfo.data);
+  let marketData: Uint8Array;
+  if (prefetched?.marketData) {
+    marketData = prefetched.marketData;
+  } else {
+    const marketInfo = await connection.getAccountInfo(market, "confirmed");
+    if (!marketInfo) return null;
+    marketData = new Uint8Array(marketInfo.data);
+  }
 
   if (knownLp) {
     try {
-      const info = await connection.getAccountInfo(knownLp, "confirmed");
+      const info = prefetched?.knownLpInfo !== undefined ? prefetched.knownLpInfo : await connection.getAccountInfo(knownLp, "confirmed");
       if (info && info.owner.equals(programId)) {
         const rows = [{ pubkey: knownLp, data: new Uint8Array(info.data) }];
         const lp = selectMarketLp({ programId, market, marketData, portfolios: rows, ctxs: await fetchCtxs(connection, rows), complete: false });
