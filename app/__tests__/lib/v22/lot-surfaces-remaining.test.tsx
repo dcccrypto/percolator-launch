@@ -110,11 +110,11 @@ describe("markets page on-chain fallback price (resolveDiscoveredPriceE6)", () =
 describe("source guards (components that need providers to render)", () => {
   const sites: Array<[string, RegExp]> = [
     ["components/trade/FundingRateCard.tsx", /qToTokenQ\(absPosition, lotExpOf\(raw\)\)/],
-    ["components/trade/MarketStatsCard.tsx", /lotPriceToTokenE6\(markPriceE6, lotExp\)/],
-    ["components/trade/MarketStatsCard.tsx", /lotPriceToTokenE6\(indexPriceE6, lotExp\)/],
+    ["components/trade/MarketStatsCard.tsx", /formatLotPriceE6\(markPriceE6 !== null \? markPriceE6 : /],
+    ["components/trade/MarketStatsCard.tsx", /formatLotPriceE6\(indexPriceE6, lotExp\)/],
     ["components/trade/MarketStatsCard.tsx", /lotPriceToTokenE6\(markPriceE6 - indexPriceE6, lotExp\)/],
     ["components/market/MarketBrowser.tsx", /<LotOpenInterest slab=\{slab\} oiQ=\{m\.engine\.totalOpenInterest\}/],
-    ["app/markets/page.tsx", /resolveDiscoveredPriceE6\(m\.onChain, lotOf\(m\.onChain\)\)/],
+    ["app/markets/page.tsx", /resolveDiscoveredPriceUsd\(m\.onChain, lotOf\(m\.onChain\)\)/],
   ];
   it.each(sites)("%s %#", (file, re) => expect(src(file)).toMatch(re));
 });

@@ -40,9 +40,9 @@ describe("GH#1646: oracle-down sort rank cross-check (stale authorityPriceE6)", 
     expect(marketsPageSource).toMatch(/stale.*authorityPriceE6|authorityPriceE6.*stale/i);
   });
 
-  it("computeIsOracleDown still uses resolveMarketPriceE6 as primary check", () => {
-    // The primary check (priceE6 === 0n) must still be present before the secondary check
-    const primary = marketsPageSource.indexOf("priceE6 === 0n) return true");
+  it("computeIsOracleDown still uses the resolved on-chain price as primary check", () => {
+    // The primary check (no resolved per-token price) must still be present before the secondary check
+    const primary = marketsPageSource.indexOf("priceUsd === null) return true");
     const secondary = marketsPageSource.indexOf("GH#1646: Secondary");
     expect(primary).toBeGreaterThan(-1);
     expect(secondary).toBeGreaterThan(-1);
