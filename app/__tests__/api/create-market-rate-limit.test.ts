@@ -34,16 +34,16 @@ describe("getClientIp", () => {
     expect(getClientIp(req as never)).toBe("5.6.7.8");
   });
 
-  it("falls back to x-real-ip when x-forwarded-for is absent", () => {
+  it("ignores x-real-ip (caller-settable) when x-forwarded-for is absent", () => {
     const req = new Request("http://localhost/", {
       headers: { "x-real-ip": "9.9.9.9" },
     });
-    expect(getClientIp(req as never)).toBe("9.9.9.9");
+    expect(getClientIp(req as never)).toBe("unknown-ip");
   });
 
-  it('returns "unknown" when no IP headers present', () => {
+  it('returns "unknown-ip" when no IP headers present', () => {
     const req = new Request("http://localhost/");
-    expect(getClientIp(req as never)).toBe("unknown");
+    expect(getClientIp(req as never)).toBe("unknown-ip");
   });
 });
 
