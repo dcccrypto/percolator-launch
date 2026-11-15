@@ -12,7 +12,7 @@ vi.mock("@/lib/slab-max-leverage", () => ({ maxLeverageFromSlab: () => risk.maxL
 const leg = vi.hoisted(() => ({ v: { kind: "flat" } as { kind: "flat" } | { kind: "open"; valuePnl: bigint } | { kind: "unreadable" } }));
 vi.mock("@/lib/bot-api/reads/account", async (orig) => ({ ...(await orig<typeof import("@/lib/bot-api/reads/account")>()), openLegsValuePnl: () => leg.v }));
 
-import { checkOrderCaps, resolveCaps, notionalCapAtoms, DEFAULT_SLIPPAGE_BPS } from "@/lib/bot-api/builders/caps";
+import { checkOrderCaps, resolveCaps, notionalCapAtoms, serverCaps, DEFAULT_SLIPPAGE_BPS, HARD_MAX_NOTIONAL_USD, HARD_MAX_LEVERAGE } from "@/lib/bot-api/builders/caps";
 import type { TradePreflight } from "@/lib/v22/trade-build";
 import { ApiError } from "@/lib/bot-api/errors";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
@@ -158,3 +158,22 @@ function indexOfMint(d: Uint8Array): number {
   if (i < 0) throw new Error("mint not found in fixture");
   return i;
 }
+
+describe("owner-proxy (round 1): the cap overrides can only lower the provisional defaults", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("a value above the hard bound is clamped to it; a lower one applies; junk keeps the default", () => {
+    expect([HARD_MAX_NOTIONAL_USD, HARD_MAX_LEVERAGE]).toEqual([5000, 10]);
+    vi.stubEnv("BOT_API_MAX_NOTIONAL_USD", "1000000000");
+    vi.stubEnv("BOT_API_MAX_LEVERAGE", "100");
+    expect(serverCaps()).toEqual({ maxNotionalUsd: 5000, maxLeverage: 10 });
+    vi.stubEnv("BOT_API_MAX_NOTIONAL_USD", "1000");
+    vi.stubEnv("BOT_API_MAX_LEVERAGE", "3");
+    expect(serverCaps()).toEqual({ maxNotionalUsd: 1000, maxLeverage: 3 });
+    vi.stubEnv("BOT_API_MAX_NOTIONAL_USD", "-5");
+    vi.stubEnv("BOT_API_MAX_LEVERAGE", "abc");
+    expect(serverCaps()).toEqual({ maxNotionalUsd: 5000, maxLeverage: 10 });
+    // A caller can still only tighten below the server cap.
+    vi.stubEnv("BOT_API_MAX_NOTIONAL_USD", "1000000000");
+    expect(resolveCaps({ maxNotionalUsd: 1e9, explicitLimit: false }).maxNotionalUsd).toBe(5000);
+  });
+});

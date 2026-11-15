@@ -12,7 +12,7 @@ import { parsePortfolio } from "@/lib/v22/layout";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { explainNoLp } from "../reads/no-lp";
 import { reserveReduce } from "../reduce-reservations";
-import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, mapReducingSlippage, MAX_SLIPPAGE_BPS, CAPS_PROVISIONAL_NOTE } from "./caps";
+import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, mapReducingSlippage, MAX_SLIPPAGE_BPS, CAPS_PROVISIONAL_NOTE, DEFAULT_MAX_FEE_BPS } from "./caps";
 import {
   finalizeTx,
   refusalToApi,
@@ -55,6 +55,9 @@ export interface OrderResponse {
     maxLeverage: number;
     notionalUsd: number | null;
     leverageAfter: number | null;
+    /** The fee-cap ceiling applied: the caller's maxFeeBps, else the provisional default (DEFAULT_MAX_FEE_BPS). */
+    maxFeeBps: number;
+    maxFeeBpsSource: "caller" | "default";
     /** The cap defaults are not owner-approved (design doc section 8): always true for now. */
     provisional: true;
     note: string;
@@ -163,6 +166,17 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
     }
     throw new ApiError("rpc_unavailable");
   }
+  // Default fee ceiling: without a caller maxFeeBps the built transaction may not sign a fee cap above DEFAULT_MAX_FEE_BPS.
+  // Checked on the result, before the final simulation, so the shared builder's 98 handling (no silent raise) is unchanged.
+  const signedCap = r.summary.feeBps === null || r.summary.feeBps === undefined ? null : BigInt(r.summary.feeBps);
+  if (input.maxFeeBps === undefined && signedCap !== null && signedCap > BigInt(DEFAULT_MAX_FEE_BPS)) {
+    await (reservation as Awaited<ReturnType<typeof reserveReduce>> | null)?.release().catch(() => undefined);
+    throw new ApiError(
+      "fee_above_max",
+      `this market needs a ${signedCap} bps fee cap, above the default fee ceiling of ${DEFAULT_MAX_FEE_BPS} bps (a provisional devnet default, not owner-approved); send maxFeeBps >= ${signedCap} to accept it`,
+      { details: { feeCapBps: Number(signedCap), defaultMaxFeeBps: DEFAULT_MAX_FEE_BPS } },
+    );
+  }
   const transactions: ReturnedTx[] = [];
   const held = reservation as Awaited<ReturnType<typeof reserveReduce>> | null;
   try {
@@ -191,6 +205,8 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       maxLeverage: caps.maxLeverage,
       notionalUsd: a?.notionalUsd ?? null,
       leverageAfter: a?.leverageAfter ?? null,
+      maxFeeBps: input.maxFeeBps !== undefined ? Number(input.maxFeeBps) : DEFAULT_MAX_FEE_BPS,
+      maxFeeBpsSource: input.maxFeeBps !== undefined ? "caller" : "default",
       provisional: true,
       note: CAPS_PROVISIONAL_NOTE,
     },

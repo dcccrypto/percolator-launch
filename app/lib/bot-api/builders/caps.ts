@@ -1,5 +1,5 @@
 /**
- * PROVISIONAL: every default below (100 bps slippage, 1000 bps max, 5,000 USD per order, 10x leverage) is a provisional devnet
+ * PROVISIONAL: every default below (100 bps slippage, 1000 bps max, 5,000 USD per order, 10x leverage, 150 bps default fee ceiling) is a provisional devnet
  * default, not owner-approved (docs/ideas/bot-trading-rails.md section 8.2). Build responses say so in `caps.provisional`.
  *
  * Safety caps for bot orders, checked inside the builder (TradeBuildRequest.preflight) once the market, the limit and the
@@ -43,6 +43,20 @@ export const DEFAULT_SLIPPAGE_BPS = 100;
 export const MAX_SLIPPAGE_BPS = 1000;
 export const DEFAULT_MAX_NOTIONAL_USD = 5000;
 export const DEFAULT_MAX_LEVERAGE = 10;
+/**
+ * Hard upper bounds for the env overrides BOT_API_MAX_NOTIONAL_USD / BOT_API_MAX_LEVERAGE: equal to the provisional defaults,
+ * so an env var can only LOWER a cap. Raising one is a code change the owner approves (design doc section 8.2), not an env edit.
+ */
+export const HARD_MAX_NOTIONAL_USD = DEFAULT_MAX_NOTIONAL_USD;
+export const HARD_MAX_LEVERAGE = DEFAULT_MAX_LEVERAGE;
+/**
+ * Default fee ceiling: the most fee cap (feeCapBps) an order signs when the caller sends no maxFeeBps. PROVISIONAL (same status
+ * as the other caps). 150 bps sits above the 135 bps cap the live devnet markets need (base 30 + worst-case request 100 + 5), so
+ * they keep working; a market whose cap is higher is refused with fee_above_max naming this default, and the caller can accept
+ * it by sending maxFeeBps. It is checked on the built transaction, so it never raises a cap silently (fee_raise_required
+ * still needs an explicit maxFeeBps).
+ */
+export const DEFAULT_MAX_FEE_BPS = 150;
 
 export interface OrderCaps {
   reduceOnly: boolean;
@@ -53,15 +67,20 @@ export interface OrderCaps {
   explicitLimit: boolean;
 }
 
-function envNumber(name: string, dflt: number): number {
+/** A positive env number, clamped to `hardMax` (an env override can only lower the cap); unset or invalid = the default. */
+function envNumber(name: string, dflt: number, hardMax: number): number {
   const v = Number(process.env[name]);
-  return Number.isFinite(v) && v > 0 ? v : dflt;
+  return Number.isFinite(v) && v > 0 ? Math.min(v, hardMax) : dflt;
 }
 
+/**
+ * Server caps. BOT_API_MAX_NOTIONAL_USD and BOT_API_MAX_LEVERAGE may lower the provisional defaults (a positive number); a value
+ * above HARD_MAX_* is clamped to it, so no env edit can loosen an owner-pending cap.
+ */
 export function serverCaps() {
   return {
-    maxNotionalUsd: envNumber("BOT_API_MAX_NOTIONAL_USD", DEFAULT_MAX_NOTIONAL_USD),
-    maxLeverage: envNumber("BOT_API_MAX_LEVERAGE", DEFAULT_MAX_LEVERAGE),
+    maxNotionalUsd: envNumber("BOT_API_MAX_NOTIONAL_USD", DEFAULT_MAX_NOTIONAL_USD, HARD_MAX_NOTIONAL_USD),
+    maxLeverage: envNumber("BOT_API_MAX_LEVERAGE", DEFAULT_MAX_LEVERAGE, HARD_MAX_LEVERAGE),
   };
 }
 

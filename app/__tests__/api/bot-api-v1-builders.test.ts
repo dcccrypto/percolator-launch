@@ -40,6 +40,7 @@ const m = vi.hoisted(() => ({
   blockHeight: 100,
   lamports: 1_000_000_000,
   blocked: new Set<string>(),
+  feeCap: null as string | null,
   limitMiss: null as null | { limitPriceE6: string; estExecPriceE6: string; markE6: string; minSlippageBps: number },
   landed: null as null | { meta: { logMessages: string[] }; transaction: { message: { staticAccountKeys: PublicKey[]; compiledInstructions: Array<{ programIdIndex: number }> } } },
 }));
@@ -110,7 +111,7 @@ vi.mock("@/lib/v22/trade-build", async (orig) => {
         resubmitAfter: m.resubmit,
         blockhash: BH,
         lastValidBlockHeight: 4242,
-        summary: { market: req.slab.toBase58(), size: req.size.toString(), limitPriceE6: String(req.limitPriceE6 ?? 2_020_000n), reducing: m.pre.reducing },
+        summary: { market: req.slab.toBase58(), size: req.size.toString(), limitPriceE6: String(req.limitPriceE6 ?? 2_020_000n), reducing: m.pre.reducing, feeBps: m.feeCap },
       };
     }),
   };
@@ -175,7 +176,7 @@ beforeEach(async () => {
   Object.assign(m, {
     pre: { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n, reducing: false }, guards: 0, guardThrow: null,
     buildCalls: 0, buildThrow: null, resubmit: false, finalSims: [], simTxs: [], gate: { err: null, logs: [] }, portfolioFound: true,
-    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null, blocked: new Set(), limitMiss: null,
+    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null, blocked: new Set(), limitMiss: null, feeCap: null,
   });
 });
 afterEach(() => {
@@ -463,6 +464,28 @@ describe("retired markets (the app's blocklist): no new money or risk in, exits 
     m.blocked.clear();
     expect((await post(deposits, "/api/v1/deposits", dep())).status).toBe(200);
     expect((await post(orders, "/api/v1/orders", order())).status).toBe(200);
+  });
+});
+
+describe("default fee ceiling (provisional): an order with no maxFeeBps may not sign a cap above 150 bps", () => {
+  it("the devnet 135 bps cap still builds, and the caps echo the default", async () => {
+    m.feeCap = "135";
+    const r = await post(orders, "/api/v1/orders", order());
+    const b = await r.json();
+    expect(r.status).toBe(200);
+    expect(b.caps).toMatchObject({ maxFeeBps: 150, maxFeeBpsSource: "default", provisional: true });
+  });
+  it("a cap above the default is refused with fee_above_max naming it, before the final simulation; maxFeeBps accepts it", async () => {
+    m.feeCap = "200";
+    const r = await post(orders, "/api/v1/orders", order());
+    const e = (await r.json()).error;
+    expect([r.status, e.code]).toEqual([422, "fee_above_max"]);
+    expect(e.details).toEqual({ feeCapBps: 200, defaultMaxFeeBps: 150 });
+    expect(e.message).toContain("maxFeeBps >= 200");
+    expect(m.simTxs).toHaveLength(0);
+    const ok = await post(orders, "/api/v1/orders", order({ maxFeeBps: 200 }));
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).caps).toMatchObject({ maxFeeBps: 200, maxFeeBpsSource: "caller" });
   });
 });
 
