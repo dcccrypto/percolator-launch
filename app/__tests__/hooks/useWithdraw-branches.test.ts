@@ -153,8 +153,7 @@ describe("useWithdraw branches", () => {
       await act(async () => {
         await expect(call()).rejects.toThrow("Market not loaded");
       });
-      state.config = { ...state.config, collateralMint: mint };
-      state.config = undefined;
+      state.config = { collateralMint: mint, vaultPubkey: vault, indexFeedId: new PublicKey(new Uint8Array(32).fill(1)) };
       state.programId = undefined;
       const r1 = run();
       await act(async () => {
@@ -222,14 +221,13 @@ describe("useWithdraw branches", () => {
       expect(conn.getProgramAccounts).not.toHaveBeenCalled();
     });
 
-    it("pyth-pinned oracle mode derives the pyth PDA for the v12 crank", async () => {
-      state.config.oracleAuthority = PublicKey.default;
-      // detectOracleMode: a non-default authority is admin; default authority + feed id => pyth-pinned
+    it("pyth-pinned oracle mode uses the derived pyth PDA as the crank oracle account", async () => {
       const { call } = run();
       await act(async () => {
         await call();
       });
-      expect(sendTx).toHaveBeenCalledTimes(1);
+      const { instructions } = vi.mocked(sendTx).mock.calls[0][0] as any;
+      expect(instructions[1].keys[7].pubkey.equals(mockOraclePda)).toBe(true);
     });
 
     it("fresh data that IS a wrapper account switches to the v17 path", async () => {
