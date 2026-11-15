@@ -87,7 +87,7 @@ export async function cancelIdempotent(
   principal: string,
   key: string,
   kv: Kv = getKv(),
-): Promise<{ found: false } | { found: true; inProgress: true } | { found: true; inProgress?: false; alreadyCancelled: boolean; lastValidBlockHeight: number | null }> {
+): Promise<{ found: false } | { found: true; inProgress: true } | { found: true; inProgress?: false; alreadyCancelled: boolean; lastValidBlockHeight: number | null; messageHashes: string[] }> {
   const raw = await kv.get(k(principal, key));
   if (!raw) return { found: false };
   let e: Entry;
@@ -98,10 +98,12 @@ export async function cancelIdempotent(
   }
   // The build is still running: there are no bytes to cancel yet and its finish would otherwise resurrect them.
   if (e.state === "running") return { found: true, inProgress: true };
-  if (e.state === "cancelled") return { found: true, alreadyCancelled: true, lastValidBlockHeight: e.lastValidBlockHeight };
-  const body = (e.res.body as { lastValidBlockHeight?: unknown } | null);
+  if (e.state === "cancelled") return { found: true, alreadyCancelled: true, lastValidBlockHeight: e.lastValidBlockHeight, messageHashes: [] };
+  const body = (e.res.body as { lastValidBlockHeight?: unknown; transactions?: Array<{ messageHash?: unknown }> } | null);
   const lvbh = body && typeof body.lastValidBlockHeight === "number" ? body.lastValidBlockHeight : null;
+  // The returned transactions' message hashes: a reduce-only reservation they hold is released by the cancel (lib/bot-api/reduce-reservations.ts).
+  const messageHashes = Array.isArray(body?.transactions) ? body.transactions.map((t) => t?.messageHash).filter((h): h is string => typeof h === "string") : [];
   const c: Entry = { h: e.h, state: "cancelled", lastValidBlockHeight: lvbh };
   await kv.set(k(principal, key), JSON.stringify(c), { ttlSec: TTL_SEC });
-  return { found: true, alreadyCancelled: false, lastValidBlockHeight: lvbh };
+  return { found: true, alreadyCancelled: false, lastValidBlockHeight: lvbh, messageHashes };
 }

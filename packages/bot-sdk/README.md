@@ -22,17 +22,29 @@ const status = await client.waitForTx(signature, { lastValidBlockHeight: built.l
 
 The package is private to the Percolator monorepo (not on npm). Use it from the workspace: add `"@percolator/bot-sdk": "workspace:*"` to a package in the monorepo and `pnpm install`, or copy `packages/bot-sdk/src` into your project (it has no dependencies). Run the examples from `packages/bot-sdk` with `npx tsx examples/<file>.ts`.
 
-The **base URL** is the origin of a deployment that has the bot API switched on (`BOT_API_ENABLED=1`, devnet v2.2 build only; otherwise every route answers `disabled`). The Percolator team tells you the preview URL. To run one yourself from the monorepo: `cd app && BOT_API_ENABLED=1 NEXT_PUBLIC_DEFAULT_NETWORK=devnet NEXT_PUBLIC_V22=1 pnpm dev`, and the base URL is `http://localhost:3000`. (The examples use `BOT_API_URL`, default `http://localhost:3000`.)
+The **base URL** is the origin of a deployment that has the bot API switched on (`BOT_API_ENABLED=1`, devnet v2.2 build only; otherwise every route answers `disabled`). The Percolator team tells you the preview URL. To run one yourself from the monorepo (the v2.2 wrapper override is required: without it the server scans the wrong program, lists 0 markets and answers live markets `market_not_found` while `/health` still says ok):
+
+    cd app && BOT_API_ENABLED=1 NEXT_PUBLIC_DEFAULT_NETWORK=devnet NEXT_PUBLIC_V22=1 \
+      NEXT_PUBLIC_ALLOW_PROGRAM_ID_OVERRIDE=1 NEXT_PUBLIC_WRAPPER_PROGRAM_ID=5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe \
+      pnpm dev
+
+and the base URL is `http://localhost:3000`. (The examples use `BOT_API_URL`, default `http://localhost:3000`.) Reads need a key unless you also set `BOT_API_ANON_READS=1` on that local server.
+
+**Try it locally with no devnet traffic and no team key** (local only; refused on Vercel and on a shared Upstash store):
+
+1. Start the fixture RPC: `cd app && npx tsx scripts/bot-api/mock-rpc.ts 3918`. It serves the recorded devnet SOL market `G2wipz3k28TyVqdKnzpTcEGWkB4bHJXwNrCbi4DVgPez` (and GATO, which has no LP), and one funded flat trading account for the test owner `cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN` (`MOCK_OWNER`); it answers simulations clean and never sends anything.
+2. Start the API against it with a dev seed key, a key you make up in the `pbk_<12 chars>_<43 chars>` shape (read + build scopes, held only in that server's memory): add `DEVNET_RPC_URL=http://127.0.0.1:3918 BOT_API_DEV_SEED_KEY=<your made-up key>` to the command above.
+3. `BOT_API_KEY=<the same key> npx tsx examples/read-market.ts G2wipz3k28TyVqdKnzpTcEGWkB4bHJXwNrCbi4DVgPez` lists the markets and quotes; a build for owner `cGfHiC6K...` on that market returns a simulated 200.
 
 ## Getting a key
 
-Reads work without a key at a small anonymous budget. Building transactions needs a key with the `build` scope. **Devnet keys are issued by the Percolator team** (ask them; there is no self-serve sign-up yet). A key looks like `pbk_<id>_<secret>`, is shown once, and only lets you ask for transactions: it never gives anyone control of a wallet. Keep it in an environment variable (`BOT_API_KEY`), never in code.
+Every call needs a key by default: reads need the `read` scope, building transactions needs the `build` scope. Keyless reads at a small anonymous budget exist but are off unless the deployment sets `BOT_API_ANON_READS=1` (a pending owner decision). On a deployment behind the playground waitlist, `/api/v1` is also behind it unless the deployment sets `BOT_API_GATE_EXEMPT=1` (also pending); without a waitlist session you get the gate's 401 `Playground access required`. **Devnet keys are issued by the Percolator team** (ask them; there is no self-serve sign-up yet; who issues keys is a provisional devnet default, not owner-approved, design doc section 8). A key looks like `pbk_<id>_<secret>`, is shown once, and only lets you ask for transactions: it never gives anyone control of a wallet. Keep it in an environment variable (`BOT_API_KEY`), never in code.
 
 Keys live in the deployment's key store. The team issues them with `app/scripts/bot-api/keys.ts` against that store. That means:
 
 - A key for the shared preview works on the preview only.
-- A **local** `pnpm dev` server uses an in-memory store when no `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` is set, so a key from the script does not survive (the script and the server are different processes). Either point both the server and the script at the same Upstash Redis for development (a separate dev database; set the variables in your own shell, never on a command line or in a file you commit), or skip HTTP and drive the route handlers in-process, as `app/__tests__/lib/bot-api/sdk-local.test.ts` does (it issues a key in memory and runs the SDK against the real handlers).
-- Reads need no key at all, so `examples/read-market.ts` works against a local server as is.
+- A **local** `pnpm dev` server uses an in-memory store when no `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` is set, so a key from the script does not survive (the script and the server are different processes). Either point both the server and the script at the same Upstash Redis for development (a separate dev database; set the variables in your own shell, never on a command line or in a file you commit), or use the local dev seed key (see "Try it locally" above), or skip HTTP and drive the route handlers in-process, as `app/__tests__/lib/bot-api/sdk-local.test.ts` does (it issues a key in memory and runs the SDK against the real handlers).
+- Reads need a key too unless the server sets `BOT_API_ANON_READS=1` (off by default); with that set, `examples/read-market.ts` works against a local server with no key.
 
 ## Units
 
@@ -59,15 +71,30 @@ Everything the API takes or returns is an integer in one of these units. Get the
 
 **Collateral the API can price.** The notional cap is in USD, so the API only builds risk-adding orders on markets whose collateral it knows to be a USD stable (the devnet Sim-USDC). Any other collateral is refused with `market_unsupported`; reducing orders and closes are never blocked by that.
 
+## Safety caps (provisional)
+
+Every order and close is checked against server caps. **These are provisional devnet defaults, not owner-approved (design doc section 8)**, and can change: read the `caps` object echoed in each build response (it carries `provisional: true` and a `note`).
+
+| Cap | Provisional default | You can |
+|---|---|---|
+| Slippage | 100 bps from the mark, max 1000 | lower or raise within the max (`slippageBps`) |
+| Notional per order | 5,000 USD | lower (`maxNotionalUsd`) |
+| Leverage after the order | 10x (or the market max if lower) | lower (`maxLeverage`) |
+| Reduce-only | off | `reduceOnly: true` |
+
+**Reduce-only is a build-time + in-flight-reservation guarantee, not an on-chain one.** v2.2's trade instruction has no reduce-only flag. The server checks a reduce-only order (or a close) against your position when it builds it, then reserves its size until the transaction lands, expires or is cancelled. A further reduce-only build that would go past the position while others are in flight gets `reduce_only_inflight` (retryable, with `details.remainingQ`). Poll `txStatus(signature, { lastValidBlockHeight, messageHash })` (or `waitForTx` with both) so a landed or expired order frees its reservation; otherwise it ends after 120 s. Never send bytes you cancelled: they can still land until their `lastValidBlockHeight`. Orders sent without `reduceOnly` are not reserved.
+
 ## Fees and slippage
 
 A fill costs the **base fee** (`baseFeeBps`, the market's configured fee) plus the **spread** the matcher quotes (`totalSpreadBps`: its base spread, an adaptive fee, inventory skew and size impact, all inside that one number).
 
 - **`allInCostBps` / `allInCostAtoms`** (quote and build summary) is that whole cost against the mark: `baseFeeBps` + the quoted spread, each counted once. Use this one to compare markets or size a trade.
-- **`expectedFeeBps` / `expectedFeeAtoms`** is only the *fee* the wrapper charges. When `feeChargedInPrice` is **true** (the market's fee channel is on) the trade settles at the mark and the wrapper charges the quoted spread as a fee on top of the base fee, so `expectedFeeBps` equals `allInCostBps` and the spread is **not** also paid in `estExecPriceE6`. When it is **false** the fee is the base fee alone and the spread is paid in the price. **Never add `expectedFeeBps` to `totalSpreadBps`**: on a fee-channel market that counts the spread twice.
+- **`estExecPriceE6`** (and the depth rows' `execPriceE6`) is the matcher's quoted price, the mark plus/minus the spread, on **every** market. It is what the program checks your limit against, so your limit must cover it.
+- **`expectedFeeBps` / `expectedFeeAtoms`** is only the *fee* the wrapper charges. `feeChargedInPrice` says how the spread is collected (the name means "charged as a fee"). **true** (fee channel on): the position is booked at the mark and the spread is charged as a fee on top of the base fee, so `expectedFeeBps` = `allInCostBps`; the spread you see in `estExecPriceE6` is that same fee, not an extra price you also pay. **false**: the position is booked at `estExecPriceE6` (spread in the price) and the fee is the base fee alone. Either way the spread is paid **once**. **Never add `expectedFeeBps` to `totalSpreadBps` or to the gap between `estExecPriceE6` and the mark**: on a fee-channel market that counts the spread twice. Use `allInCostBps`.
 - **`feeCapBps`** is the most the fee may be, and is what the transaction signs. The program takes a fill only if the signed cap covers base + the matcher's request, and that request can move between your quote and landing, so the API signs the worst case: base fee + the matcher's worst-case request (the smaller of the market's `maxRequestedFeeBps`, the matcher's max total + 1, and 1023) + 5 bps, within the market's max trading fee. On the live devnet markets that is 30 + 100 + 5 = **135 bps**. You pay the fee in `expectedFeeBps`, not the cap.
+- **Default fee ceiling (provisional)**: an order sent without `maxFeeBps` may sign a cap of at most **150 bps** (a provisional devnet default, not owner-approved). The 135 bps devnet markets build as before; a market that needs more is refused with `fee_above_max` and `details {feeCapBps, defaultMaxFeeBps}`, and you accept it by sending `maxFeeBps`. The applied ceiling is echoed in `caps.maxFeeBps` / `caps.maxFeeBpsSource`.
 - **`maxFeeBps`** (on orders) is a ceiling on that cap. Below the floor above (135 on those markets) the order is refused with `fee_above_max`: the API cannot sign a cap the program would reject. It exists to stop you signing a cap *higher* than you accept, e.g. after a utilisation-fee raise (`fee_raise_required`).
-- **Slippage is measured from the mark** (`effectivePriceE6`), not from the expected fill. A `slippageBps` smaller than the quote's spread cannot fill: the order is refused before simulating with `slippage_cap_exceeded` and `details {limitPriceE6, estExecPriceE6, minSlippageBps}`; use at least `minSlippageBps`. (`quote` shows the same with `withinLimit: false`.) Reducing orders are not pre-checked.
+- **Slippage is measured from the mark** (`effectivePriceE6`), not from the expected fill. A `slippageBps` smaller than the quote's spread cannot fill: the order is refused before simulating with `slippage_cap_exceeded` and `details {limitPriceE6, estExecPriceE6, minSlippageBps}`; use at least `minSlippageBps`. (`quote` shows the same with `withinLimit: false`.) Reducing orders are not pre-checked (the estimate does not model the close exemption), but if one then fails simulation at its limit you get the same `slippage_cap_exceeded` with `minSlippageBps`, not an opaque `simulation_failed`.
 - A quote for a size beyond `maxSizePerSide` is priced on the **fillable** size (`fillableQ`), with `exceedsMaxSize: true`; a build refuses such an order (`size_cap_exceeded`).
 
 ## Getting devnet collateral

@@ -1,4 +1,7 @@
 /**
+ * PROVISIONAL: every default below (100 bps slippage, 1000 bps max, 5,000 USD per order, 10x leverage, 150 bps default fee ceiling) is a provisional devnet
+ * default, not owner-approved (docs/ideas/bot-trading-rails.md section 8.2). Build responses say so in `caps.provisional`.
+ *
  * Safety caps for bot orders, checked inside the builder (TradeBuildRequest.preflight) once the market, the limit and the
  * owner's position are known and before anything is simulated. Defaults are deliberately tighter than the app's:
  * a refused order is safe, an overfilled one is not.
@@ -24,6 +27,7 @@ import { decodePortfolioRisk } from "@/lib/limits/decode";
 import { maxLeverageFromSlab } from "@/lib/slab-max-leverage";
 import type { Connection } from "@solana/web3.js";
 import { requireValuedCollateral } from "./collateral";
+import { isRetiredMarket, retiredMarket } from "./retired";
 import { conservativeEquity } from "./equity";
 import { openLegsValuePnl } from "../reads/account";
 import { decodeMarket } from "../reads/market";
@@ -32,10 +36,27 @@ import { quoteFailsLimit } from "@/lib/limits/matcher-quote";
 import { computeLimitPriceE6 } from "@/lib/slippage";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 
+/** One wording for every surface a bot reads (OpenAPI, build responses, README). */
+export const CAPS_PROVISIONAL_NOTE = "provisional devnet default, not owner-approved (design doc section 8)";
+
 export const DEFAULT_SLIPPAGE_BPS = 100;
 export const MAX_SLIPPAGE_BPS = 1000;
 export const DEFAULT_MAX_NOTIONAL_USD = 5000;
 export const DEFAULT_MAX_LEVERAGE = 10;
+/**
+ * Hard upper bounds for the env overrides BOT_API_MAX_NOTIONAL_USD / BOT_API_MAX_LEVERAGE: equal to the provisional defaults,
+ * so an env var can only LOWER a cap. Raising one is a code change the owner approves (design doc section 8.2), not an env edit.
+ */
+export const HARD_MAX_NOTIONAL_USD = DEFAULT_MAX_NOTIONAL_USD;
+export const HARD_MAX_LEVERAGE = DEFAULT_MAX_LEVERAGE;
+/**
+ * Default fee ceiling: the most fee cap (feeCapBps) an order signs when the caller sends no maxFeeBps. PROVISIONAL (same status
+ * as the other caps). 150 bps sits above the 135 bps cap the live devnet markets need (base 30 + worst-case request 100 + 5), so
+ * they keep working; a market whose cap is higher is refused with fee_above_max naming this default, and the caller can accept
+ * it by sending maxFeeBps. It is checked on the built transaction, so it never raises a cap silently (fee_raise_required
+ * still needs an explicit maxFeeBps).
+ */
+export const DEFAULT_MAX_FEE_BPS = 150;
 
 export interface OrderCaps {
   reduceOnly: boolean;
@@ -46,15 +67,20 @@ export interface OrderCaps {
   explicitLimit: boolean;
 }
 
-function envNumber(name: string, dflt: number): number {
+/** A positive env number, clamped to `hardMax` (an env override can only lower the cap); unset or invalid = the default. */
+function envNumber(name: string, dflt: number, hardMax: number): number {
   const v = Number(process.env[name]);
-  return Number.isFinite(v) && v > 0 ? v : dflt;
+  return Number.isFinite(v) && v > 0 ? Math.min(v, hardMax) : dflt;
 }
 
+/**
+ * Server caps. BOT_API_MAX_NOTIONAL_USD and BOT_API_MAX_LEVERAGE may lower the provisional defaults (a positive number); a value
+ * above HARD_MAX_* is clamped to it, so no env edit can loosen an owner-pending cap.
+ */
 export function serverCaps() {
   return {
-    maxNotionalUsd: envNumber("BOT_API_MAX_NOTIONAL_USD", DEFAULT_MAX_NOTIONAL_USD),
-    maxLeverage: envNumber("BOT_API_MAX_LEVERAGE", DEFAULT_MAX_LEVERAGE),
+    maxNotionalUsd: envNumber("BOT_API_MAX_NOTIONAL_USD", DEFAULT_MAX_NOTIONAL_USD, HARD_MAX_NOTIONAL_USD),
+    maxLeverage: envNumber("BOT_API_MAX_LEVERAGE", DEFAULT_MAX_LEVERAGE, HARD_MAX_LEVERAGE),
   };
 }
 
@@ -91,6 +117,8 @@ export function checkOrderCaps(caps: OrderCaps, p: TradePreflight): { notionalUs
   if (caps.reduceOnly && !p.reducing) {
     throw new ApiError(before === 0n ? "no_position" : "reduce_only_violation");
   }
+  // A retired market (the app's blocklist, ./retired.ts): only orders that shrink the position, so a user can always exit.
+  if (!p.reducing && isRetiredMarket(p.market.toBase58())) throw retiredMarket("orders that add risk are refused");
 
   if (caps.explicitLimit) {
     // Adverse side: a buy pays up to the limit, a sell receives down to it.
@@ -160,8 +188,40 @@ export interface MarketGuardResult {
   /** The whole cost against the mark (base fee + the quoted spread, once); see reads/quote.ts expectedFee. */
   allInCostBps: number | null;
   allInCostAtoms: bigint | null;
+  /**
+   * A REDUCING order whose limit is tighter than the matcher's estimated fill (never refused up front: the estimate does not
+   * model the close exemption, so the real fill can be better). If the simulation then fails with the program's opaque
+   * InvalidInstruction, the order builder reports slippage_cap_exceeded with these numbers instead (mapReducingSlippage).
+   */
+  limitMiss?: { limitPriceE6: string; estExecPriceE6: string; markE6: string; minSlippageBps: number } | null;
 }
-const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null };
+const NO_FEE: MarketGuardResult = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null, limitMiss: null };
+
+/** The program's code for a fill past the limit (and other malformed trades): wrapper Custom(9) InvalidInstruction. */
+const INVALID_INSTRUCTION = 9;
+
+/** The slippage refusal for a limit tighter than the expected fill, with the smallest slippageBps that would pass. */
+function slippageRefusal(limitPriceE6: bigint, execE6: bigint, markE6: bigint, buy: boolean, minSlippageBps: number, reducing: boolean): ApiError {
+  return new ApiError(
+    "slippage_cap_exceeded",
+    `the limit ${limitPriceE6} is ${buy ? "below" : "above"} the matcher's estimated fill price ${execE6}; slippage is measured from the mark (${markE6}), so it must also cover the spread, fee and size impact: ${minSlippageBps <= MAX_SLIPPAGE_BPS ? `use slippageBps >= ${minSlippageBps} or a looser limitPriceE6` : `the fill needs ${minSlippageBps} bps, above the ${MAX_SLIPPAGE_BPS} bps maximum; try a smaller size`}${reducing ? " (this reducing order failed simulation at its limit)" : ""}`,
+    { details: { limitPriceE6: limitPriceE6.toString(), estExecPriceE6: execE6.toString(), minSlippageBps } },
+  );
+}
+
+/**
+ * A reducing order that failed simulation with the wrapper's InvalidInstruction while its limit was tighter than the matcher's
+ * estimated fill: the limit is the cause, so the caller gets slippage_cap_exceeded with minSlippageBps (as an open does up
+ * front), not an opaque simulation_failed. Any other error, or a limit the estimate says fills, is returned unchanged.
+ */
+export function mapReducingSlippage(e: ApiError, miss: MarketGuardResult["limitMiss"], buy: boolean): ApiError {
+  if (!miss || e.code !== "simulation_failed" || e.extra.onchain?.code !== INVALID_INSTRUCTION || e.extra.onchain?.name === null) return e;
+  const r = slippageRefusal(BigInt(miss.limitPriceE6), BigInt(miss.estExecPriceE6), BigInt(miss.markE6), buy, miss.minSlippageBps, true);
+  return new ApiError("slippage_cap_exceeded", r.message, {
+    details: { limitPriceE6: miss.limitPriceE6, estExecPriceE6: miss.estExecPriceE6, minSlippageBps: miss.minSlippageBps, onchain: e.extra.onchain },
+    ...(e.extra.logs ? { logs: e.extra.logs } : {}),
+  });
+}
 
 /**
  * Checks that need a fresh read of the market, the LP and the matcher, for orders that add risk:
@@ -191,18 +251,17 @@ export async function checkOpenMarketGuards(connection: Pick<Connection, "getMul
     }
     const src = buildQuoteSource(md, new Uint8Array(c.data), new Uint8Array(pf.data), p.lp.accountB, at, p.positionBeforeQ ?? 0n);
     const mq = matcherQuote(src, p.size);
-    if (enforce && mq && mq.fillQ > 0n && mq.quotePriceE6 !== null) {
+    let limitMiss: MarketGuardResult["limitMiss"] = null;
+    if (mq && mq.fillQ > 0n && mq.quotePriceE6 !== null) {
       // The program refuses a fill past the limit (buy: exec <= limit; sell: exec >= limit) with an opaque InvalidInstruction. The
       // matcher's own estimate (the quote's estExecPriceE6) is checked first, so the caller gets the number that would pass. Not
-      // applied to a reducing order: the estimate does not model the close exemption, so it can only be worse than the real fill.
+      // enforced on a reducing order: the estimate does not model the close exemption, so it can only be worse than the real fill.
+      // For a reducing order the miss is kept, and mapped onto a failed simulation afterwards (mapReducingSlippage).
       const buy = p.size > 0n;
       if (quoteFailsLimit(mq.quotePriceE6, p.limitPriceE6, buy)) {
         const minSlippageBps = minSlippageBpsFor(src.effectivePriceE6, mq.quotePriceE6, buy);
-        throw new ApiError(
-          "slippage_cap_exceeded",
-          `the limit ${p.limitPriceE6} is ${buy ? "below" : "above"} the matcher's estimated fill price ${mq.quotePriceE6}; slippage is measured from the mark (${src.effectivePriceE6}), so it must also cover the spread, fee and size impact: ${minSlippageBps <= MAX_SLIPPAGE_BPS ? `use slippageBps >= ${minSlippageBps} or a looser limitPriceE6` : `the fill needs ${minSlippageBps} bps, above the ${MAX_SLIPPAGE_BPS} bps maximum; try a smaller size`}`,
-          { details: { limitPriceE6: p.limitPriceE6.toString(), estExecPriceE6: mq.quotePriceE6.toString(), minSlippageBps } },
-        );
+        if (enforce) throw slippageRefusal(p.limitPriceE6, mq.quotePriceE6, src.effectivePriceE6, buy, minSlippageBps, false);
+        limitMiss = { limitPriceE6: p.limitPriceE6.toString(), estExecPriceE6: mq.quotePriceE6.toString(), markE6: src.effectivePriceE6.toString(), minSlippageBps };
       }
     }
     if (enforce) {
@@ -215,7 +274,7 @@ export async function checkOpenMarketGuards(connection: Pick<Connection, "getMul
       }
     }
     const f = expectedFee(src, mq, (abs(p.size) * src.effectivePriceE6) / 1_000_000n);
-    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms, allInCostBps: f.allInBps, allInCostAtoms: f.allInAtoms };
+    return { expectedFeeBps: f.bps, expectedFeeAtoms: f.atoms, allInCostBps: f.allInBps, allInCostAtoms: f.allInAtoms, limitMiss };
   } catch (e) {
     if (enforce) throw e;
     return NO_FEE;

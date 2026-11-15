@@ -1,0 +1,137 @@
+{
+  "sha": "488048ccdd6030a937a311f7e58283628a818d6d",
+  "dirty": true,
+  "command": "npx tsx loadtest.ts --mode http --base http://127.0.0.1:3971 --market D82VLwS9PjGBHBTa6D4BaWwAgF9TFe42qXz1idh46pSN --owner 4XBUxkvpmiKDkx9iW5NFLvyRcY89Q9ujF8rXNkCr7dv6 --concurrency 2 --rps 1 --duration 90 --warmup 3 --mix read=30,quote=20,build=50 --label r3-surfpool-fork-http",
+  "label": "r3-surfpool-fork-http",
+  "mode": "http",
+  "rpc": "server-configured",
+  "target": "127.0.0.1:3971",
+  "concurrency": 2,
+  "mix": {
+    "read": 30,
+    "quote": 20,
+    "account": 0,
+    "build": 50
+  },
+  "pacingRps": 1,
+  "keys": 1,
+  "wallSeconds": 91,
+  "throughputRps": 0.99,
+  "requests": 90,
+  "status": {
+    "200": 41,
+    "422": 49
+  },
+  "errorCodes": {
+    "simulation_failed": 49
+  },
+  "errorRate": 0,
+  "non2xxRate": 0.54,
+  "latencyMs": {
+    "count": 90,
+    "min": 4.28,
+    "p50": 83.91,
+    "p95": 147.5,
+    "p99": 196.96,
+    "max": 196.96,
+    "mean": 56.19
+  },
+  "latencyServedMs": {
+    "count": 90,
+    "min": 4.28,
+    "p50": 83.91,
+    "p95": 147.5,
+    "p99": 196.96,
+    "max": 196.96,
+    "mean": 56.19
+  },
+  "byClass": {
+    "read": {
+      "requests": 19,
+      "status": {
+        "200": 19
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 19,
+        "min": 4.28,
+        "p50": 5,
+        "p95": 59.64,
+        "p99": 59.64,
+        "max": 59.64,
+        "mean": 8.04
+      },
+      "latencyServedMs": {
+        "count": 19,
+        "min": 4.28,
+        "p50": 5,
+        "p95": 59.64,
+        "p99": 59.64,
+        "max": 59.64,
+        "mean": 8.04
+      }
+    },
+    "quote": {
+      "requests": 22,
+      "status": {
+        "200": 22
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 22,
+        "min": 5.45,
+        "p50": 6.92,
+        "p95": 21.24,
+        "p99": 33.84,
+        "max": 33.84,
+        "mean": 9.17
+      },
+      "latencyServedMs": {
+        "count": 22,
+        "min": 5.45,
+        "p50": 6.92,
+        "p95": 21.24,
+        "p99": 33.84,
+        "max": 33.84,
+        "mean": 9.17
+      }
+    },
+    "build": {
+      "requests": 49,
+      "status": {
+        "422": 49
+      },
+      "errorCodes": {
+        "simulation_failed": 49
+      },
+      "errorRate": 0,
+      "non2xxRate": 1,
+      "latencyMs": {
+        "count": 49,
+        "min": 82.33,
+        "p50": 88.24,
+        "p95": 150.91,
+        "p99": 196.96,
+        "max": 196.96,
+        "mean": 95.97
+      },
+      "latencyServedMs": {
+        "count": 49,
+        "min": 82.33,
+        "p50": 88.24,
+        "p95": 150.91,
+        "p99": 196.96,
+        "max": 196.96,
+        "mean": 95.97
+      }
+    }
+  },
+  "notes": [
+    "errorRate = transport failures + 5xx; non2xxRate also counts 4xx (rate limits, coded refusals).",
+    "latencyServedMs leaves out 429s, which are answered before any work."
+  ]
+}

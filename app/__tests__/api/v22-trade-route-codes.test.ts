@@ -5,6 +5,8 @@
  *   (a) an LP scan that fails on RPC answers 503 `rpc` (it used to answer 503 `no_lp`); a market with no LP is still `no_lp`.
  *   (b) the owner's account is checked before the LP: no portfolio answers 409 `no_portfolio` whatever the LP scan would say
  *       (it used to answer 503 `no_lp` on a market without an LP).
+ * And one answer it must KEEP (council round 1, owner-proxy): a caller-named `portfolio` that does not exist is still a
+ * retryable 503 `rpc` here. The 400 `bad_portfolio` up-front check is opt-in (strictNamedPortfolio) and only /api/v1 sets it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -14,14 +16,15 @@ import { NextRequest } from "next/server";
 
 const fx = JSON.parse(readFileSync(join(__dirname, "../fixtures/v22-trade-build/gato-market.json"), "utf8")) as { slab: string; owner: string; data: string };
 const OWNER = Keypair.generate().publicKey;
-const h = vi.hoisted(() => ({ portfolio: null as PublicKey | null, lpScans: 0, lpError: null as Error | null }));
+const h = vi.hoisted(() => ({ portfolio: null as PublicKey | null, lpScans: 0, lpError: null as Error | null, lpOk: false, missing: new Set<string>() }));
 
 vi.mock("@/lib/upstash-rate-limit", () => ({
   createUpstashRateLimiter: () => ({ check: async () => ({ allowed: true, remaining: 1, retryAfterSecs: 0 }) }),
 }));
 vi.mock("@/lib/server-rpc", () => ({
   getServerConnection: () => ({
-    getAccountInfo: async () => ({ owner: new PublicKey(fx.owner), data: Buffer.from(fx.data, "base64"), lamports: 1, executable: false }),
+    getAccountInfo: async (k: PublicKey) =>
+      h.missing.has(k.toBase58()) ? null : { owner: new PublicKey(fx.owner), data: Buffer.from(fx.data, "base64"), lamports: 1, executable: false },
   }),
 }));
 vi.mock("@/lib/programAllowlist", () => ({ assertKnownProgram: () => undefined }));
@@ -30,6 +33,7 @@ vi.mock("@/lib/v22/trade-accounts", async (orig) => ({
   ...(await orig<typeof import("@/lib/v22/trade-accounts")>()),
   resolveLpTradeAccounts: vi.fn(async () => {
     h.lpScans++;
+    if (h.lpOk) return { accountB: new PublicKey(fx.slab), matcherProg: new PublicKey(fx.owner), matcherCtx: new PublicKey(fx.slab), matcherDelegate: new PublicKey(fx.owner) };
     throw h.lpError ?? new Error("No LP portfolio with an active matcher config found for this market.");
   }),
 }));
@@ -38,7 +42,8 @@ import { POST } from "@/app/api/v22/trade/route";
 import { __clearTradeBuildCacheForTest } from "@/lib/v22/trade-build";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 
-const post = () => POST(new NextRequest("http://x/api/v22/trade", { method: "POST", body: JSON.stringify({ owner: OWNER.toBase58(), market: fx.slab, size: "1000000" }) }));
+const post = (extra: Record<string, string> = {}) =>
+  POST(new NextRequest("http://x/api/v22/trade", { method: "POST", body: JSON.stringify({ owner: OWNER.toBase58(), market: fx.slab, size: "1000000", ...extra }) }));
 
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
@@ -47,6 +52,8 @@ beforeEach(() => {
   h.portfolio = null;
   h.lpScans = 0;
   h.lpError = null;
+  h.lpOk = false;
+  h.missing = new Set();
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -72,6 +79,18 @@ describe("/api/v22/trade error answers changed by the bot-API fixes (R19)", () =
     h.portfolio = Keypair.generate().publicKey;
     const res = await post();
     expect([res.status, (await res.json()).error]).toEqual([503, "no_lp"]);
+    expect(h.lpScans).toBe(1);
+  });
+});
+
+describe("/api/v22/trade answers the bot API must NOT change (held route)", () => {
+  it("a named portfolio that does not exist is still a retryable 503 rpc, not 400 bad_portfolio", async () => {
+    const named = Keypair.generate().publicKey;
+    h.missing.add(named.toBase58());
+    h.lpOk = true;
+    const res = await post({ portfolio: named.toBase58() });
+    const body = await res.json();
+    expect([res.status, body.error]).toEqual([503, "rpc"]);
     expect(h.lpScans).toBe(1);
   });
 });

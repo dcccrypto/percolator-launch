@@ -23,6 +23,8 @@ import {
   parseWrapperConfigV17,
   V17_HEADER_LEN,
 } from "@percolatorct/sdk";
+import { isBlockedSlab } from "@/lib/blocklist";
+import { retiredMarket } from "./retired";
 import { ApiError } from "@/lib/bot-api/errors";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { getMaintenanceConfig } from "@/lib/maintenance";
@@ -122,6 +124,9 @@ export async function buildDeposit(connection: Connection, b: Record<string, unk
   const given = pubkeyField(b, "portfolio", false);
   const fresh = pubkeyField(b, "newPortfolio", false);
   if (given && fresh) throw new ApiError("bad_request", "give portfolio or newPortfolio, not both");
+  // Same blocklist and rule as the app's deposit (hooks/useDeposit.ts, lib/blocklist.ts): no new money into a retired market,
+  // which can strand it. Withdrawals are never gated, so money can always leave. Checked before any RPC read.
+  if (isBlockedSlab(market.toBase58())) throw retiredMarket("deposits are refused");
   try {
     const m = await readMarket(connection, market, owner, meta);
     const bal = await tokenBalance(connection, m.userAta, meta);

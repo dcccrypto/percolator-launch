@@ -3,9 +3,13 @@
  * check with status and latency; exits 1 if any check fails (non-200, bad body, timeout, or slower than --max-ms).
  * Runs anywhere with Node 20+; it only reads and sends no secrets unless you pass a key.
  *   npx tsx scripts/bot-api/uptime.ts --base https://<deployment> [--market ADDR] [--max-ms 3000] [--timeout-ms 10000] [--fail-on-stale]
- * A key, if needed, comes from UPTIME_API_KEY (never from an argument). With a key set, a keyed check also runs
- * (GET /api/v1/metrics, `ops` scope): it is what catches a KV outage, where anonymous reads still answer but every key fails.
+ * A key comes from UPTIME_API_KEY (never from an argument). The key needs BOTH the `read` scope (health and the market reads
+ * send it, and reads need a key unless the deployment set BOT_API_ANON_READS=1) AND the `ops` scope (the keyed check,
+ * GET /api/v1/metrics): issue it with `scripts/bot-api/keys.ts issue --scopes read,ops`. A key with only `ops` fails health
+ * with 403 forbidden_scope. The keyed check is what catches a KV outage, where keyless reads still answer but every key fails.
  * /health with status "degraded" (KV failing, memory store on a deployed build) fails the check.
+ * Scheduling (local, nothing installed for you): `pnpm --filter app bot-api:uptime -- --base <url>`, or the launchd template
+ * ops/bot-api/uptime.plist.example (see docs/bot-api/uptime.md).
  */
 function flag(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);

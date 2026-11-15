@@ -49,7 +49,7 @@ vi.mock("@/lib/v22/trade-build", async (orig) => {
 });
 
 import { buildOrder, buildClose, orderSummary } from "@/lib/bot-api/builders/order";
-import { checkOpenMarketGuards, checkOrderCaps, minSlippageBpsFor, resolveCaps } from "@/lib/bot-api/builders/caps";
+import { checkOpenMarketGuards, checkOrderCaps, mapReducingSlippage, minSlippageBpsFor, resolveCaps } from "@/lib/bot-api/builders/caps";
 import { ApiError } from "@/lib/bot-api/errors";
 import { marketOffsets } from "@/lib/v22/market-offsets";
 import { A_A_SHORT } from "@/lib/limits/constants";
@@ -143,6 +143,24 @@ describe("trader-1: slippage below the matcher's estimate is refused before simu
   it("a reducing order is never refused on the estimate (it does not model the close exemption)", async () => {
     await expect(checkOpenMarketGuards(conn(), pre(25_000n, 1n, { reducing: true, positionBeforeQ: -555_540n }))).resolves.toBeDefined();
   });
+  it("trader (round 1): a reducing order with a too-tight limit keeps the miss; a failed InvalidInstruction simulation becomes slippage_cap_exceeded with minSlippageBps", async () => {
+    const g = await checkOpenMarketGuards(conn(), pre(25_000n, 1n, { reducing: true, positionBeforeQ: -555_540n }));
+    expect(g.limitMiss).toMatchObject({ minSlippageBps: expect.any(Number) });
+    expect(g.limitMiss!.minSlippageBps).toBeGreaterThan(1);
+    const sim = new ApiError("simulation_failed", "simulation failed: InvalidInstruction", { onchain: { code: 9, name: "InvalidInstruction", program: "w", instructionIndex: 2 }, logs: ["x"] });
+    const mapped = mapReducingSlippage(sim, g.limitMiss, true);
+    expect([mapped.code, mapped.status, mapped.retryable]).toEqual(["slippage_cap_exceeded", 422, false]);
+    expect(mapped.extra.details).toMatchObject({ minSlippageBps: g.limitMiss!.minSlippageBps, limitPriceE6: g.limitMiss!.limitPriceE6, estExecPriceE6: g.limitMiss!.estExecPriceE6 });
+    expect(mapped.message).toContain(`slippageBps >= ${g.limitMiss!.minSlippageBps}`);
+    // Unchanged: a limit the estimate says fills, another program's code 9, or another wrapper code.
+    expect(mapReducingSlippage(sim, null, true)).toBe(sim);
+    const other = new ApiError("simulation_failed", "x", { onchain: { code: 9, name: null, program: "sys" } });
+    expect(mapReducingSlippage(other, g.limitMiss, true)).toBe(other);
+    const margin = new ApiError("insufficient_margin", "x", { onchain: { code: 49, name: "EngineInsufficientInitialMargin" } });
+    expect(mapReducingSlippage(margin, g.limitMiss, true)).toBe(margin);
+    // A generous limit: no miss recorded.
+    expect((await checkOpenMarketGuards(conn(), pre(25_000n, 1000n, { reducing: true, positionBeforeQ: -555_540n }))).limitMiss).toBeNull();
+  });
   it("minSlippageBpsFor: smallest whole bps whose builder limit accepts the fill", () => {
     const mark = 2_000_000n;
     expect(minSlippageBpsFor(mark, 2_000_000n, true)).toBe(1);
@@ -182,6 +200,15 @@ describe("first-timer-6: a wrong or missing `portfolio` is bad_portfolio, not re
   it("order naming another wallet's portfolio (the LP's): bad_portfolio", async () => {
     const e = await err(buildOrder(conn({ [LP.toBase58()]: { owner: WRAPPER, data: Buffer.from(LP_DATA) } }), { owner: OWNER, market: SOL, size: 1_000n, portfolio: LP }, meta()));
     expect(e.code).toBe("bad_portfolio");
+  });
+  it("the shared builder WITHOUT strictNamedPortfolio (how POST /api/v22/trade calls it) keeps the old 503 rpc for a missing named portfolio", async () => {
+    const { buildV22Trade, TradeBuildRefusal } = await import("@/lib/v22/trade-build");
+    const e = await buildV22Trade(conn(), { owner: OWNER, slab: SOL, size: 1_000n, portfolio: nowhere }).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(TradeBuildRefusal);
+    expect([(e as InstanceType<typeof TradeBuildRefusal>).code, (e as InstanceType<typeof TradeBuildRefusal>).status]).toEqual(["rpc", 503]);
+    // With it (what /v1 sets): 400 bad_portfolio before any identity read.
+    const e2 = await buildV22Trade(conn(), { owner: OWNER, slab: SOL, size: 1_000n, portfolio: nowhere, strictNamedPortfolio: true }).catch((x: unknown) => x);
+    expect([(e2 as InstanceType<typeof TradeBuildRefusal>).code, (e2 as InstanceType<typeof TradeBuildRefusal>).status]).toEqual(["bad_portfolio", 400]);
   });
   it("close naming a portfolio that does not exist: bad_portfolio (not no_portfolio, not rpc_unavailable)", async () => {
     const e = await err(buildClose(conn(), { owner: OWNER.toBase58(), market: SOL.toBase58(), portfolio: nowhere.toBase58() }, meta()));

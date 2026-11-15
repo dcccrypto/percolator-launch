@@ -11,7 +11,8 @@ import { findOwnerPortfolio } from "@/lib/owner-portfolio";
 import { parsePortfolio } from "@/lib/v22/layout";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { explainNoLp } from "../reads/no-lp";
-import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, MAX_SLIPPAGE_BPS } from "./caps";
+import { reserveReduce } from "../reduce-reservations";
+import { checkOrderCaps, checkOpenMarketGuards, resolveCaps, mapReducingSlippage, MAX_SLIPPAGE_BPS, CAPS_PROVISIONAL_NOTE, DEFAULT_MAX_FEE_BPS } from "./caps";
 import {
   finalizeTx,
   refusalToApi,
@@ -47,7 +48,20 @@ export interface OrderResponse {
   lastValidBlockHeight: number;
   resubmitAfter: boolean;
   summary: Record<string, unknown>;
-  caps: { reduceOnly: boolean; slippageBps: number | null; maxNotionalUsd: number; maxLeverage: number; notionalUsd: number | null; leverageAfter: number | null };
+  caps: {
+    reduceOnly: boolean;
+    slippageBps: number | null;
+    maxNotionalUsd: number;
+    maxLeverage: number;
+    notionalUsd: number | null;
+    leverageAfter: number | null;
+    /** The fee-cap ceiling applied: the caller's maxFeeBps, else the provisional default (DEFAULT_MAX_FEE_BPS). */
+    maxFeeBps: number;
+    maxFeeBpsSource: "caller" | "default";
+    /** The cap defaults are not owner-approved (design doc section 8): always true for now. */
+    provisional: true;
+    note: string;
+  };
 }
 
 const ORDER_FIELDS = ["owner", "market", "side", "size", "reduceOnly", "slippageBps", "limitPriceE6", "maxFeeBps", "maxNotionalUsd", "maxLeverage", "portfolio", "expiresAfter"] as const;
@@ -110,6 +124,9 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
   let seen: { positionBeforeQ: bigint | null; reducing: boolean } | null = null;
   let fees: Awaited<ReturnType<typeof checkOpenMarketGuards>> = { expectedFeeBps: null, expectedFeeAtoms: null, allInCostBps: null, allInCostAtoms: null };
   let r: Awaited<ReturnType<typeof buildV22Trade>>;
+  // A reduce-only order (and a close) reserves its size against the position until it lands or expires (../reduce-reservations.ts),
+  // so two built from the same position cannot both land and flip it.
+  let reservation: Awaited<ReturnType<typeof reserveReduce>> | null = null;
   try {
     meta.rpcCalls += 8; // market, LP (cached), portfolio scan, identities, fee, lev guard, blockhash, priority fee
     meta.sims += 1;
@@ -121,23 +138,59 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       ...(input.maxFeeBps !== undefined ? { maxFeeBps: input.maxFeeBps } : {}),
       ...(input.portfolio ? { portfolio: input.portfolio } : {}),
       crankOnLossStale: true,
+      // A wrong or missing named portfolio is the caller's input: 400 bad_portfolio (POST /api/v22/trade keeps its 503 rpc).
+      strictNamedPortfolio: true,
       preflight: async (p) => {
         seen = { positionBeforeQ: p.positionBeforeQ, reducing: p.reducing };
         applied = checkOrderCaps(caps, p);
+        if (caps.reduceOnly && p.positionBeforeQ !== null) {
+          const abs = (n: bigint) => (n < 0n ? -n : n);
+          reservation = await reserveReduce(
+            { owner: input.owner.toBase58(), market: input.market.toBase58(), account: (p.account ?? input.portfolio)?.toBase58() ?? "-" },
+            abs(p.positionBeforeQ),
+            abs(p.size),
+          );
+        }
         fees = await checkOpenMarketGuards(connection, p);
       },
     });
   } catch (e) {
-    if (e instanceof ApiError) throw e;
+    await (reservation as Awaited<ReturnType<typeof reserveReduce>> | null)?.release().catch(() => undefined);
+    // A reducing order that failed at its limit: slippage_cap_exceeded with minSlippageBps, not an opaque InvalidInstruction.
+    const buy = input.size > 0n;
+    if (e instanceof ApiError) throw mapReducingSlippage(e, fees.limitMiss, buy);
     if (e instanceof TradeBuildRefusal) {
       // No LP: say whether a retry could ever help (a dormant or unsupported market cannot be traded, whatever the retry).
       if (e.code === "no_lp") throw await explainNoLpFor(connection, input.market, meta);
-      throw refusalToApi(e);
+      throw mapReducingSlippage(refusalToApi(e), fees.limitMiss, buy);
     }
     throw new ApiError("rpc_unavailable");
   }
+  // Default fee ceiling: without a caller maxFeeBps the built transaction may not sign a fee cap above DEFAULT_MAX_FEE_BPS.
+  // Checked on the result, before the final simulation, so the shared builder's 98 handling (no silent raise) is unchanged.
+  const signedCap = r.summary.feeBps === null || r.summary.feeBps === undefined ? null : BigInt(r.summary.feeBps);
+  if (input.maxFeeBps === undefined && signedCap !== null && signedCap > BigInt(DEFAULT_MAX_FEE_BPS)) {
+    await (reservation as Awaited<ReturnType<typeof reserveReduce>> | null)?.release().catch(() => undefined);
+    throw new ApiError(
+      "fee_above_max",
+      `this market needs a ${signedCap} bps fee cap, above the default fee ceiling of ${DEFAULT_MAX_FEE_BPS} bps (a provisional devnet default, not owner-approved); send maxFeeBps >= ${signedCap} to accept it`,
+      { details: { feeCapBps: Number(signedCap), defaultMaxFeeBps: DEFAULT_MAX_FEE_BPS } },
+    );
+  }
   const transactions: ReturnedTx[] = [];
-  for (const t of r.transactions) transactions.push(await finalizeTx(connection, t.transaction, t.purpose, meta));
+  const held = reservation as Awaited<ReturnType<typeof reserveReduce>> | null;
+  try {
+    for (const t of r.transactions) transactions.push(await finalizeTx(connection, t.transaction, t.purpose, meta));
+  } catch (e) {
+    await held?.release().catch(() => undefined);
+    throw e instanceof ApiError ? mapReducingSlippage(e, fees.limitMiss, input.size > 0n) : e;
+  }
+  if (held) {
+    // Only an order transaction reduces the position; a crank-only answer (resubmitAfter) frees the reservation.
+    const orderTx = transactions.find((t) => t.purpose === "order");
+    if (orderTx) await held.attach(orderTx.messageHash, r.lastValidBlockHeight);
+    else await held.release();
+  }
   const a = applied as ReturnType<typeof checkOrderCaps> | null;
   return {
     transactions,
@@ -152,6 +205,10 @@ export async function buildOrder(connection: Connection, input: OrderInput, meta
       maxLeverage: caps.maxLeverage,
       notionalUsd: a?.notionalUsd ?? null,
       leverageAfter: a?.leverageAfter ?? null,
+      maxFeeBps: input.maxFeeBps !== undefined ? Number(input.maxFeeBps) : DEFAULT_MAX_FEE_BPS,
+      maxFeeBpsSource: input.maxFeeBps !== undefined ? "caller" : "default",
+      provisional: true,
+      note: CAPS_PROVISIONAL_NOTE,
     },
   };
 }

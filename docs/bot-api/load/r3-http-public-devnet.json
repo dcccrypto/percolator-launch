@@ -1,0 +1,132 @@
+{
+  "sha": "488048ccdd6030a937a311f7e58283628a818d6d",
+  "dirty": false,
+  "command": "npx tsx loadtest.ts --mode http --base http://127.0.0.1:3971 --market D82VLwS9PjGBHBTa6D4BaWwAgF9TFe42qXz1idh46pSN --owner 4XBUxkvpmiKDkx9iW5NFLvyRcY89Q9ujF8rXNkCr7dv6 --concurrency 1 --rps 0.2 --duration 120 --warmup 1 --mix read=20,quote=20,build=60 --label r3-public-devnet-http-builds",
+  "label": "r3-public-devnet-http-builds",
+  "mode": "http",
+  "rpc": "server-configured",
+  "target": "127.0.0.1:3971",
+  "concurrency": 1,
+  "mix": {
+    "read": 20,
+    "quote": 20,
+    "account": 0,
+    "build": 60
+  },
+  "pacingRps": 0.2,
+  "keys": 1,
+  "wallSeconds": 120,
+  "throughputRps": 0.2,
+  "requests": 24,
+  "status": {
+    "200": 24
+  },
+  "errorCodes": {},
+  "errorRate": 0,
+  "non2xxRate": 0,
+  "latencyMs": {
+    "count": 24,
+    "min": 65.65,
+    "p50": 159.39,
+    "p95": 367.25,
+    "p99": 460.57,
+    "max": 460.57,
+    "mean": 198.9
+  },
+  "latencyServedMs": {
+    "count": 24,
+    "min": 65.65,
+    "p50": 159.39,
+    "p95": 367.25,
+    "p99": 460.57,
+    "max": 460.57,
+    "mean": 198.9
+  },
+  "byClass": {
+    "read": {
+      "requests": 5,
+      "status": {
+        "200": 5
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 5,
+        "min": 65.65,
+        "p50": 68.6,
+        "p95": 111.93,
+        "p99": 111.93,
+        "max": 111.93,
+        "mean": 83.77
+      },
+      "latencyServedMs": {
+        "count": 5,
+        "min": 65.65,
+        "p50": 68.6,
+        "p95": 111.93,
+        "p99": 111.93,
+        "max": 111.93,
+        "mean": 83.77
+      }
+    },
+    "quote": {
+      "requests": 8,
+      "status": {
+        "200": 8
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 8,
+        "min": 86.08,
+        "p50": 91.45,
+        "p95": 166.73,
+        "p99": 166.73,
+        "max": 166.73,
+        "mean": 113.71
+      },
+      "latencyServedMs": {
+        "count": 8,
+        "min": 86.08,
+        "p50": 91.45,
+        "p95": 166.73,
+        "p99": 166.73,
+        "max": 166.73,
+        "mean": 113.71
+      }
+    },
+    "build": {
+      "requests": 11,
+      "status": {
+        "200": 11
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 11,
+        "min": 273.41,
+        "p50": 295.07,
+        "p95": 460.57,
+        "p99": 460.57,
+        "max": 460.57,
+        "mean": 313.18
+      },
+      "latencyServedMs": {
+        "count": 11,
+        "min": 273.41,
+        "p50": 295.07,
+        "p95": 460.57,
+        "p99": 460.57,
+        "max": 460.57,
+        "mean": 313.18
+      }
+    }
+  },
+  "notes": [
+    "errorRate = transport failures + 5xx; non2xxRate also counts 4xx (rate limits, coded refusals).",
+    "latencyServedMs leaves out 429s, which are answered before any work."
+  ]
+}

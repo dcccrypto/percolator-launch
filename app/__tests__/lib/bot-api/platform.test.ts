@@ -22,6 +22,7 @@ beforeEach(() => {
   now = 1_700_000_000_000;
   vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
   vi.stubEnv("BOT_API_ENABLED", "1");
+  vi.stubEnv("BOT_API_ANON_READS", "1"); // anon reads default off (provisional); these tests use the anon tier
   vi.stubEnv("BOT_API_LOG", "0");
   vi.stubEnv("TRUSTED_PROXY_DEPTH", "1");
   __setDevnetV22ForTest(true);
@@ -443,7 +444,7 @@ describe("operator F4: health reports degraded", () => {
     const j = await res.json();
     expect(j).toMatchObject({ status: "ok", slot: 123, kv: { backend: "memory", degraded: false, memoryOnDeployedBuild: false }, clientIp: { resolved: true } });
     // operator R3: the kill-switch state the design doc promises
-    expect(j.switches).toEqual({ botApiEnabled: true, anonReads: true, writesPaused: false });
+    expect(j.switches).toEqual({ botApiEnabled: true, gateExempt: false, anonReads: true, writesPaused: false });
   });
   it("degraded and 503 while the KV is failing", async () => {
     const { redis } = deadRedis();

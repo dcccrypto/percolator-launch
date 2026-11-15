@@ -79,14 +79,29 @@ describe("openapi spec", () => {
   });
 });
 
+describe("fill-price docs say one thing (trader, round 1)", () => {
+  it("estExecPriceE6 includes the spread on every market and is what the limit checks; feeChargedInPrice never claims the spread is not in it", () => {
+    const q = (buildOpenApi() as { components: { schemas: { Quote: { properties: Record<string, { description?: string; oneOf?: Array<{ description?: string }> }> } } } }).components.schemas.Quote.properties;
+    const est = q.estExecPriceE6.oneOf?.[0]?.description ?? q.estExecPriceE6.description ?? "";
+    expect(est).toContain("on EVERY market");
+    expect(est).toContain("checks against your limit");
+    const flag = q.feeChargedInPrice.description ?? "";
+    expect(flag).not.toMatch(/not also paid in the price/);
+    expect(flag).toContain("counted once");
+    expect(flag).toContain("booked at the mark");
+  });
+});
+
 describe("GET /api/v1/openapi.json", () => {
   beforeEach(() => {
     process.env.BOT_API_ENABLED = "1";
+    process.env.BOT_API_ANON_READS = "1"; // anon reads default off (provisional)
     process.env.NEXT_PUBLIC_V22 = "1";
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
   });
   afterEach(() => {
     delete process.env.BOT_API_ENABLED;
+    delete process.env.BOT_API_ANON_READS;
     delete process.env.NEXT_PUBLIC_V22;
   });
   it("serves the spec anonymously with rate-limit headers", async () => {
@@ -97,5 +112,20 @@ describe("GET /api/v1/openapi.json", () => {
     const body = (await res.json()) as { openapi: string; paths: Record<string, unknown> };
     expect(body.openapi).toBe("3.1.0");
     expect(body.paths["/api/v1/openapi.json"]).toBeDefined();
+  });
+  it("the served spec labels the section 8 defaults provisional (info, cap fields, build caps)", async () => {
+    const { GET } = await import("@/app/api/v1/openapi.json/route");
+    const res = await GET(new NextRequest("http://localhost/api/v1/openapi.json"));
+    const text = await res.text();
+    expect(text).toContain("provisional");
+    expect(text).toContain("provisional devnet default, not owner-approved (design doc section 8)");
+    const spec = JSON.parse(text) as { info: { description: string }; components: { schemas: Record<string, { properties: Record<string, { description?: string; properties?: Record<string, unknown> }> }> } };
+    expect(spec.info.description).toMatch(/^PROVISIONAL:/);
+    const order = spec.components.schemas.OrderRequest.properties;
+    for (const f of ["slippageBps", "maxNotionalUsd", "maxLeverage"]) expect(order[f].description).toContain("provisional");
+    expect(spec.components.schemas.BuildResponse.properties.caps.properties).toHaveProperty("provisional");
+    // The two pending gate switches are documented as such.
+    expect(spec.info.description).toContain("BOT_API_GATE_EXEMPT");
+    expect(spec.info.description).toContain("BOT_API_ANON_READS");
   });
 });

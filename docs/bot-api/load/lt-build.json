@@ -1,0 +1,158 @@
+{
+  "label": "e2 build-heavy paced 10rps, base 44f4cf6e0 + mock-rpc simulate",
+  "mode": "inproc",
+  "rpc": "mock",
+  "target": "in-process handlers",
+  "concurrency": 16,
+  "mix": {
+    "read": 30,
+    "quote": 20,
+    "account": 10,
+    "build": 40
+  },
+  "pacingRps": 10,
+  "keys": 20,
+  "wallSeconds": 61.5,
+  "throughputRps": 9.76,
+  "mockRpcRequests": 3828,
+  "requests": 600,
+  "status": {
+    "200": 600
+  },
+  "errorCodes": {},
+  "errorRate": 0,
+  "non2xxRate": 0,
+  "latencyMs": {
+    "count": 600,
+    "min": 0.71,
+    "p50": 1.9,
+    "p95": 7.7,
+    "p99": 9.57,
+    "max": 19.9,
+    "mean": 3.79
+  },
+  "latencyServedMs": {
+    "count": 600,
+    "min": 0.71,
+    "p50": 1.9,
+    "p95": 7.7,
+    "p99": 9.57,
+    "max": 19.9,
+    "mean": 3.79
+  },
+  "byClass": {
+    "read": {
+      "requests": 165,
+      "status": {
+        "200": 165
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 165,
+        "min": 0.71,
+        "p50": 1.01,
+        "p95": 1.25,
+        "p99": 1.38,
+        "max": 1.53,
+        "mean": 1.01
+      },
+      "latencyServedMs": {
+        "count": 165,
+        "min": 0.71,
+        "p50": 1.01,
+        "p95": 1.25,
+        "p99": 1.38,
+        "max": 1.53,
+        "mean": 1.01
+      }
+    },
+    "quote": {
+      "requests": 126,
+      "status": {
+        "200": 126
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 126,
+        "min": 1.4,
+        "p50": 1.74,
+        "p95": 2.07,
+        "p99": 3.6,
+        "max": 9.57,
+        "mean": 1.82
+      },
+      "latencyServedMs": {
+        "count": 126,
+        "min": 1.4,
+        "p50": 1.74,
+        "p95": 2.07,
+        "p99": 3.6,
+        "max": 9.57,
+        "mean": 1.82
+      }
+    },
+    "account": {
+      "requests": 37,
+      "status": {
+        "200": 37
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 37,
+        "min": 1.09,
+        "p50": 1.47,
+        "p95": 2.04,
+        "p99": 2.29,
+        "max": 2.29,
+        "mean": 1.51
+      },
+      "latencyServedMs": {
+        "count": 37,
+        "min": 1.09,
+        "p50": 1.47,
+        "p95": 2.04,
+        "p99": 2.29,
+        "max": 2.29,
+        "mean": 1.51
+      }
+    },
+    "build": {
+      "requests": 272,
+      "status": {
+        "200": 272
+      },
+      "errorCodes": {},
+      "errorRate": 0,
+      "non2xxRate": 0,
+      "latencyMs": {
+        "count": 272,
+        "min": 5.45,
+        "p50": 6.32,
+        "p95": 8.88,
+        "p99": 15.02,
+        "max": 19.9,
+        "mean": 6.7
+      },
+      "latencyServedMs": {
+        "count": 272,
+        "min": 5.45,
+        "p50": 6.32,
+        "p95": 8.88,
+        "p99": 15.02,
+        "max": 19.9,
+        "mean": 6.7
+      }
+    }
+  },
+  "notes": [
+    "errorRate = transport failures + 5xx; non2xxRate also counts 4xx (rate limits, coded refusals).",
+    "latencyServedMs leaves out 429s, which are answered before any work.",
+    "mock RPC answers simulateTransaction cleanly and serves a flat taker account for MOCK_OWNER: build requests run the whole build path (reads, caps, LP selection, simulations) and measure the API's own cost, not the program or a real RPC's latency. Builds draw on the global build budget (300 per minute), so an unpaced run is mostly 429 on builds; pace with --rps to measure served builds."
+  ]
+}

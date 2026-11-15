@@ -39,9 +39,14 @@ const m = vi.hoisted(() => ({
   sigStatus: null as null | { slot: number; confirmations: number | null; err: unknown; confirmationStatus?: string },
   blockHeight: 100,
   lamports: 1_000_000_000,
+  blocked: new Set<string>(),
+  feeCap: null as string | null,
+  limitMiss: null as null | { limitPriceE6: string; estExecPriceE6: string; markE6: string; minSlippageBps: number },
   landed: null as null | { meta: { logMessages: string[] }; transaction: { message: { staticAccountKeys: PublicKey[]; compiledInstructions: Array<{ programIdIndex: number }> } } },
 }));
 
+// The app's retired-market blocklist (lib/blocklist.ts) is a module-level set built from env at import: driven per test here.
+vi.mock("@/lib/blocklist", () => ({ isBlockedSlab: (s: string | null | undefined) => !!s && m.blocked.has(s) }));
 // The wrapper whose error table names a Custom(n): only a code this program returned is named (lib/bot-api/onchain.ts).
 vi.mock("@/lib/config", async (orig) => ({
   ...(await orig<typeof import("@/lib/config")>()),
@@ -66,7 +71,7 @@ vi.mock("@/lib/bot-api/builders/caps", async (orig) => ({
       m.guards++;
       if (m.guardThrow) throw m.guardThrow;
     }
-    return { expectedFeeBps: 65, expectedFeeAtoms: 130_000n };
+    return { expectedFeeBps: 65, expectedFeeAtoms: 130_000n, limitMiss: p.reducing ? m.limitMiss : null };
   },
 }));
 vi.mock("@/lib/slab-max-leverage", () => ({ maxLeverageFromSlab: () => 20 }));
@@ -106,7 +111,7 @@ vi.mock("@/lib/v22/trade-build", async (orig) => {
         resubmitAfter: m.resubmit,
         blockhash: BH,
         lastValidBlockHeight: 4242,
-        summary: { market: req.slab.toBase58(), size: req.size.toString(), limitPriceE6: String(req.limitPriceE6 ?? 2_020_000n), reducing: m.pre.reducing },
+        summary: { market: req.slab.toBase58(), size: req.size.toString(), limitPriceE6: String(req.limitPriceE6 ?? 2_020_000n), reducing: m.pre.reducing, feeBps: m.feeCap },
       };
     }),
   };
@@ -152,6 +157,8 @@ import { POST as withdrawals } from "@/app/api/v1/withdrawals/route";
 import { GET as tx } from "@/app/api/v1/tx/[signature]/route";
 import { buildOpenApi } from "@/lib/bot-api/openapi";
 import { validate } from "../lib/bot-api/openapi-validate";
+import bs58 from "bs58";
+const bs58encode = (b: Uint8Array) => bs58.encode(b);
 
 let key: string;
 const post = (h: (r: NextRequest) => Promise<Response>, path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -169,7 +176,7 @@ beforeEach(async () => {
   Object.assign(m, {
     pre: { effectivePriceE6: 2_000_000n, positionBeforeQ: 0n, reducing: false }, guards: 0, guardThrow: null,
     buildCalls: 0, buildThrow: null, resubmit: false, finalSims: [], simTxs: [], gate: { err: null, logs: [] }, portfolioFound: true,
-    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null,
+    pf: { capital: 50_000_000n, legs: [], owner: OWNER, marketGroupId: SLAB }, ataBalance: 100_000_000n, newPortfolioExists: false, fresh: null, position: 0n, sigStatus: null, blockHeight: 100, lamports: 1_000_000_000, landed: null, blocked: new Set(), limitMiss: null, feeCap: null,
   });
 });
 afterEach(() => {
@@ -310,6 +317,8 @@ describe("POST /api/v1/positions/close", () => {
     expect(r.status).toBe(200);
     expect(b.summary.size).toBe("-7000000");
     expect(b.caps.reduceOnly).toBe(true);
+    expect(b.caps.provisional).toBe(true);
+    expect(b.caps.note).toContain("not owner-approved");
   });
   it("partial close, oversize refused, no position refused", async () => {
     m.position = -7_000_000n;
@@ -422,6 +431,156 @@ describe("POST /api/v1/deposits and /api/v1/withdrawals", () => {
   it("a portfolio that is not this owner's on this market is refused", async () => {
     m.pf.owner = Keypair.generate().publicKey;
     expect((await (await post(withdrawals, "/api/v1/withdrawals", dep())).json()).error.code).toBe("bad_portfolio");
+  });
+});
+
+describe("retired markets (the app's blocklist): no new money or risk in, exits always allowed", () => {
+  const dep = (o: Record<string, unknown> = {}) => ({ owner: OWNER.toBase58(), market: SLAB.toBase58(), amount: "25000000", ...o });
+  beforeEach(() => {
+    m.blocked.add(SLAB.toBase58());
+  });
+  it("POST /v1/deposits is refused with market_retired before any read or simulation", async () => {
+    const r = await post(deposits, "/api/v1/deposits", dep());
+    const e = (await r.json()).error;
+    expect([r.status, e.code, e.retryable]).toEqual([409, "market_retired", false]);
+    expect(m.simTxs).toHaveLength(0);
+  });
+  it("POST /v1/orders that add risk are refused with market_retired; nothing is simulated", async () => {
+    const r = await post(orders, "/api/v1/orders", order());
+    expect([r.status, (await r.json()).error.code]).toEqual([409, "market_retired"]);
+    expect(m.simTxs).toHaveLength(0);
+  });
+  it("reduce-only orders and closes still build, so a holder can exit", async () => {
+    m.position = 7_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
+    expect((await post(orders, "/api/v1/orders", order({ side: "sell", size: "1000000", reduceOnly: true }))).status).toBe(200);
+    // The reduce-only order above reserves 1M of the 7M in flight, so the close takes the rest.
+    expect((await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58(), size: "6000000" })).status).toBe(200);
+  });
+  it("withdrawals still build", async () => {
+    expect((await post(withdrawals, "/api/v1/withdrawals", dep())).status).toBe(200);
+  });
+  it("a market not on the list is unaffected", async () => {
+    m.blocked.clear();
+    expect((await post(deposits, "/api/v1/deposits", dep())).status).toBe(200);
+    expect((await post(orders, "/api/v1/orders", order())).status).toBe(200);
+  });
+});
+
+describe("default fee ceiling (provisional): an order with no maxFeeBps may not sign a cap above 150 bps", () => {
+  it("the devnet 135 bps cap still builds, and the caps echo the default", async () => {
+    m.feeCap = "135";
+    const r = await post(orders, "/api/v1/orders", order());
+    const b = await r.json();
+    expect(r.status).toBe(200);
+    expect(b.caps).toMatchObject({ maxFeeBps: 150, maxFeeBpsSource: "default", provisional: true });
+  });
+  it("a cap above the default is refused with fee_above_max naming it, before the final simulation; maxFeeBps accepts it", async () => {
+    m.feeCap = "200";
+    const r = await post(orders, "/api/v1/orders", order());
+    const e = (await r.json()).error;
+    expect([r.status, e.code]).toEqual([422, "fee_above_max"]);
+    expect(e.details).toEqual({ feeCapBps: 200, defaultMaxFeeBps: 150 });
+    expect(e.message).toContain("maxFeeBps >= 200");
+    expect(m.simTxs).toHaveLength(0);
+    const ok = await post(orders, "/api/v1/orders", order({ maxFeeBps: 200 }));
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).caps).toMatchObject({ maxFeeBps: 200, maxFeeBpsSource: "caller" });
+  });
+});
+
+describe("trader (round 1): a reduce-only order with a tight slippage gets slippage_cap_exceeded, not an opaque InvalidInstruction", () => {
+  it("the final simulation's wrapper InvalidInstruction is mapped when the limit is tighter than the expected fill", async () => {
+    m.position = 7_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
+    m.limitMiss = { limitPriceE6: "1999800", estExecPriceE6: "1995000", markE6: "2000000", minSlippageBps: 25 };
+    m.finalSims = [{ err: { InstructionError: [2, { Custom: 9 }] }, logs: [WRAPPER_FAILED("9")] }];
+    const r = await post(orders, "/api/v1/orders", order({ side: "sell", size: "1000000", reduceOnly: true, slippageBps: 1 }));
+    const e = (await r.json()).error;
+    expect([r.status, e.code, e.retryable]).toEqual([422, "slippage_cap_exceeded", false]);
+    expect(e.details).toMatchObject({ minSlippageBps: 25, estExecPriceE6: "1995000" });
+    // The reservation the failed build took is freed again.
+    m.finalSims = [];
+    expect((await post(orders, "/api/v1/orders", order({ side: "sell", size: "7000000", reduceOnly: true }))).status).toBe(200);
+  });
+  it("without a limit miss the InvalidInstruction stays simulation_failed (the limit was not the cause)", async () => {
+    m.position = 7_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 7_000_000n, reducing: true };
+    m.finalSims = [{ err: { InstructionError: [2, { Custom: 9 }] }, logs: [WRAPPER_FAILED("9")] }];
+    expect((await (await post(orders, "/api/v1/orders", order({ side: "sell", size: "1000000", reduceOnly: true }))).json()).error.code).toBe("simulation_failed");
+  });
+});
+
+describe("risk seat: in-flight reduce-only reservations (two reduce-only orders cannot flip a position)", () => {
+  const long10 = () => {
+    m.position = 10_000_000n;
+    m.pre = { effectivePriceE6: 2_000_000n, positionBeforeQ: 10_000_000n, reducing: true };
+  };
+  const sell = (size: string, headers: Record<string, string> = {}) => post(orders, "/api/v1/orders", order({ side: "sell", size, reduceOnly: true }), headers);
+  it("long 10, two reduce-only sells of 6: the second is refused with reduce_only_inflight and the remaining size", async () => {
+    long10();
+    expect((await sell("6000000")).status).toBe(200);
+    const r = await sell("6000000");
+    const e = (await r.json()).error;
+    expect([r.status, e.code, e.retryable]).toEqual([409, "reduce_only_inflight", true]);
+    expect(e.details).toMatchObject({ positionQ: "10000000", reservedQ: "6000000", remainingQ: "4000000", sizeQ: "6000000" });
+    expect(m.simTxs).toHaveLength(1); // the refused one was never simulated
+  });
+  it("sells of 6 then 4 both build (exactly the position)", async () => {
+    long10();
+    expect((await sell("6000000")).status).toBe(200);
+    expect((await sell("4000000")).status).toBe(200);
+    expect((await (await sell("1")).json()).error.code).toBe("reduce_only_inflight");
+  });
+  it("a second full close while the first is in flight is refused", async () => {
+    long10();
+    expect((await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() })).status).toBe(200);
+    const r = await post(close, "/api/v1/positions/close", { owner: OWNER.toBase58(), market: SLAB.toBase58() });
+    expect((await r.json()).error).toMatchObject({ code: "reduce_only_inflight", details: { remainingQ: "0" } });
+  });
+  it("an order without reduceOnly is not reserved and not blocked by reservations", async () => {
+    long10();
+    expect((await sell("6000000")).status).toBe(200);
+    expect((await post(orders, "/api/v1/orders", order({ side: "sell", size: "6000000" }))).status).toBe(200);
+  });
+  it("cancel releases the reservation", async () => {
+    long10();
+    expect((await sell("6000000", { "idempotency-key": "reduce-a-1" })).status).toBe(200);
+    expect((await sell("6000000")).status).toBe(409);
+    const c = await (await post(cancel, "/api/v1/orders/cancel", { idempotencyKey: "reduce-a-1" })).json();
+    expect(c).toMatchObject({ cancelled: true, reservationsReleased: 1 });
+    expect((await sell("6000000")).status).toBe(200);
+  });
+  it("a refused or failed build frees its reservation", async () => {
+    long10();
+    m.finalSims = [{ err: { InstructionError: [3, { Custom: 49 }] }, logs: [WRAPPER_FAILED("31")] }];
+    expect((await sell("6000000")).status).toBe(422);
+    expect((await sell("6000000")).status).toBe(200);
+  });
+  it("tx status: a landed order frees its reservation", async () => {
+    long10();
+    const b = await (await sell("6000000")).json();
+    const msg = Transaction.from(Buffer.from(b.transactions[0].transaction, "base64")).compileMessage();
+    m.landed = { meta: { logMessages: [] }, transaction: { message: msg } } as unknown as typeof m.landed;
+    m.sigStatus = { slot: 9, confirmations: 1, err: null, confirmationStatus: "confirmed" };
+    const sig = bs58encode(new Uint8Array(64).fill(7));
+    const t = await (await tx(new NextRequest(`http://x/api/v1/tx/${sig}`, { headers: { authorization: `Bearer ${key}`, "x-forwarded-for": "1.1.1.1" } }), { params: Promise.resolve({ signature: sig }) })).json();
+    expect(t).toMatchObject({ status: "confirmed", reservationReleased: true });
+    expect((await sell("6000000")).status).toBe(200);
+  });
+  it("tx status: an expired order frees it with ?messageHash= only once past its lastValidBlockHeight", async () => {
+    long10();
+    const b = await (await sell("6000000")).json();
+    const hash = b.transactions[0].messageHash as string;
+    const sig = bs58encode(new Uint8Array(64).fill(8));
+    const ask = async () =>
+      (await tx(new NextRequest(`http://x/api/v1/tx/${sig}?lastValidBlockHeight=${b.lastValidBlockHeight}&messageHash=${hash}`, { headers: { authorization: `Bearer ${key}`, "x-forwarded-for": "1.1.1.1" } }), { params: Promise.resolve({ signature: sig }) })).json();
+    m.blockHeight = b.lastValidBlockHeight; // still able to land
+    expect(await ask()).toMatchObject({ status: "pending", reservationReleased: false });
+    expect((await sell("6000000")).status).toBe(409);
+    m.blockHeight = b.lastValidBlockHeight + 1;
+    expect(await ask()).toMatchObject({ status: "expired", reservationReleased: true });
+    expect((await sell("6000000")).status).toBe(200);
   });
 });
 

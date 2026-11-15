@@ -10,7 +10,8 @@ export type ErrorCode =
   | "rpc_unavailable" | "internal" | "market_not_found" | "market_unsupported" | "market_unreadable" | "market_stale"
   | "no_portfolio" | "bad_portfolio" | "no_lp" | "slippage_cap_exceeded" | "notional_cap_exceeded" | "size_cap_exceeded"
   | "leverage_cap_exceeded" | "reduce_only_violation" | "no_position" | "insufficient_margin" | "insufficient_funds"
-  | "fee_raise_required" | "fee_above_max" | "fee_unreadable" | "too_large" | "simulation_failed" | "bad_signature";
+  | "fee_raise_required" | "fee_above_max" | "fee_unreadable" | "too_large" | "simulation_failed" | "bad_signature"
+  | "market_retired" | "reduce_only_inflight";
 
 /** Codes the SDK itself raises when there was no API envelope. */
 export type ClientErrorCode = "network_error" | "bad_response" | "timeout";
@@ -65,6 +66,8 @@ export interface Market {
   feeBps: string;
   maxLeverage: number | null;
   openInterest: { longQ: string; shortQ: string };
+  /** On the app's retired-market blocklist: deposits and opens are refused (market_retired); exits still work. */
+  retired?: boolean;
 }
 
 export interface MarketDetail extends Market {
@@ -74,6 +77,8 @@ export interface MarketDetail extends Market {
 export interface MarketList extends Meta {
   count: number;
   skipped: number;
+  /** Retired markets left out of the list. */
+  retired?: number;
   markets: Market[];
 }
 
@@ -129,7 +134,7 @@ export interface Quote {
   /** The fee cap a build signs (the MOST a fill may charge), bps. Far above expectedFeeBps by design. */
   feeCapBps: number | null;
   baseFeeBps: number;
-  /** true: fee channel on (settles at the mark, the quoted spread is charged as a fee); false: the spread is paid in the price. */
+  /** How the spread is collected. true: fee channel on, the position is booked at the mark and the spread is charged as a fee (inside expectedFeeBps). false: booked at estExecPriceE6. estExecPriceE6 includes the spread either way and is what the limit is checked against; the spread is paid once (allInCostBps). */
   feeChargedInPrice: boolean;
   maxSizePerSide: { long: SideLimit | null; short: SideLimit | null };
   /** |sizeQ| is above maxSizePerSide: the price and fee figures are then for fillableQ. */
@@ -305,7 +310,8 @@ export interface BuildResponse {
   /** true: the only tx is a maintenance crank; send it, then build again. */
   resubmitAfter: boolean;
   summary: BuildSummary;
-  caps?: Record<string, unknown>;
+  /** The caps applied to an order or close. `provisional: true`: the defaults are provisional devnet values, not owner-approved (design doc section 8). */
+  caps?: Record<string, unknown> & { provisional?: boolean; note?: string };
 }
 
 export interface BuildSummary {
@@ -339,6 +345,8 @@ export interface CancelResponse {
   cancelled: boolean;
   alreadyCancelled: boolean;
   lastValidBlockHeight: number | null;
+  /** Reduce-only reservations the cancel released. */
+  reservationsReleased?: number;
   onchain: string;
 }
 
@@ -353,6 +361,8 @@ export interface TxStatus {
   blockHeight: number | null;
   lastValidBlockHeight: number | null;
   observedAt: string;
+  /** This call ended the reduce-only reservation the transaction held. */
+  reservationReleased?: boolean;
 }
 
 export interface Health {

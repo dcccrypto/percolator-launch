@@ -10,7 +10,8 @@ import { PublicKey } from "@solana/web3.js";
 import { validate } from "./openapi-validate";
 import { fakeConnection, SOL, SOL_DATA, LP, LP_DATA, CTX, CTX_DATA, WRAPPER, SOL_SLOT, pk } from "./fake-chain";
 
-const state = vi.hoisted(() => ({ conn: null as unknown }));
+const state = vi.hoisted(() => ({ conn: null as unknown, blocked: new Set<string>() }));
+vi.mock("@/lib/blocklist", () => ({ isBlockedSlab: (s: string | null | undefined) => !!s && state.blocked.has(s) }));
 vi.mock("@/lib/server-rpc", () => ({ getServerConnection: () => state.conn }));
 vi.mock("@/lib/config", async (orig) => ({
   ...(await orig<typeof import("@/lib/config")>()),
@@ -47,8 +48,10 @@ const fits = (schema: string, body: unknown) => expect(validate(schemas[schema],
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
   vi.stubEnv("BOT_API_ENABLED", "1");
+  vi.stubEnv("BOT_API_ANON_READS", "1"); // anon reads default off (provisional); these tests use the anon tier
   vi.stubEnv("BOT_API_LOG", "0");
   __setDevnetV22ForTest(true);
+  state.blocked = new Set();
   __resetDiscoveryCacheForTest();
   __clearQuoteCacheForTest();
   state.conn = fakeConnection({
@@ -71,6 +74,20 @@ describe("handler JSON fits the OpenAPI schemas", () => {
     const one = await call(marketOne as Handler, `/api/v1/markets/${SOL.toBase58()}`, { market: SOL.toBase58() });
     expect(one.status).toBe(200);
     fits("MarketOne", one.body);
+  });
+  it("a retired market (the app's blocklist) is left out of GET /markets and flagged retired: true on a direct read", async () => {
+    let list = await call(marketsList as Handler, "/api/v1/markets");
+    expect(list.body).toMatchObject({ count: 1, retired: 0 });
+    expect(list.body.markets[0].retired).toBe(false);
+    state.blocked.add(SOL.toBase58());
+    list = await call(marketsList as Handler, "/api/v1/markets");
+    expect(list.status).toBe(200);
+    fits("MarketList", list.body);
+    expect(list.body).toMatchObject({ count: 0, retired: 1, markets: [] });
+    const one = await call(marketOne as Handler, `/api/v1/markets/${SOL.toBase58()}`, { market: SOL.toBase58() });
+    expect(one.status).toBe(200);
+    fits("MarketOne", one.body);
+    expect(one.body.market.retired).toBe(true);
   });
   it("GET /quote carries numbers for bps, the oracle block and the fee fields", async () => {
     const r = await call(quote as Handler, `/api/v1/markets/${SOL.toBase58()}/quote?size=100000000&slippageBps=100`, { market: SOL.toBase58() });
