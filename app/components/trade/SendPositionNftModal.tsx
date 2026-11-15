@@ -4,6 +4,7 @@ import { FC, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PublicKey } from "@solana/web3.js";
 import gsap from "gsap";
+import { NFT_STALE_SEND_REFUSED } from "@/components/trade/nft-close-copy";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
@@ -31,9 +32,7 @@ interface SendPositionNftModalProps {
   onCancel: () => void;
 }
 
-/** The one calm line shown when a stale NFT (earlier incarnation of the portfolio) is asked to be sent. */
-export const NFT_STALE_SEND_REFUSED =
-  "This NFT belongs to an earlier version of the account and can't be sent. Burn it to reclaim its rent.";
+export { NFT_STALE_SEND_REFUSED };
 
 function isValidPubkey(input: string): PublicKey | null {
   // Trim before the length check: a pasted address often carries a space or newline.

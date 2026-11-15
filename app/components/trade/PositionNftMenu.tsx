@@ -26,7 +26,15 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount } from "@/lib/format";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
-import { SendPositionNftModal, NFT_STALE_SEND_REFUSED } from "@/components/trade/SendPositionNftModal";
+import dynamic from "next/dynamic";
+import { NFT_CLOSE_COPY, NFT_STALE_SEND_REFUSED } from "@/components/trade/nft-close-copy";
+
+// The send modal (address form + its animation code) loads on the first "Send NFT"; it is a portal
+// overlay, so there is no layout to hold while the chunk arrives.
+const SendPositionNftModal = dynamic(
+  () => import("@/components/trade/SendPositionNftModal").then((m) => m.SendPositionNftModal),
+  { ssr: false },
+);
 
 export const NFT_MENU_COPY = {
   menuLabel: "More position actions",
@@ -42,10 +50,7 @@ export const NFT_MENU_COPY = {
   closeWrapped: "Unwrap to close this position",
   /** The dock's wrapped-position banner: names the ⋯ button and this menu's Unwrap item. */
   wrappedHint: "Wrapped in Position NFT — Unwrap it from the ⋯ menu to close",
-  /** The order ticket's Close tab when this market's position is wrapped (the ticket can't close it). */
-  closeTabTitle: "Position wrapped as an NFT",
-  closeTabBody: (side: "long" | "short") =>
-    `Your ${side} on this market is held in a Position NFT, so it can't be closed here. Unwrap it from the ⋯ menu on its row in Positions, then close it.`,
+  ...NFT_CLOSE_COPY,
   heldElsewhere: "Held as an NFT by another wallet",
   closedTitle: "Your NFT-wrapped position has closed",
   closedBody: "Unwrap the NFT to get back any collateral left in it.",

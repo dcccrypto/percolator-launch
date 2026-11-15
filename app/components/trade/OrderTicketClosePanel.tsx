@@ -12,7 +12,7 @@ import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
 import { useCloseFeeEstimate } from "@/hooks/useCloseFeeEstimate";
 import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import type { MarketLimits } from "@/hooks/useMarketLimits";
-import { NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
+import { NFT_CLOSE_COPY } from "@/components/trade/nft-close-copy";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
@@ -187,9 +187,9 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         data-testid="close-panel-wrapped"
         className="rounded-none border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-3 py-8 text-center"
       >
-        <p className="text-[12px] font-medium text-[var(--text)]">{NFT_MENU_COPY.closeTabTitle}</p>
+        <p className="text-[12px] font-medium text-[var(--text)]">{NFT_CLOSE_COPY.closeTabTitle}</p>
         <p className="mx-auto mt-1.5 max-w-[240px] text-[11px] leading-relaxed text-[var(--text-secondary)]">
-          {NFT_MENU_COPY.closeTabBody(wrappedSize > 0n ? "long" : "short")}
+          {NFT_CLOSE_COPY.closeTabBody(wrappedSize > 0n ? "long" : "short")}
         </p>
       </div>
     );

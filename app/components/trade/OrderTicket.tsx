@@ -37,6 +37,7 @@
 
 import { ticketFillIn } from "@/lib/funding-memo";
 import { errorText } from "@/lib/error-text";
+import dynamic from "next/dynamic";
 import { FC, memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { balanceKey, NO_BALANCE_KNOWN, resolveTokenBalance, type KnownBalance, type TokenRead } from "@/lib/token-balance";
 import { useWalletBalanceRefreshKey } from "@/lib/wallet-balance-invalidation";
@@ -58,7 +59,6 @@ import { diagnoseTradeRejection, isCustom9Error } from "@/lib/tradeRejectDiagnos
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { ACCOUNT_LOADING_COPY, useSlowFlag } from "@/hooks/useSlowFlag";
-import { OrderTicketClosePanel } from "@/components/trade/OrderTicketClosePanel";
 import { terminalPositionPnl } from "@/lib/position-pnl";
 import { riskEntryFromSettled, riskLegOf, settledRiskAnchorE6 } from "@/lib/risk-entry";
 import { computeLimitPriceE6 } from "@/lib/slippage";
@@ -93,7 +93,6 @@ import { confirmDriftRefusal, marketMayChargeBusyFee, type ConfirmedTerms } from
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
-import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { depositAmountMessage } from "@/lib/deposit-guard";
@@ -161,6 +160,32 @@ import { growthMaxLeverageForOrder, isReducingOrder } from "@/lib/v21/growth-mar
 import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { sanitizeDecimalInput } from "@/lib/decimal-input";
 import { useDecimalInput, useStrictDecimalInput } from "@/hooks/useDecimalInput";
+
+// Rarely used panels load on first use (the close tab needs a wallet + a position; the deposit card
+// only shows once a wallet is connected), so they stay out of the /trade first load. The placeholders
+// hold the panels' footprint so the ticket does not jump when the chunk arrives.
+const OrderTicketClosePanel = dynamic(
+  () => import("@/components/trade/OrderTicketClosePanel").then((m) => m.OrderTicketClosePanel),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        data-testid="close-panel-loading"
+        role="status"
+        className="min-h-[260px] rounded-none border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-8 text-center"
+      >
+        <p className="text-[12px] font-medium text-[var(--text-secondary)]">Loading position…</p>
+      </div>
+    ),
+  },
+);
+const DepositWithdrawCard = dynamic(
+  () => import("@/components/trade/DepositWithdrawCard").then((m) => m.DepositWithdrawCard),
+  {
+    ssr: false,
+    loading: () => <div aria-hidden="true" className="min-h-[170px] rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80" />,
+  },
+);
 
 const SIZE_PRESETS = [25, 50, 75, 100];
 const MAX_DISPLAY_LEVERAGE = 200;
