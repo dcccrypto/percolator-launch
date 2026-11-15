@@ -319,14 +319,60 @@ export async function discoverMarketsOnChain(
   }
 }
 
+// Without Supabase every request used to redo the whole chain read: the registration Blob, a
+// getProgramAccounts discovery, the batched slab reads, the LP-capital reads and (for wizard
+// markets) a second getProgramAccounts scan. One per-instance memo with in-flight sharing makes that
+// once per DISCOVERY_MEMO_MS (default 5 s, the route's own s-maxage). The memo holds the UNFILTERED
+// set; ?program_id= / ?search= are applied to it afterwards, so one read serves every query shape.
+const DEFAULT_DISCOVERY_MEMO_MS = 5_000;
+
+function discoveryMemoTtlMs(): number {
+  const raw = process.env.DISCOVERY_MEMO_MS;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_DISCOVERY_MEMO_MS;
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_DISCOVERY_MEMO_MS;
+}
+
+let discoveryMemo: { at: number; rows: Record<string, unknown>[] } | null = null;
+let discoveryInflight: Promise<Record<string, unknown>[]> | null = null;
+
+/** Test hook: forget the memo and any in-flight read. */
+export function resetDiscoveredMarketRowsCache(): void {
+  discoveryMemo = null;
+  discoveryInflight = null;
+}
+
 /**
  * The discovered rows /api/markets serves when Supabase is not configured (see the module comment).
- * `filter` narrows the rows before the LP overlay (the route's ?program_id= / ?search=), so a narrowed
- * request does not pay the LP reads for rows it drops. [] when discovery finds nothing or fails.
+ * `filter` narrows the memoized rows (the route's ?program_id= / ?search=). [] when discovery finds
+ * nothing or fails; an empty result is never memoized, so a transient RPC failure is retried next call.
  */
 export async function loadDiscoveredMarketRows(
   opts: { filter?: (row: Record<string, unknown>) => boolean } = {},
 ): Promise<Record<string, unknown>[]> {
+  const ttl = discoveryMemoTtlMs();
+  let rows: Record<string, unknown>[];
+  if (ttl === 0) {
+    rows = await loadDiscoveredMarketRowsUncached();
+  } else if (discoveryMemo && Date.now() - discoveryMemo.at < ttl) {
+    rows = discoveryMemo.rows;
+  } else {
+    if (!discoveryInflight) {
+      const startedAt = Date.now();
+      const p: Promise<Record<string, unknown>[]> = loadDiscoveredMarketRowsUncached()
+        .then((r) => {
+          if (r.length > 0) discoveryMemo = { at: startedAt, rows: r };
+          return r;
+        })
+        .finally(() => { if (discoveryInflight === p) discoveryInflight = null; });
+      discoveryInflight = p;
+    }
+    rows = await discoveryInflight;
+  }
+  return opts.filter ? rows.filter(opts.filter) : rows;
+}
+
+async function loadDiscoveredMarketRowsUncached(): Promise<Record<string, unknown>[]> {
   // Read the registration Blob ONCE per request — feeds both row metadata
   // (symbol/name for wizard-launched markets) and the visibility filter
   // below. Guarded: Blob unavailable → empty map, curated-only behavior.
@@ -356,8 +402,7 @@ export async function loadDiscoveredMarketRows(
     // is_complete there); curated seeds are never hidden (proven complete out
     // of band, and is_complete only flips false on an EXPLICIT proof). Only an
     // explicit false is dropped — undefined (legacy v12 / unknown) is kept.
-    .filter(m => !isProvenIncompleteMarket(m))
-    .filter(m => !opts.filter || opts.filter(m));
+    .filter(m => !isProvenIncompleteMarket(m));
   if (filtered.length === 0) return [];
 
   // GH#2334 follow-up: discoveredToApiRow() hardcodes vault_balance: null
