@@ -57,6 +57,8 @@ afterEach(() => __setDevnetV22ForTest(null));
 describe("LOW-3: the loader path sets the holding-fee flag with the exponent", () => {
   it("a slab known only through the loader: rent_max 0 -> no holding fee, rent_max != 0 -> may apply, exponent known in both", async () => {
     render(<LotExpLoaderBridge />);
+    // The bridge imports the registry lazily (keeps the SDK out of the root layout's first load): let the install land.
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     const PLAIN = "11111111111111111111111111111111";
     const RENT = "So11111111111111111111111111111111111111112";
     conn.data = market(0);
