@@ -142,7 +142,7 @@ beforeEach(() => {
   h.resolved.mockReturnValue(false);
   h.simulateForGate.mockResolvedValue({ err: null });
   h.sendTx.mockResolvedValue("sig");
-  h.getFreshBlockhash.mockResolvedValue({ blockhash: "bh" });
+  h.getFreshBlockhash.mockResolvedValue("bh");
   h.getPriorityFee.mockResolvedValue(10);
   h.buildBatchTx.mockImplementation(() => ({ tx: true }));
   h.signAllCompat.mockImplementation(async (_w: unknown, txs: unknown[]) => txs);
@@ -388,11 +388,12 @@ describe("settle: exit after the market is settled", () => {
     const [p] = own();
     h.loadOwnPortfolios.mockResolvedValue([p]);
     h.traderExitItems.mockReturnValue(items(p!.key));
-    h.selfHealSimulate.mockResolvedValue({ err: custom(21, 1) });
+    h.selfHealSimulate.mockResolvedValue({ err: custom(21, 2) });
     const { result } = setup(true);
     await act(async () => { await result.current.settle(); });
     expect(h.signAllCompat).not.toHaveBeenCalled();
     expect(h.waitLive).not.toHaveBeenCalled(); // isResolvedCloseWait false -> build never read
+    expect(h.isWait).toHaveBeenCalledWith({ index: 2, code: 21 }, 2, true);
     expect(result.current.done).toBe(STALE_SETTLE_COPY.settledPayoutSoon);
     expect(result.current.waiting).toBeNull();
   });
@@ -401,7 +402,7 @@ describe("settle: exit after the market is settled", () => {
     const [p] = own();
     h.loadOwnPortfolios.mockResolvedValue([p]);
     h.traderExitItems.mockReturnValue(items(p!.key));
-    h.selfHealSimulate.mockResolvedValue({ err: custom(21, 1) });
+    h.selfHealSimulate.mockResolvedValue({ err: custom(21, 2) });
     h.isWait.mockReturnValue(true);
     h.waitLive.mockResolvedValue(true);
     const { result } = setup(true);
@@ -417,7 +418,7 @@ describe("settle: exit after the market is settled", () => {
     const [p] = own();
     h.loadOwnPortfolios.mockResolvedValue([p]);
     h.traderExitItems.mockReturnValue(items(p!.key));
-    h.selfHealSimulate.mockResolvedValue({ err: custom(21, 1) });
+    h.selfHealSimulate.mockResolvedValue({ err: custom(21, 2) });
     h.isWait.mockReturnValue(true);
     h.waitLive.mockResolvedValue(false);
     const { result } = setup(true);
@@ -430,7 +431,7 @@ describe("settle: exit after the market is settled", () => {
     const [a, b] = own(2);
     h.loadOwnPortfolios.mockResolvedValue([a, b]);
     h.traderExitItems.mockReturnValue([...items(a!.key), ...items(b!.key)]);
-    h.selfHealSimulate.mockResolvedValueOnce({ err: custom(21, 1) }).mockResolvedValueOnce({ err: null });
+    h.selfHealSimulate.mockResolvedValueOnce({ err: custom(21, 2) }).mockResolvedValueOnce({ err: null });
     const { result } = setup(true);
     await act(async () => { await result.current.settle(); });
     expect(h.buildBatchTx).toHaveBeenCalledTimes(2);
@@ -493,7 +494,7 @@ describe("settle: exit after the market is settled", () => {
 });
 
 describe("unmount", () => {
-  it("does not set busy after unmount, still refreshes", async () => {
+  it("still refreshes after unmount", async () => {
     let release!: () => void;
     h.sendTx.mockImplementation(() => new Promise<string>((r) => { release = () => r("sig"); }));
     const { result, unmount } = setup();
