@@ -47,9 +47,11 @@ describe("Earn: selecting a vault on a phone brings the deposit rail into view",
     vi.unstubAllGlobals();
   });
 
-  it("scrolls the rail into view when a row is tapped below lg", () => {
+  it("scrolls the rail into view when a row is tapped below lg", async () => {
     atWidth(false);
     render(<EarnVaultView />);
+    // The rail is a next/dynamic chunk: wait for it before reading it.
+    await screen.findByTestId("rail");
     fireEvent.click(screen.getAllByText("TRENDS")[0]);
     expect(screen.getByTestId("rail")).toHaveTextContent(OTHER);
     expect(scrolled).toHaveLength(1);
@@ -59,17 +61,21 @@ describe("Earn: selecting a vault on a phone brings the deposit rail into view",
     expect(scrolled[0]).toHaveClass("scroll-mt-24");
   });
 
-  it("doesn't scroll on desktop, where the rail is beside the table", () => {
+  it("doesn't scroll on desktop, where the rail is beside the table", async () => {
     atWidth(true);
     render(<EarnVaultView />);
+    // The rail is a next/dynamic chunk: wait for it before reading it.
+    await screen.findByTestId("rail");
     fireEvent.click(screen.getAllByText("TRENDS")[0]);
     expect(screen.getByTestId("rail")).toHaveTextContent(OTHER);
     expect(scrolled).toHaveLength(0);
   });
 
-  it("doesn't scroll on the initial auto-select of the first vault", () => {
+  it("doesn't scroll on the initial auto-select of the first vault", async () => {
     atWidth(false);
     render(<EarnVaultView />);
+    // The rail is a next/dynamic chunk: wait for it before reading it.
+    await screen.findByTestId("rail");
     expect(screen.getByTestId("rail")).toHaveTextContent(FIRST);
     expect(scrolled).toHaveLength(0);
   });

@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { useEarnStats } from '@/hooks/useEarnStats';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { VaultGrid } from '@/components/earn/VaultGrid';
-import { VaultDepositRail } from '@/components/earn/VaultDepositRail';
 import { useEarnPositions } from '@/hooks/useEarnPositions';
 import { useWalletCompat } from '@/hooks/useWalletCompat';
 import { formatCompact } from '@/lib/formatters';
@@ -13,6 +12,22 @@ import { limitsFlags } from '@/lib/limits/flags';
 import { COPY } from '@/lib/limits/copy';
 import { isDevnetV22Enabled } from '@/lib/v22/flag';
 import { V22_COPY } from '@/lib/v22/copy';
+
+// The deposit rail (deposit/withdraw panel, exit/tranche panels, bond + rescue cards and their
+// hooks) is the bulk of the Vaults tab's JS, so it loads after the page. The placeholder is a sized
+// panel (the empty card is shorter, so the column can settle once the rail mounts).
+const VaultDepositRail = dynamic(
+  () => import('@/components/earn/VaultDepositRail').then((m) => m.VaultDepositRail),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-8 min-h-[16rem] hud-corners" aria-busy="true">
+        <ShimmerSkeleton className="mx-auto h-3 w-32" />
+        <ShimmerSkeleton className="mx-auto mt-3 h-3 w-56 max-w-full" />
+      </div>
+    ),
+  },
+);
 
 const EarnHeader = dynamic(
   () => import('@/components/earn/EarnHeader').then((m) => m.EarnHeader),
