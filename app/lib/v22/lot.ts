@@ -75,7 +75,7 @@ export function tokenQToQ(tokenQ: bigint, lotExp: number): { q: bigint; remainde
 export const LOT_NOTE = "1 lot = 10^lotExp tokens";
 
 // ── Trade-surface helpers (G3) ───────────────────────────────────────────
-import { formatMarkPrice, formatTokenAmount, formatUsdPriceE6 } from "../format";
+import { formatMarkPrice, formatTokenAmount, formatUsdPriceE6, formatSpreadUsd } from "../format";
 
 /**
  * Whole lots only: a Q is truncated toward zero to a lot multiple (SDK `quantizeQToLotsV22`) and the remainder is
@@ -134,4 +134,22 @@ export function lotOrderQ(marginDerivedQ: bigint, typedTokenQ: bigint | null, lo
     if (typedQ > 0n && diff <= POS_SCALE_V22) source = typedQ;
   }
   return quantizeQToLots(source, lotExp);
+}
+
+/**
+ * Mark-vs-index spread line: "+$0.06 (+0.03%)". Byte-identical to the old card output at lotExp = 0.
+ * The sign of BOTH parts comes from the exact per-lot difference (`mark - index`), never from the per-token
+ * value: that is BigInt-truncated toward zero, so a negative spread under $0.000001 per token became 0n
+ * and the card read "−$0.0000001 (+0.05%)".
+ */
+export function formatLotSpread(markE6: bigint, indexE6: bigint, spreadBps: number, lotExp: number): string {
+  const lotDiff = markE6 - indexE6;
+  const spreadAbs = lotPriceToTokenE6(lotDiff, lotExp);
+  const sign = lotDiff >= 0n ? "+" : "−";
+  const pctPart = spreadBps === 0 ? "0.00%" : `${sign}${Math.abs(spreadBps / 100).toFixed(2)}%`;
+  if (lotExp > 0) {
+    if (lotDiff === 0n) return `$0.00 (${pctPart})`;
+    return `${lotDiff > 0n ? "+" : "−"}${formatLotPriceE6(lotDiff < 0n ? -lotDiff : lotDiff, lotExp)} (${pctPart})`;
+  }
+  return `${formatSpreadUsd(spreadAbs)} (${pctPart})`;
 }
