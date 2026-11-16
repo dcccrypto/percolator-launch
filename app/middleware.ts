@@ -29,6 +29,7 @@ import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
 import { parseBlocklist, isIpBlocked } from "@/lib/ip-blocklist";
 import { gateDecision, LOCKED_PATH, SESSION_COOKIE } from "@/lib/playground-gate";
 import { trustedProxyDepth } from "@/lib/trusted-proxy-depth";
+import { resolveClientIp } from "@/lib/middleware-client-ip";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
@@ -200,7 +201,7 @@ const _rawBlocklist = (process.env.IP_BLOCKLIST ?? "")
 const _blocklist = parseBlocklist(_rawBlocklist, (entry, reason) => {
   console.warn(`[middleware] IP_BLOCKLIST: ignoring "${entry}" — ${reason}`);
 });
-// #3483: at depth 0 (no proxy) the client IP resolves to "unknown", which matches no entry,
+// #3483: at depth 0 (no proxy) the client IP resolves to "unknown-ip", which matches no entry,
 // so a configured blocklist cannot apply. Say so instead of looking protected.
 if (_blocklist.length > 0 && trustedProxyDepth() === 0) {
   console.warn("[middleware] IP_BLOCKLIST is set but TRUSTED_PROXY_DEPTH=0: the blocklist cannot match any request.");
@@ -413,18 +414,9 @@ export async function middleware(request: NextRequest) {
   // ── IP Blocklist check ─────────────────────────────────────────────────────
   // Resolve client IP using the same proxy-depth logic as the rate limiter.
   if (_blocklist.length > 0) {
-    const _proxyDepth = trustedProxyDepth();
-    let _clientIp = "unknown";
-    // NOTE: depth=0 means "no proxy" — _clientIp stays "unknown" and
-    // isIpBlocked("unknown", ...) returns false, so the blocklist cannot apply
-    // (warned once at module load, above).
-    if (_proxyDepth > 0) {
-      const _fwd = request.headers.get("x-forwarded-for");
-      if (_fwd) {
-        const _ips = _fwd.split(",").map((s) => s.trim());
-        _clientIp = _ips[Math.max(0, _ips.length - _proxyDepth)] ?? "unknown";
-      }
-    }
+    // depth 0 / short chain / non-IP hop -> "unknown-ip", which matches no entry
+    // (depth 0 warned once at module load, above).
+    const _clientIp = resolveClientIp(request.headers.get("x-forwarded-for"), trustedProxyDepth());
     if (isIpBlocked(_clientIp, _blocklist)) {
       return new NextResponse(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
@@ -525,16 +517,7 @@ export async function middleware(request: NextRequest) {
   // - TRUSTED_PROXY_DEPTH=1: One proxy layer (Vercel, Cloudflare) — use last IP
   // - TRUSTED_PROXY_DEPTH=2: Two proxy layers — use second-to-last IP
   // This prevents IP spoofing attacks via forged X-Forwarded-For headers.
-  const PROXY_DEPTH = trustedProxyDepth();
-  let ip = "unknown";
-  if (PROXY_DEPTH > 0) {
-    const forwarded = request.headers.get("x-forwarded-for");
-    if (forwarded) {
-      const ips = forwarded.split(",").map((s) => s.trim());
-      const idx = Math.max(0, ips.length - PROXY_DEPTH);
-      ip = ips[idx] ?? "unknown";
-    }
-  }
+  const ip = resolveClientIp(request.headers.get("x-forwarded-for"), trustedProxyDepth());
   const isApi = request.nextUrl.pathname.startsWith("/api/");
 
   if (isApi) {
