@@ -70,15 +70,14 @@ describe("middleware rate limiter — client IP resolution", () => {
     expect(await count429(mw, 130, (i) => `garbage-${i}`)).toBeGreaterThan(0);
   });
 
-  it("x-real-ip is never read", async () => {
-    const mw = await load({ TRUSTED_PROXY_DEPTH: "2" });
-    let i = 0;
+  it("x-real-ip is never read (no XFF + rotating x-real-ip shares one bucket)", async () => {
+    const mw = await load({ TRUSTED_PROXY_DEPTH: "1" });
     let blocked = 0;
-    for (; i < 130; i++) {
-      const res = await mw(req(`10.2.0.${i + 1}`, { "x-real-ip": `10.3.0.${i + 1}` }));
+    for (let i = 0; i < 130; i++) {
+      const res = await mw(req(null, { "x-real-ip": `10.3.0.${i + 1}` }));
       if (res.status === 429) blocked++;
     }
-    expect(blocked).toBeGreaterThan(0);
+    expect(blocked).toBe(10);
   });
 
   it("correctly sized chain: each client has its own bucket, caller prefix ignored", async () => {
@@ -115,5 +114,28 @@ describe("middleware IP blocklist — client IP resolution", () => {
   it("depth 1: last hop is the client (unchanged)", async () => {
     const mw = await load({ TRUSTED_PROXY_DEPTH: "1", IP_BLOCKLIST: "9.9.9.9" });
     expect((await mw(req("1.1.1.1, 9.9.9.9"))).status).toBe(403);
+  });
+});
+
+import { resolveClientIp, UNKNOWN_IP } from "@/lib/middleware-client-ip";
+describe("resolveClientIp", () => {
+  it.each([
+    ["1.2.3.4", 1, "1.2.3.4"],
+    ["9.9.9.9, 1.2.3.4", 1, "1.2.3.4"],
+    ["1.2.3.4, 5.6.7.8", 2, "1.2.3.4"],
+    ["a, 1.1.1.1, 2.2.2.2, 3.3.3.3", 3, "1.1.1.1"],
+    ["1.1.1.1, 2.2.2.2, 3.3.3.3", 3, "1.1.1.1"],
+    ["[2001:db8::1]:443", 1, "[2001:db8::1]:443"],
+    ["2001:db8::1", 1, "2001:db8::1"],
+    ["1.2.3.4:5555", 1, "1.2.3.4:5555"],
+    ["1.2.3.4", 2, UNKNOWN_IP],
+    ["1.1.1.1, 2.2.2.2", 3, UNKNOWN_IP],
+    ["1.2.3.4", 0, UNKNOWN_IP],
+    [null, 1, UNKNOWN_IP],
+    ["", 1, UNKNOWN_IP],
+    ["1.2.3.4, garbage", 1, UNKNOWN_IP],
+    ["1.2.3.4,", 1, UNKNOWN_IP],
+  ])("%s depth %i -> %s", (xff, depth, want) => {
+    expect(resolveClientIp(xff, depth)).toBe(want);
   });
 });
