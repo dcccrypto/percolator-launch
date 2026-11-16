@@ -84,6 +84,7 @@ vi.mock("@/lib/portfolio-invalidation", () => ({ invalidatePortfolio: vi.fn() })
 vi.mock("@/lib/matcherCaps", () => ({ getMatcherCaps: vi.fn(async () => null), getLpInventoryState: vi.fn(async () => null) }));
 vi.mock("@/lib/position-change", () => ({
   readBeforeTrade: vi.fn(async () => 0n),
+  readBeforeTradeFull: vi.fn(async () => ({ q: 0n, funding: null })),
   measurePositionChange: vi.fn(async () => ({ beforeQ: 0n, afterQ: 0n })),
   recordPositionChange: vi.fn(),
 }));

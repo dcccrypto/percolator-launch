@@ -44,6 +44,8 @@ vi.mock("@/lib/priceStore/priceStore", async (orig) => ({
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccountIdle: () => null, getMockUserAccount: () => null }));
 vi.mock("@/lib/tx", async (orig) => ({ ...(await orig<typeof import("@/lib/tx")>()), prewarmTxLanding: vi.fn() }));
 vi.mock("@/lib/position-change", () => ({ takePositionChange: async () => mocks.change }));
+// The chain's newest position change before this fill (Council r10 round 2 MED): "own" = the one the saved records below include.
+vi.mock("@/lib/entry-chain-prev", () => ({ prevChangeBeforeFill: async () => "own" }));
 vi.mock("@/components/trade/DepositWithdrawCard", () => ({ DepositWithdrawCard: () => null }));
 vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 vi.mock("@/components/trade/TradeConfirmationModal", () => ({
@@ -175,7 +177,7 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
   });
 
   it("an add averages the saved entry with the price PAID on this fill (the booked prices are averaged beside it for risk math)", async () => {
-    saveEntryPrice(SLAB, 0, 90_000_000n, 3, W, FILLED);
+    saveEntryPrice(SLAB, 0, 90_000_000n, 3, W, FILLED, { lastSig: "own" });
     withPosition(FILLED, 1_000_000n);
     mocks.change = { beforeQ: FILLED, afterQ: 2n * FILLED };
     mocks.getTransaction.mockResolvedValue(landed(BOOKED));
@@ -201,14 +203,27 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
   });
 
   it("probe A: an ADD from existing capital keeps the book (size match), so the later close reports the whole trade", async () => {
-    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 90_000_000n, fees: 5_000n, pnl: 0n, fundingBase: 0n });
+    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 90_000_000n, fees: 5_000n, pnl: 0n, fundingBase: 0n, lastSig: "own" });
     withPosition(FILLED, 1_000_000n);
     mocks.change = { beforeQ: FILLED, afterQ: 2n * FILLED };
     mocks.getTransaction.mockResolvedValue(landed(BOOKED));
     render(<OrderTicket slabAddress={SLAB} />);
     await submit("5");
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(loadBook(W, SLAB, WALLET.toBase58())).toMatchObject({ q: 2n * FILLED, fees: 5_000n + FEE });
+    expect(loadBook(W, SLAB, WALLET.toBase58())).toMatchObject({ q: 2n * FILLED, fees: 5_000n + FEE, lastSig: SIG });
+  });
+
+  it("Council r10 round 2 MED: an ADD onto a same-size position reopened on another device (the saved Entry and book are of the OLD one) carries neither on", async () => {
+    saveEntryPrice(SLAB, 0, 90_000_000n, 3, W, FILLED, { lastSig: "older" });
+    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 90_000_000n, fees: 5_000n, pnl: 0n, fundingBase: 0n, lastSig: "older" });
+    withPosition(FILLED, 1_000_000n);
+    mocks.change = { beforeQ: FILLED, afterQ: 2n * FILLED };
+    mocks.getTransaction.mockResolvedValue(landed(BOOKED));
+    render(<OrderTicket slabAddress={SLAB} />);
+    await submit("5");
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(getSavedEntry(SLAB, 0, W)).toBeNull(); // unknown until the chain rebuild, never the old average
+    expect(loadBook(W, SLAB, WALLET.toBase58())).toBeNull();
   });
 
   it("L-3: the size measurement FAILED and the render-time position is not flat (it may be stale): the book is dropped and NO result is claimed, even for a short that would 'close' the old long", async () => {

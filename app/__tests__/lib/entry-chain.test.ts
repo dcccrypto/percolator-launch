@@ -25,6 +25,8 @@ const effective = (q: bigint, booked: bigint, spreadBps: bigint) => (q > 0n ? bo
 type Tx = { logs: string[]; err?: unknown; signed?: bigint };
 // a wrapper-free transaction (a deposit, a crank): well-formed logs, no event
 const NOISE = ["Program 11111111111111111111111111111111 invoke [1]", "Program 11111111111111111111111111111111 success"];
+// a keeper crank as it lands on devnet (signer FbTbDe…, 3 wrapper instructions): the wrapper runs, logs no event, changes no size
+const CRANK = [0, 1, 2].flatMap(() => [`Program ${WRAPPER.toBase58()} invoke [1]`, `Program ${WRAPPER.toBase58()} consumed 160425 of 1399700 compute units`, `Program ${WRAPPER.toBase58()} success`]);
 /** TradeCpi instruction data (85 bytes): tag 10, asset u16 @41, fee_bps u64 @67. */
 function tradeCpiData(feeBps: bigint, asset = 0): Uint8Array {
   const b = Buffer.alloc(85);
@@ -46,7 +48,8 @@ function conn(txs: Record<string, Tx>, order: string[], opt: { failSigs?: boolea
     return {
       slot: 1,
       meta: { err: txs[sig].err ?? null, logMessages: txs[sig].logs },
-      transaction: { message: signed === undefined ? { staticAccountKeys: [], compiledInstructions: [] } : { staticAccountKeys: [WRAPPER], compiledInstructions: [{ programIdIndex: 0, data: tradeCpiData(signed) }] } },
+      // A transaction whose logs show the wrapper running names it among its accounts (the runtime requires it); a wrapper-free one does not.
+      transaction: { message: signed === undefined ? { staticAccountKeys: txs[sig].logs.some((l) => l.startsWith(`Program ${WRAPPER.toBase58()} invoke`)) ? [WRAPPER] : [], compiledInstructions: [] } : { staticAccountKeys: [WRAPPER], compiledInstructions: [{ programIdIndex: 0, data: tradeCpiData(signed) }] } },
     };
   });
   return { getSignaturesForAddress, getTransaction } as unknown as Parameters<typeof entryFromChain>[0] & { getSignaturesForAddress: typeof getSignaturesForAddress; getTransaction: typeof getTransaction };
@@ -146,14 +149,14 @@ describe("entryFromChain: honest unknowns (the device cache is then left as it w
     expect((await run(conn({}, [], { failSigs: true }), T)).verdict).toBe("unreadable");
     expect((await run(conn({ s1: fill(T, 100_000_000n, 20n) }, ["s1"], { failTx: "s1" }), T)).verdict).toBe("unreadable");
   });
-  it("the transaction limit is reached before the open: incomplete, and it stops reading (bounded RPC)", async () => {
+  it("the read limit is reached before the open: incomplete, and it stops reading (bounded RPC)", async () => {
     const txs: Record<string, Tx> = {};
     const order: string[] = [];
-    for (let i = 0; i < 40; i++) { txs[`n${i}`] = { logs: NOISE }; order.push(`n${i}`); }
+    for (let i = 0; i < 40; i++) { txs[`n${i}`] = { logs: CRANK }; order.push(`n${i}`); }
     txs.open = fill(T, 100_000_000n, 20n);
     order.push("open");
     const c = conn(txs, order);
-    const r = await run(c, T, { maxTx: 12, pageSize: 10 });
+    const r = await run(c, T, { maxRead: 12, pageSize: 10, concurrency: 4 });
     expect(r.verdict).toBe("incomplete");
     expect(c.getTransaction.mock.calls.length).toBeLessThanOrEqual(12);
     expect(c.getSignaturesForAddress.mock.calls.length).toBeLessThanOrEqual(2);

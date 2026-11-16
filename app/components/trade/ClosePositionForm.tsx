@@ -52,10 +52,16 @@ export interface ClosePositionFormProps {
   /**
    * r10 owner decision 1: funding the position has paid so far (collateral atoms, WHOLE position, negative = received): what the chain has
    * already moved since the trade opened plus what has accrued and is not yet settled (lib/funding-flow.ts). It is part of the net result, so
-   * the estimate and the realised "Trade result" agree. null = it could not be worked out (opened on another device, a read failed): the net then
-   * stands but is tagged "excl. funding" (never green). Omitted = the caller does not supply it (no tag, nothing subtracted).
+   * the estimate and the realised "Trade result" agree. On a device that did not place the trade it comes from the book rebuilt from chain (the
+   * opening fill's funding memo). null = the chain cannot state it (no memo on the opening fill, a read failed): the net then stands but is tagged
+   * "excl. funding" (never green). Omitted = the caller does not supply it (no tag, nothing subtracted).
    */
   fundingPaidAtoms?: bigint | null;
+  /**
+   * Council r10 recheck: `fundingPaidAtoms` is null only for a moment (the market and portfolio reads are out of order around a keeper crank).
+   * With no held figure the net shows as loading ("--"), never as "excl. funding".
+   */
+  fundingLoading?: boolean;
   /** r10 (#3817 MED-1): the market may charge holding rent, which no figure here includes: the net is tagged "excl. holding fee" (never green). */
   holdingFeeExcluded?: boolean;
   currentPrice: bigint;
@@ -165,6 +171,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   busyOpenFeeAtoms = null,
   busyFeeMayApply = false,
   fundingPaidAtoms: fundingPaidAtomsRaw,
+  fundingLoading,
   holdingFeeExcluded,
   currentPrice: liveCurrentPrice,
   capital,
@@ -276,12 +283,13 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     // r10: the closed part's share of the funding the position has paid so far (signed, toward zero), never a guess when unknown.
     const fundingKnown = fundingPaidAtoms != null;
     const fundingShare = fundingKnown && absPosition > 0n ? (fundingPaidAtoms * closeAbs) / absPosition : 0n;
-    const netExclFunding = fundingPaidAtoms === null;
+    const fundingWait = fundingPaidAtoms === null && fundingLoading === true;
+    const netExclFunding = fundingPaidAtoms === null && !fundingWait;
     const netExclHolding = holdingFeeExcluded === true;
-    const netResult = entryPrice > 0n && !feeLoading ? pnl - closeFee - openFee - busyOpenFee - fundingShare : null;
+    const netResult = entryPrice > 0n && !feeLoading && !fundingWait ? pnl - closeFee - openFee - busyOpenFee - fundingShare : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, busyOpenFee, fundingShare, netExclFunding, netExclHolding, netExclBusy, netResult, feeLoading, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
-  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals, busyOpenFeeAtoms, busyFeeMayApply, fundingPaidAtoms, holdingFeeExcluded]);
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, openFee, busyOpenFee, fundingShare, netExclFunding, netExclHolding, netExclBusy, netResult, feeLoading, fundingWait, netExclSpread: spreadUnavailable, feeEstimated, balanceAfter, spread };
+  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals, busyOpenFeeAtoms, busyFeeMayApply, fundingPaidAtoms, fundingLoading, holdingFeeExcluded]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
@@ -422,7 +430,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
               --
             </span>
           ) : net === null ? (
-            <span className="font-mono font-medium text-[var(--text-muted)]" title="Waiting for the closing fee and spread estimate" data-testid="close-net-loading">
+            <span className="font-mono font-medium text-[var(--text-muted)]" title={preview.fundingWait ? "Waiting for the funding figure" : "Waiting for the closing fee and spread estimate"} data-testid="close-net-loading">
               --
             </span>
           ) : (

@@ -178,7 +178,6 @@ describe("usePortfolio trigger (shouldSyncPosition)", () => {
     expect(shouldSyncPosition(row({ entryPriceSource: "derived" }), WALLET)).toBe(true);
   });
   it.each([
-    ["a current device entry (cache)", { entryPriceSource: "cache" }],
     ["a server entry", { entryPriceSource: "server" }],
     ["an NFT-wrapped position", { nftWrapped: true }],
     ["an unreadable ADL state", { adlKnown: false }],
@@ -253,10 +252,10 @@ describe("N3: a chain record is vouched for by the portfolio's newest signature"
     await syncChainEntry(conn, target(), () => t);
     expect(getSavedEntry(SLAB, 0, WALLET)).toBeNull();
   });
-  it("trigger: a chain-sourced record (chainSig) is a candidate to re-verify; a device-written one is not", async () => {
+  it("trigger: every cached record is a candidate to re-verify, the device's own too (a same-size reopen elsewhere keeps the size)", async () => {
     const row = { slabAddress: SLAB, idx: 0, adlKnown: true, effectiveSize: 2n * T, portfolioPk: portfolio, entryPriceSource: "cache", account: { positionSize: 2n * T } };
     saveEntryPrice(SLAB, 0, 100_000_000n, 2, WALLET, 2n * T);
-    expect(shouldSyncPosition(row, WALLET)).toBe(false);
+    expect(shouldSyncPosition(row, WALLET)).toBe(true);
     saveEntryPrice(SLAB, 0, 100_000_000n, 2, WALLET, 2n * T, { chainSig: "sigA" });
     expect(shouldSyncPosition(row, WALLET)).toBe(true);
   });

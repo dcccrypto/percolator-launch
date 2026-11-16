@@ -10,6 +10,7 @@ import { resolveUserMessage } from "@/lib/limits/user-message";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { executeV22MultiAssetOrder, HealthCheckStaleError, MAX_PEER_CRANKS, MAX_TWO_TX_REPEATS, marketAssetSlots, needsMultiAssetShape, planV22TradeRefresh, type MultiAssetOrderDeps, type MultiAssetOrderInput, type MultiAssetSendKind, type RefreshSim, type TradeRefreshDeps, type TradeRefreshInput } from "@/lib/v22/trade-refresh";
 import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
+import { fundingMemoIx } from "@/lib/funding-memo";
 
 interface Ser { programId: string; keys: string[]; data: string }
 const FX = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-q7-devnet-2026-10-12.json"), "utf8")) as {
@@ -141,6 +142,17 @@ describe("multi-asset order flow (fresh-taker fix): the body alone, cranks only 
     return { d, sent, sleeps };
   }
   const bodyOnly = (ixs: readonly TransactionInstruction[]) => cranksOf(ixs).length === 0;
+
+  it("Council r10 recheck: an open carrying the funding memo FIRST in its body still gets the 121 refresh (the trade stays last)", async () => {
+    const memo = fundingMemoIx(442_997n);
+    const [a] = [k()];
+    const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : { ...ok, consumed: 900_000 }), [a, P, LP]);
+    const r = await executeV22MultiAssetOrder(input({ body: [memo, deposit, trade] }), d);
+    expect(r.path).toBe("oneTx");
+    expect(sent[0].kind).toBe("orderWithRefresh");
+    expect(cranksOf(sent[0].ixs).length).toBeGreaterThan(0);
+    expect(sent[0].ixs.slice(-3)).toEqual([memo, deposit, trade]);
+  });
 
   it("fast path: the body simulates OK and goes ALONE; no peers read, no crank", async () => {
     const { d, sent } = mk(() => ok);

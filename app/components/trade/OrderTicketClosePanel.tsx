@@ -36,6 +36,8 @@ export interface OrderTicketClosePanelProps {
   busyOpenFeeAtoms?: bigint | null;
   /** r10: funding the position has paid so far (atoms, whole position, negative = received); null = unknown; omitted = not supplied. */
   fundingPaidAtoms?: bigint | null;
+  /** Council r10 recheck: see ClosePositionForm. */
+  fundingLoading?: boolean;
   /** r10: the market may charge a holding fee that the net result does not include. */
   holdingFeeExcluded?: boolean;
   capital: bigint;
@@ -96,6 +98,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   riskEntryPriceE6,
   busyOpenFeeAtoms,
   fundingPaidAtoms,
+  fundingLoading,
   holdingFeeExcluded,
   capital,
   symbol,
@@ -243,6 +246,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         riskEntryPrice={riskEntryPriceE6}
         busyOpenFeeAtoms={busyOpenFeeAtoms}
         fundingPaidAtoms={fundingPaidAtoms}
+          fundingLoading={fundingLoading}
         holdingFeeExcluded={holdingFeeExcluded}
         busyFeeMayApply={closeFeeBpsFor.busyFeeMayApply === true}
         currentPrice={currentPriceE6}
