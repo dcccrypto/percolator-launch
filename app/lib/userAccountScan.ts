@@ -722,7 +722,8 @@ export function triggerHeldNftScan(params: HeldNftScanParams): Promise<HeldNftRa
         entry.throttle.trailingTimer = null;
         const latest = latestHeldNftParams.get(key);
         latestHeldNftParams.delete(key);
-        if (latest) void triggerHeldNftScan({ ...latest, minIntervalMs: undefined });
+        // A first-scan failure now rejects; the trailing fire-and-forget has no caller, so swallow it (already logged).
+        if (latest) triggerHeldNftScan({ ...latest, minIntervalMs: undefined }).catch(() => {});
       }, wait);
     }
     return entry.inFlight ?? Promise.resolve(entry.snapshot ?? []);
