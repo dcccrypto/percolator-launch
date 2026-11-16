@@ -112,7 +112,7 @@ describe("source guards (components that need providers to render)", () => {
     ["components/trade/FundingRateCard.tsx", /qToTokenQ\(absPosition, lotExpOf\(raw\)\)/],
     ["components/trade/MarketStatsCard.tsx", /formatLotPriceE6\(markPriceE6 !== null \? markPriceE6 : /],
     ["components/trade/MarketStatsCard.tsx", /formatLotPriceE6\(indexPriceE6, lotExp\)/],
-    ["components/trade/MarketStatsCard.tsx", /lotPriceToTokenE6\(markPriceE6 - indexPriceE6, lotExp\)/],
+    ["components/trade/MarketStatsCard.tsx", /formatLotSpread\(markPriceE6 as bigint, indexPriceE6 as bigint, spreadBps, lotExp\)/],
     ["components/market/MarketBrowser.tsx", /<LotOpenInterest slab=\{slab\} oiQ=\{m\.engine\.totalOpenInterest\}/],
     ["app/markets/page.tsx", /resolveDiscoveredPriceUsd\(m\.onChain, lotOf\(m\.onChain\)\)/],
   ];

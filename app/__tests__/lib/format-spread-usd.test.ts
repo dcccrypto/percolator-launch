@@ -27,9 +27,14 @@ describe("formatSpreadUsd", () => {
 describe("MarketStatsCard spread", () => {
   const src = readFileSync(join(__dirname, "..", "..", "components/trade/MarketStatsCard.tsx"), "utf8");
 
+  // The spread text is built by formatLotSpread (lib/v22/lot.ts); the card only calls it.
+  const lotSrc = readFileSync(join(__dirname, "..", "..", "lib/v22/lot.ts"), "utf8");
+
   it("uses formatSpreadUsd and an unsigned 0.00% for a zero spread", () => {
-    expect(src).toContain("formatSpreadUsd(spreadAbs)");
-    expect(src).toContain('spreadBps === 0 ? "0.00%"');
+    expect(src).toContain("formatLotSpread(");
+    expect(lotSrc).toContain("formatSpreadUsd(spreadAbs)");
+    expect(lotSrc).toContain('spreadBps === 0 ? "0.00%"');
     expect(src).not.toMatch(/formatUsd\(absSpread\)\.replace/);
+    expect(lotSrc).not.toMatch(/formatUsd\(absSpread\)\.replace/);
   });
 });
