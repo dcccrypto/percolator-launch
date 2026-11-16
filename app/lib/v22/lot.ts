@@ -145,7 +145,7 @@ export function lotOrderQ(marginDerivedQ: bigint, typedTokenQ: bigint | null, lo
 export function formatLotSpread(markE6: bigint, indexE6: bigint, spreadBps: number, lotExp: number): string {
   const lotDiff = markE6 - indexE6;
   const spreadAbs = lotPriceToTokenE6(lotDiff, lotExp);
-  const sign = spreadAbs >= 0n ? "+" : "−"; // BASELINE (pre-fix) sign source
+  const sign = lotDiff >= 0n ? "+" : "−";
   const pctPart = spreadBps === 0 ? "0.00%" : `${sign}${Math.abs(spreadBps / 100).toFixed(2)}%`;
   if (lotExp > 0) {
     if (lotDiff === 0n) return `$0.00 (${pctPart})`;
