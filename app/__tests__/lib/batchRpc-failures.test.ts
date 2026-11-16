@@ -36,6 +36,7 @@ describe("batchRpc failure handling", () => {
     globalThis.fetch = originalFetch;
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("partial batch: a missing id resolves a JSON-RPC error for that caller only (not null/empty)", async () => {
@@ -76,7 +77,7 @@ describe("batchRpc failure handling", () => {
     }
   });
 
-  it("429 exhaustion resolves a -32005 error for all callers (honours Retry-After, then gives up)", async () => {
+  it("429 exhaustion resolves a -32005 error for all callers (then gives up)", async () => {
     const f = vi.fn().mockResolvedValue(status(429, { "Retry-After": "1" }));
     globalThis.fetch = f;
     const { enqueue } = createBatchRpc({ endpoint: EP, batchWindowMs: 10, maxRetries: 1, initialBackoffMs: 5 });
@@ -143,7 +144,7 @@ describe("batchRpc failure handling", () => {
     });
     globalThis.fetch = f;
     const { enqueue } = createBatchRpc({ endpoint: EP, batchWindowMs: 10, maxBatchSize: n, maxQueueSize: 10_000 });
-    // Fast flush is not triggered: use a non-fast method; fill n+1 so chunk boundary splits 1 + n... first n flush at once
+    // n+1 reads: the first n flush together when the cap is hit, the last goes alone after the window
     const ps = Array.from({ length: n + 1 }, (_, i) => enqueue("getAccountInfo", [`k${i}`]));
     const settled = ps.map((p) => p.then((v) => ({ v }), (e: Error) => ({ e })));
     await vi.advanceTimersByTimeAsync(100);
@@ -152,7 +153,7 @@ describe("batchRpc failure handling", () => {
     expect(JSON.parse((out[n] as { v: string }).v).result).toBe(n + 1);
   });
 
-  it("maxBatchSize is clamped to RPC_MAX_BATCH_SIZE and floors at 1", async () => {
+  it("maxBatchSize floors at 1", async () => {
     const f = vi.fn().mockImplementation(async (_u: string, init: { body: string }) => {
       const body = JSON.parse(init.body) as { id: number }[];
       return ok(body.map((b) => ({ jsonrpc: "2.0", result: b.id, id: b.id })));
@@ -166,7 +167,7 @@ describe("batchRpc failure handling", () => {
     for (const c of f.mock.calls) expect(JSON.parse(c[1].body)).toHaveLength(1);
   });
 
-  it("sequential failed batches double the cooldown; success resets it", async () => {
+  it("a failed batch starts a cooldown; reads queue until it ends, then flush", async () => {
     const f = vi
       .fn()
       .mockResolvedValueOnce(status(503))
@@ -292,7 +293,6 @@ describe("batchRpc failure handling", () => {
       const a = getBatchRpc();
       expect(getBatchRpc()).toBe(a);
       expect(() => invalidateRpcReadDedupe()).not.toThrow();
-      vi.unstubAllGlobals();
     });
   });
 });
