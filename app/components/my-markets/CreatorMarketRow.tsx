@@ -32,7 +32,7 @@ import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { formatUsdFromNumber, formatStatValue, formatSlotAge } from "@/lib/format";
 import { detectOracleMode, sanitizePriceE6, applyInvert, priceE6ToUsd } from "@/lib/oraclePrice";
 import { CreatorTranchePanel } from "@/components/limits/CreatorLimits";
-import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
+import { ADMIN_BURN_COPY } from "@/lib/admin-burn-text";
 import { sanitizeDecimalInput } from "@/lib/decimal-input";
 import { EARN_FLOOR_COPY, earnDeadShareFloorPresent } from "@/lib/v22/resolved-claims";
 import { staleMinutes, staleResolveStatusV22 } from "@/lib/v22/stale-resolve";

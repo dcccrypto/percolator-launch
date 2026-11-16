@@ -1,6 +1,6 @@
 "use client";
 
-import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
+import { tokenUsdOfLotUsd } from "@/lib/v22/lot-display";
 import { useCallback, useMemo, useState, useSyncExternalStore, type FC } from "react";
 import Link from "next/link";
 import useSWR from "swr";

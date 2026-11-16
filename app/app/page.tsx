@@ -6,7 +6,7 @@ import { ButtonLink } from "@/components/ui/Button";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveMarketRail } from "@/components/landing/LiveMarketRail";
 import { MAX_LEVERAGE_X } from "@/lib/market-params";
-import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
+import { ADMIN_BURN_COPY } from "@/lib/admin-burn-text";
 import { TrendingTokensRail } from "@/components/landing/TrendingTokensRail";
 import { InfoTabs } from "@/components/waitlist/InfoTabs";
 import { GradientText } from "@/components/ui/GradientText";
