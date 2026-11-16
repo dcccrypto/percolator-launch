@@ -176,7 +176,7 @@ describe("prevChangeCheck / prevChangeSig", () => {
   it("an unreconcilable change counts as a change", async () => {
     const twoAssets = fillEventLogs(WRAPPER, MARKET, [{ ...fillRec(T), executedQ: 0n }], PORTFOLIO);
     const r = await run(mk({ b: {}, odd: { logs: twoAssets } }, ["b", "odd"]));
-    expect(r.kind).toBe("sig");
+    expect(r).toEqual({ kind: "sig", sig: "odd" });
   });
   it("stopAt / known.top reached with no change in between returns the record", async () => {
     const c = mk({ b: {}, crank: {}, rec: {}, older: { logs: FILL(T) } }, ["b", "crank", "rec", "older"]);
@@ -190,7 +190,9 @@ describe("prevChangeCheck / prevChangeSig", () => {
     const order = ["b", ...Array.from({ length: 12 }, (_, i) => `c${i}`)];
     const txs: Record<string, Tx> = { b: {} };
     order.slice(1).forEach((s) => (txs[s] = {}));
-    expect(await run(mk(txs, order), { maxRead: 5 })).toEqual({ kind: "unknown" });
+    const withFill = { ...txs, c7: { logs: FILL(T) } };
+    expect(await run(mk(withFill, order), { maxRead: 5 })).toEqual({ kind: "unknown" });
+    expect(await run(mk(withFill, order))).toEqual({ kind: "sig", sig: "c7" });
     expect(await run(mk(txs, order), { paceMs: 1 })).toEqual({ kind: "unknown" });
     // page of 2: crossing a page boundary finds the change on page 2
     const o2 = ["b", "c0", "c1", "hit"];
@@ -272,7 +274,8 @@ describe("walletChangeCheck", () => {
     const many = Array.from({ length: 1000 }, (_, i) => `s${i}`);
     const txs: Record<string, Tx> = {};
     many.forEach((s) => (txs[s] = { slot: 9 }));
-    expect(await run(mk(txs, many), { maxPages: 1 })).toEqual({ kind: "unknown" });
+    expect(await run(mk({ ...txs, rec: { slot: 5 } }, [...many, "rec"]), { maxPages: 1 })).toEqual({ kind: "unknown" });
+    expect(await run(mk({ ...txs, rec: { slot: 5 } }, [...many, "rec"]), { maxPages: 2, maxRead: 2000 })).toEqual({ kind: "current" });
     // a full page followed by the record: continues to the next page and reads them all
     const order = [...many, "rec"];
     expect(await run(mk({ ...txs, rec: { slot: 5 } }, order), { maxRead: 2000, paceMs: 1 })).toEqual({ kind: "current" });
@@ -328,7 +331,7 @@ describe("entryFromChain: limits, resume and memo", () => {
     expect(r.verdict).toBe("chain");
     expect(r.entry?.fills).toBe(3);
   });
-  it("a noBusyCap that throws is treated as unreadable (unknown entry on a growth market)", async () => {
+  it("a noBusyCap that throws gives no cap (unexplained entry on a growth market)", async () => {
     const data = new Uint8Array(85);
     data[0] = 10;
     const c = mk({ open: { logs: FILL(T), keys: [WRAPPER], ixs: [{ programIdIndex: 0, data }] } }, ["open"]);
@@ -367,6 +370,6 @@ describe("entryFromChain: limits, resume and memo", () => {
   it("a REDUCE with a unit we cannot reconcile is a mismatch", async () => {
     const logs = reduceEventLogs(WRAPPER, MARKET, PORTFOLIO, { reason: 1, signedReducedQ: -T });
     const r = await go(mk({ x: { logs } }, ["x"]), T);
-    expect(["mismatch", "unreadable"]).toContain(r.verdict);
+    expect(r.verdict).toBe("mismatch");
   });
 });
