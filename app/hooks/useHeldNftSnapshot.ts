@@ -8,7 +8,7 @@ import { getHeldNftSnapshot, makeHeldNftScanKey, subscribeHeldNftScan, type Held
 /**
  * Subscribes to the shared held-NFT store for `wallet`. The returned snapshot is referentially stable until a
  * scan publishes a CHANGED result, so including it in an effect's deps re-runs that effect when a throttled
- * trailing scan lands (triggerHeldNftScan itself resolves with the stale snapshot while throttled).
+ * trailing scan lands (triggerHeldNftScan itself resolves with the stale snapshot while throttled (rejects if none has succeeded yet)).
  */
 export function useHeldNftSnapshot(wallet: PublicKey | null): HeldNftRaw[] | null {
   const walletStr = wallet?.toBase58() ?? null;
