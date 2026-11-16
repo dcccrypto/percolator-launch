@@ -211,6 +211,21 @@ describe("deposit (96)", () => {
     expect(vm.siblingLedger.equals(deriveLpBackingLedger(PROG, MARKET, 1)[0])).toBe(true);
   });
 
+  it("registry owned by another program is ignored (domain 0, decoder not asked); slots read are [registry, state, market]", async () => {
+    const regData = new Uint8Array([1, 2, 3]);
+    const stData = new Uint8Array([4, 5, 6]);
+    h.conn.getMultipleAccountsInfo = vi.fn(async () => [{ owner: k(), data: regData }, owned(stData), owned()]);
+    const { result } = renderHook(() => useJuniorTranche(MARKET.toBase58()));
+    await act(async () => void (await result.current.deposit(1n)));
+    expect(h.decodeDomain).not.toHaveBeenCalled();
+    expect(Array.from(h.decodeState.mock.calls[0][0])).toEqual([4, 5, 6]);
+    expect(h.deposit.mock.calls[0][0].ledger.equals(deriveLpBackingLedger(PROG, MARKET, 0)[0])).toBe(true);
+    const keys = h.conn.getMultipleAccountsInfo.mock.calls[0][0] as PublicKey[];
+    expect(keys[2].equals(MARKET)).toBe(true);
+    expect(keys[0].equals(h.deposit.mock.calls[0][0].registry)).toBe(true);
+    expect(keys[1].equals(h.deposit.mock.calls[0][0].vaultLpState)).toBe(true);
+  });
+
   it("registry that does not decode: domain 0", async () => {
     h.decodeDomain.mockReturnValue(null);
     const { result } = renderHook(() => useJuniorTranche(MARKET.toBase58()));
