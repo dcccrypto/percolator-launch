@@ -255,7 +255,7 @@ describe("struct-input functions", () => {
     }
     counts.rentRatesFromStateV22 = N_CASES; total += N_CASES;
     process.stdout.write(`rentRatesFromStateV22: ${diverged}/${N_CASES} diverge (${withOccupancyAbove85} above the 85% knee)\n`);
-    expect(diverged, `app rentRatesFromStateV22 omits occupancy rent + growth gate; first: ${firstRow}`).toBe(0);
+    expect(diverged, `app rentRatesFromStateV22 diverges from the SDK (occupancy rent + growth gate); first: ${firstRow}`).toBe(0);
   });
 });
 
