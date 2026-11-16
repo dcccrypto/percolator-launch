@@ -23,6 +23,7 @@ import {
   withLevGuardTailV22,
   TAG_LEV_GUARD_V22,
 } from "./sdk";
+import { LEV_GUARD_ACCOUNT_LEN_V2_V22 } from "@/lib/v22/sdk/lev-guard-v22";
 import { deriveVaultLpState } from "@/lib/limits/p3-ix";
 import { deriveVaultLpExt } from "@/lib/v21/sdk";
 import { rc23OpenLimits } from "@/lib/v21/growth-market";
@@ -157,11 +158,10 @@ export function planLevGuardLaunch(p: {
 }
 
 /**
- * Account length the rent is costed at. 4,456 B today; 4,472 B once percolator-prog #605 (burst-memory layout) lands. Costing the larger
- * keeps the SOL pre-check from under-counting either way (a few thousand lamports of headroom). The app never decodes a guard, so no
- * length is checked anywhere else.
+ * Account length the rent is costed at: the v2 guard, 4,600 B (16 B header + 488 B record + 4,096 B touched set; percolator-prog #721,
+ * SDK #491). The earlier layouts were 4,456 B and 4,472 B (#605); costing those under-counts the deposit the program needs.
  */
-export const LEV_GUARD_RENT_ACCOUNT_LEN = 4_472;
+export const LEV_GUARD_RENT_ACCOUNT_LEN = LEV_GUARD_ACCOUNT_LEN_V2_V22;
 
 /**
  * The launch creates a guard: v2.2 on, with a growth block and the vault-LP bind (the program answers 134 otherwise), on a wrapper that
