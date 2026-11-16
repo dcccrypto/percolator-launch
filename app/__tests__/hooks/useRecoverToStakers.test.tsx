@@ -40,7 +40,8 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 vi.mock("@percolatorct/sdk", async (orig) => {
   const { PublicKey: PK } = await import("@solana/web3.js");
   const fixed = new PK("11111111111111111111111111111112");
-  return { ...(await orig<typeof import("@percolatorct/sdk")>()), deriveStakePool: () => [fixed, 255], deriveStakeVaultAuth: () => [fixed, 255], deriveVaultAuthority: () => [fixed, 255] };
+  const poolKey = new PK("SysvarC1ock11111111111111111111111111111111");
+  return { ...(await orig<typeof import("@percolatorct/sdk")>()), deriveStakePool: (slab: PublicKey, prog?: PublicKey) => [prog && prog.toBase58() === "VmpVUArRnVkrjaPXQ2qaqCQa3ZrZFgsz7rjeALitF5w" ? poolKey : fixed, 255], deriveStakeVaultAuth: () => [fixed, 255], deriveVaultAuthority: () => [fixed, 255] };
 });
 vi.mock("@solana/spl-token", async (orig) => ({
   ...(await orig<typeof import("@solana/spl-token")>()),
@@ -74,7 +75,7 @@ function setup(o: { risk?: number; poolMode?: number; cap?: ReturnType<typeof ca
   h.wallet.publicKey = o.wallet === false ? null : CALLER;
   h.getAccountInfo.mockImplementation(async (key: PublicKey) => {
     if (key.equals(MARKET)) return { owner: WRAPPER, data: Buffer.alloc(8), lamports: 1 };
-    if (key) return { owner: STAKE, data: Buffer.alloc(8), lamports: 1 };
+    if (key.toBase58() === "SysvarC1ock11111111111111111111111111111111") return { owner: STAKE, data: Buffer.alloc(8), lamports: 1 };
     return { owner: WRAPPER, data: Buffer.alloc(8), lamports: 1 };
   });
 }

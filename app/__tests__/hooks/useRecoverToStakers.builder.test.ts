@@ -62,12 +62,15 @@ describe("buildRecoverIxs (accounts + data vs the SDK tag-29 builder)", () => {
     expect(ixs[0].programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(true);
     expect(ixs[0].keys[0].pubkey.equals(CALLER)).toBe(true);
     expect(ixs[0].keys[1].pubkey.equals(creatorToken)).toBe(true);
+    expect(ixs[0].keys[2].pubkey.equals(ADMIN)).toBe(true); // owner
+    expect(ixs[0].keys[3].pubkey.equals(MINT)).toBe(true); // mint
     expect(Array.from(ixs[0].data)).toEqual([1]); // CreateIdempotent
     expect(head(ixs[1])).toEqual(expectedHead);
     expect(ixs[1].keys).toHaveLength(11);
     expect(ixs[1].keys[9].pubkey.equals(deriveInsuranceUnitsV22(WRAPPER, MARKET)[0])).toBe(true);
     expect(ixs[1].keys[10].pubkey.equals(creatorToken)).toBe(true);
     expect(ixs[1].keys[9].isWritable && ixs[1].keys[10].isWritable).toBe(true);
+    expect(Buffer.from(ixs[1].data).readBigUInt64LE(1)).toBe(123_456n);
     expect(Buffer.from(ixs[1].data)[0]).toBe(29);
   });
 
@@ -75,6 +78,10 @@ describe("buildRecoverIxs (accounts + data vs the SDK tag-29 builder)", () => {
     const ixs = buildRecoverIxs(args(2));
     const creatorToken = getAssociatedTokenAddressSync(MINT, ADMIN, true);
     expect(ixs).toHaveLength(2);
+    expect(ixs[0].programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(true);
+    expect(head(ixs[1])).toEqual(expectedHead);
+    expect(ixs[1].keys[9].isWritable).toBe(true);
+    expect(Buffer.from(ixs[1].data).readBigUInt64LE(1)).toBe(123_456n);
     expect(ixs[1].keys).toHaveLength(10);
     expect(ixs[1].keys[9].pubkey.equals(creatorToken)).toBe(true);
   });
