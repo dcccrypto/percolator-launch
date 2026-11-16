@@ -706,12 +706,19 @@ export interface HeldNftScanParams {
  * key. Same dedup/keep-last-good/awaitable contract as `triggerPortfolioScan`
  * — see that function's doc and the module header.
  */
+/** No scan in flight: serve the snapshot, or reject if none has ever succeeded (never `[]` = "holds none"). */
+function heldNftSnapshotOrReject(entry: HeldNftEntry): Promise<HeldNftRaw[]> {
+  return entry.snapshot !== null
+    ? Promise.resolve(entry.snapshot)
+    : Promise.reject(new Error("held-NFT scan has no successful result yet"));
+}
+
 export function triggerHeldNftScan(params: HeldNftScanParams): Promise<HeldNftRaw[]> {
   const key = makeHeldNftScanKey(params.nftProgramId, params.wallet);
   const entry = getOrCreateHeldNftEntry(key);
 
   if (entry.lastTriggerRaw === params.raw) {
-    return entry.inFlight ?? Promise.resolve(entry.snapshot ?? []);
+    return entry.inFlight ?? heldNftSnapshotOrReject(entry);
   }
 
   const wait = throttleDelayMs(entry.throttle, params.minIntervalMs, entry.scanned, false);
@@ -726,7 +733,7 @@ export function triggerHeldNftScan(params: HeldNftScanParams): Promise<HeldNftRa
         if (latest) triggerHeldNftScan({ ...latest, minIntervalMs: undefined }).catch(() => {});
       }, wait);
     }
-    return entry.inFlight ?? Promise.resolve(entry.snapshot ?? []);
+    return entry.inFlight ?? heldNftSnapshotOrReject(entry);
   }
 
   entry.throttle.lastScanStartedAt = Date.now();

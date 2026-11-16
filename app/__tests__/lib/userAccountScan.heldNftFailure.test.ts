@@ -57,4 +57,20 @@ describe("held-NFT scan failure is not reported as 'holds none'", () => {
     const second = await triggerHeldNftScan({ connection: c, nftProgramId: pid, wallet, raw: new Uint8Array([4]) });
     expect(second).toHaveLength(1);
   });
+
+  it("throttled call after a failed first scan rejects instead of resolving []", async () => {
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    const pid = Keypair.generate().publicKey;
+    const wallet = Keypair.generate().publicKey;
+    const c = conn(async () => {
+      throw new Error("429");
+    });
+    const minIntervalMs = 10_000;
+    await expect(
+      triggerHeldNftScan({ connection: c, nftProgramId: pid, wallet, raw: new Uint8Array([5]), minIntervalMs }),
+    ).rejects.toThrow();
+    await expect(
+      triggerHeldNftScan({ connection: c, nftProgramId: pid, wallet, raw: new Uint8Array([6]), minIntervalMs }),
+    ).rejects.toThrow();
+  });
 });
