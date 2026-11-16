@@ -389,13 +389,17 @@ describe("errors 131..135", () => {
 
 // ── security review A-1 / A-2 ───────────────────────────────────────────────────────────────────
 describe("A-1: the guard's rent is in the SOL estimate and gate", () => {
-  it("costed at 4,472 B (the larger layout)", () => expect(LEV_GUARD_RENT_ACCOUNT_LEN).toBe(4_472));
-  it("levGuard on adds exactly rentSol(4472) to the total and shows as its own line", () => {
+  it("costed at 4,600 B (the v2 account, prog#721) and not below any layout the program accepts", () => {
+    expect(LEV_GUARD_RENT_ACCOUNT_LEN).toBe(4_600);
+    expect(LEV_GUARD_RENT_ACCOUNT_LEN).toBeGreaterThanOrEqual(4_472);
+    expect(rentSol(LEV_GUARD_RENT_ACCOUNT_LEN)).toBeGreaterThan(rentSol(4_472));
+  });
+  it("levGuard on adds exactly rentSol(4600) to the total and shows as its own line", () => {
     const off = computeCreateMarketSolCost({ p3: true });
     const on = computeCreateMarketSolCost({ p3: true, levGuard: true });
     expect(off.levGuardRentSol).toBeUndefined();
-    expect(on.levGuardRentSol).toBeCloseTo(rentSol(4_472), 12);
-    expect(on.totalSolCost - off.totalSolCost).toBeCloseTo(rentSol(4_472), 12);
+    expect(on.levGuardRentSol).toBeCloseTo(rentSol(4_600), 12);
+    expect(on.totalSolCost - off.totalSolCost).toBeCloseTo(rentSol(4_600), 12);
     expect(on.levGuardRentSol!).toBeGreaterThan(0.022);
   });
   it("the resume remainder keeps the guard rent (conservative)", () => {

@@ -2,14 +2,14 @@
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk-growth @ 15cf3be (#429 360 B record, burst memory),
  * src/abi/lev-guard-v22.ts: the kind-17 guard account DECODER, report freshness and the W1 round test (the ticket now reads the guard:
  * app bug 2026-10-29, product review finding 4). Only the imports are retargeted (the vendored ./layout has no LevGuard kind, so the kind
- * byte is a local constant). Delete when @percolatorct/sdk >= 9.0.0 ships these and point ./index.ts at the package. Re-synced with percolator-sdk PR #432 (prog#611: 16-byte tags, cap 256). Do not edit here;
+ * byte is a local constant). Delete when @percolatorct/sdk >= 9.0.0 ships these and point ./index.ts at the package. Re-synced with percolator-sdk PR #432 (prog#611: 16-byte tags, cap 256) and PR #491 (prog#721: 4600 B v2 record, price-band marks). Do not edit here;
  * fix upstream in percolator-sdk.
  */
 import { PublicKey } from "@solana/web3.js";
 import { LAYOUT_V22, UnknownLayoutError, resolveLayout } from "./layout";
 import type { LayoutTable } from "./layout";
 import {
-  LEV_GUARD_FLAG_V22, LEV_GUARD_KEY_TAG_LEN_V22, LEV_GUARD_TOUCHED_CAP_V22, LEV_GUARD_TOUCHED_LEN_V22, LEV_GUARD_VERSION_V22,
+  LEV_GUARD_BAND_MARKS_V22, LEV_GUARD_FLAG_V22, LEV_GUARD_KEY_TAG_LEN_V22, LEV_GUARD_REC_LEN_V2_V22, LEV_GUARD_VERSION_V2_V22, LEV_GUARD_TOUCHED_CAP_V22, LEV_GUARD_TOUCHED_LEN_V22, LEV_GUARD_VERSION_V22,
   LEV_REPORT_FRESH_SLOTS_V22, LEV_REPORT_HELD_SLOTS_V22, LEV_W1_ROUND_SLOTS_V22,
 } from "./lev-guard-v22";
 
@@ -30,6 +30,8 @@ export const LEV_GUARD_FIELD_OFF_V22 = Object.freeze({
   navps: 184, navLastEquity: 200, navLastIn: 216, navLastOut: 232, navPeakCur: 248, navPeakPrev: 264, navRef: 280,
   navBucketStart: 296, navLastSlot: 304, roundId: 312, roundTargetQ: 320, roundOpenSlot: 336,
   burstVarPeakX100: 344, pad3: 348, burstPeakSlot: 352,
+  /** v2 only (record 488 B, prog#721). */
+  pad4: 128, pbMarksPx: 360, pbMarksSlot: 424,
 } as const);
 
 /** Decoded `LevGuardV22`. u64 fields are `bigint`, u128 fields `bigint`, u8 / u16 fields `number`. */
@@ -68,8 +70,12 @@ export interface LevGuardV22 {
   holderDumpSlot: bigint;
   pbLastPx: bigint;
   pbLastSlot: bigint;
+  /** v1: the fixed reference. v2: derived, the OLDEST non-empty mark (0n when none); the stored field no longer exists. NOT the program's v2 band rule (max move vs every mark < 1 h old): `levObservePriceV22` previews stay v1-only until they read `pbMarksPx`. */
   pbRefPx: bigint;
   pbRefSlot: bigint;
+  /** v2 sliding window marks (8 each, 0n = empty); empty arrays for v1 records. */
+  pbMarksPx: bigint[];
+  pbMarksSlot: bigint[];
   pbFreezeUntil: bigint;
   pbOracleUntil: bigint;
   frozenLX100: number;
@@ -105,8 +111,8 @@ function allZero(b: Uint8Array): boolean {
 }
 
 /**
- * Decode a leverage guard account (`16 + 360 + 4096 = 4472` bytes, header kind 17). Mirrors the program's `validate_guard`
- * (version 1, only known flag bits, booleans 0/1, `touched_n <= 256`, `round_keep_bps <= 10 000`, report bps in range, padding zero).
+ * Decode a leverage guard account (header kind 17): 4600 B (`16 + 488 + 4096`, v2, prog#721), 4472 B (v1, record 360) or 4456 B (v1, record 344). Mirrors the program's `validate_guard`
+ * (version 1, or 2 for the 488 B record, only known flag bits, booleans 0/1, `touched_n <= 256`, `round_keep_bps <= 10 000`, report bps in range, padding zero).
  *
  * @param data   Raw account bytes.
  * @param table  Layout table (default {@link LAYOUT_V22}); only its header version is used.
@@ -123,24 +129,40 @@ export function decodeLevGuardV22(data: Uint8Array, table: LayoutTable = LAYOUT_
   const L = resolveLayout(data, { parser, kind: LEV_GUARD_ACCOUNT_KIND_V22, versions: [table.version] });
   const b = L.headerLen;
   if (b !== 16) throw new UnknownLayoutError("INVALID_RECORD", parser, `invalid account data: header length ${b} != 16`, { kind: LEV_GUARD_ACCOUNT_KIND_V22 });
-  // Exact lengths only (security review M-1): 4456 (record 344, prog#604) or 4472 (record 360, prog#605 burst
-  // memory). Anything else is refused rather than decoded at shifted offsets.
+  // Exact lengths only (security review M-1): 4456 (record 344, prog#604), 4472 (record 360, prog#605 burst
+  // memory) or 4600 (record 488, v2, prog#721). Anything else is refused rather than decoded at shifted offsets.
   const recLen = data.length - b - LEV_GUARD_TOUCHED_LEN_V22;
-  if (recLen !== LEV_GUARD_REC_LEN_BURST_V22 && recLen !== LEV_GUARD_REC_LEN_PRE_BURST_V22) {
+  if (recLen !== LEV_GUARD_REC_LEN_BURST_V22 && recLen !== LEV_GUARD_REC_LEN_PRE_BURST_V22 && recLen !== LEV_GUARD_REC_LEN_V2_V22) {
     throw new UnknownLayoutError(
       data.length < b + LEV_GUARD_REC_LEN_PRE_BURST_V22 + LEV_GUARD_TOUCHED_LEN_V22 ? "TOO_SHORT" : "INVALID_RECORD",
       parser,
-      `lev guard account length ${data.length}: expected ${b + LEV_GUARD_REC_LEN_PRE_BURST_V22 + LEV_GUARD_TOUCHED_LEN_V22} or ${LEV_GUARD_ACCOUNT_LEN_BURST_V22}`,
+      `lev guard account length ${data.length}: expected ${b + LEV_GUARD_REC_LEN_PRE_BURST_V22 + LEV_GUARD_TOUCHED_LEN_V22}, ${LEV_GUARD_ACCOUNT_LEN_BURST_V22} or ${b + LEV_GUARD_REC_LEN_V2_V22 + LEV_GUARD_TOUCHED_LEN_V22}`,
       { version: L.version, kind: LEV_GUARD_ACCOUNT_KIND_V22 },
     );
   }
-  const burst = recLen === LEV_GUARD_REC_LEN_BURST_V22;
+  const v2 = recLen === LEV_GUARD_REC_LEN_V2_V22;
+  const burst = recLen !== LEV_GUARD_REC_LEN_PRE_BURST_V22;
   const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const F = LEV_GUARD_FIELD_OFF_V22;
   const u16 = (o: number): number => v.getUint16(b + o, true);
   const u64 = (o: number): bigint => v.getBigUint64(b + o, true);
   const u128 = (o: number): bigint => u128At(v, b + o);
   const flags = data[b + F.flags];
+  const marksPx: bigint[] = [];
+  const marksSlot: bigint[] = [];
+  if (v2) {
+    for (let i = 0; i < LEV_GUARD_BAND_MARKS_V22; i++) {
+      marksPx.push(u64(F.pbMarksPx + 8 * i));
+      marksSlot.push(u64(F.pbMarksSlot + 8 * i));
+    }
+  }
+  let refPx = v2 ? 0n : u64(F.pbRefPx);
+  let refSlot = v2 ? 0n : u64(F.pbRefSlot);
+  if (v2) {
+    for (let i = 0; i < marksPx.length; i++) {
+      if (marksPx[i] !== 0n && (refPx === 0n || marksSlot[i] < refSlot)) { refPx = marksPx[i]; refSlot = marksSlot[i]; }
+    }
+  }
   const g: LevGuardV22 = {
     market: new PublicKey(data.slice(b + F.market, b + F.market + 32)),
     riskKey: new PublicKey(data.slice(b + F.riskKey, b + F.riskKey + 32)),
@@ -165,8 +187,10 @@ export function decodeLevGuardV22(data: Uint8Array, table: LayoutTable = LAYOUT_
     holderDumpSlot: u64(F.holderDumpSlot),
     pbLastPx: u64(F.pbLastPx),
     pbLastSlot: u64(F.pbLastSlot),
-    pbRefPx: u64(F.pbRefPx),
-    pbRefSlot: u64(F.pbRefSlot),
+    pbRefPx: refPx,
+    pbRefSlot: refSlot,
+    pbMarksPx: marksPx,
+    pbMarksSlot: marksSlot,
     pbFreezeUntil: u64(F.pbFreezeUntil),
     pbOracleUntil: u64(F.pbOracleUntil),
     frozenLX100: u16(F.frozenLX100),
@@ -189,13 +213,14 @@ export function decodeLevGuardV22(data: Uint8Array, table: LayoutTable = LAYOUT_
   };
   const rawBool = (o: number): boolean => data[b + o] <= 1;
   const bad =
-    g.version !== LEV_GUARD_VERSION_V22 ||
+    g.version !== (v2 ? LEV_GUARD_VERSION_V2_V22 : LEV_GUARD_VERSION_V22) ||
     (flags & ~(LEV_GUARD_FLAG_V22.MINT_AUTH_LIVE | LEV_GUARD_FLAG_V22.FREEZE_AUTH_LIVE | LEV_GUARD_FLAG_V22.PERM_PROVEN)) !== 0 ||
     !rawBool(F.roundActive) || !rawBool(F.roundLpLong) ||
     g.touchedN > LEV_GUARD_TOUCHED_CAP_V22 || g.roundKeepBps > 10_000 ||
     g.repJDumpBps > 10_000 || g.repMIndBps > 10_000 || g.repNMultBps > 10_000 ||
     data[b + F.pad0] !== 0 || !allZero(data.subarray(b + F.pad1, b + F.pad1 + 2)) || !allZero(data.subarray(b + F.pad2, b + F.pad2 + 6)) ||
-    (burst && !allZero(data.subarray(b + F.pad3, b + F.pad3 + 4)));
+    (burst && !allZero(data.subarray(b + F.pad3, b + F.pad3 + 4))) ||
+    (v2 && !allZero(data.subarray(b + F.pad4, b + F.pad4 + 16)));
   if (bad) throw new UnknownLayoutError("INVALID_RECORD", parser, "invalid account data: lev guard fails the program's validate_guard", { kind: LEV_GUARD_ACCOUNT_KIND_V22 });
   const t = b + recLen;
   for (let i = 0; i < g.touchedN; i++) g.touchedTags.push(u128At(v, t + LEV_GUARD_KEY_TAG_LEN_V22 * i));

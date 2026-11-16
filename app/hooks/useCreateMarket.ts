@@ -991,7 +991,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
       getCachedRentExemption(connection, MATCHER_CONTEXT_LEN),
       getCachedRentExemption(connection, MINT_SIZE),
       getCachedRentExemption(connection, ACCOUNT_SIZE),
-      // v2.2 leverage guard (tag 124 op 0): the creator pays its rent (4,472 B costed; 4,456 B today).
+      // v2.2 leverage guard (tag 124 op 0): the creator pays its rent (costed at the v2 4,600 B account).
       levGuardApplies({ v22On: isDevnetV22Enabled(), growth: !!params.growth, p3: !!params.p3 })
         ? getCachedRentExemption(connection, LEV_GUARD_RENT_ACCOUNT_LEN)
         : Promise.resolve(0),
