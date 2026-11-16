@@ -37,7 +37,7 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { MarketLogo } from "@/components/market/MarketLogo";
 import { WatchButton } from "@/components/market/WatchButton";
-import { MarketHealthBadges } from "@/components/market/MarketHealthBadges";
+import { MarketHealthBadges } from "@/components/market/MarketHealthChips";
 import { useMarketHealth } from "@/hooks/useMarketHealth";
 import { liveHealthLevel } from "@/lib/market-health-overlay";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
