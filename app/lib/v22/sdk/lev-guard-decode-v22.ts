@@ -70,7 +70,7 @@ export interface LevGuardV22 {
   holderDumpSlot: bigint;
   pbLastPx: bigint;
   pbLastSlot: bigint;
-  /** v1: the fixed reference. v2: derived, the OLDEST non-empty mark (0n when none); the stored field no longer exists. NOT the program's v2 band rule. */
+  /** v1: the fixed reference. v2: derived, the OLDEST non-empty mark (0n when none); the stored field no longer exists. NOT the program's v2 band rule (max move vs every mark < 1 h old): `levObservePriceV22` previews stay v1-only until they read `pbMarksPx`. */
   pbRefPx: bigint;
   pbRefSlot: bigint;
   /** v2 sliding window marks (8 each, 0n = empty); empty arrays for v1 records. */

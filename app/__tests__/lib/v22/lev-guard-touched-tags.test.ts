@@ -10,7 +10,7 @@ import {
   LEV_GUARD_ACCOUNT_LEN_BURST_V22, LEV_GUARD_ACCOUNT_LEN_V22, LEV_GUARD_FIELD_OFF_V22, LEV_GUARD_KEY_TAG_LEN_V22,
   LEV_GUARD_TOUCHED_CAP_V22, LEV_GUARD_TOUCHED_LEN_V22, LEV_GUARD_ACCOUNT_LEN_V2_V22, LEV_GUARD_BODY_LEN_V2_V22, decodeLevGuardV22, levKeyTagV22,
 } from "@/lib/v22/sdk";
-import { LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC } from "@/lib/v22/sdk/layout";
+import { LAYOUT_V22, UnknownLayoutError, WRAPPER_ACCOUNT_MAGIC } from "@/lib/v22/sdk/layout";
 
 function synth(len = LEV_GUARD_ACCOUNT_LEN_BURST_V22): Uint8Array {
   const d = new Uint8Array(len);
@@ -100,10 +100,10 @@ describe("v2 guard (4600 B account, prog#721)", () => {
   it("refuses a v1 version byte, non-zero _pad4, and lengths 4599 / 4601", () => {
     const d = v2();
     const bad = (f: (x: Uint8Array) => void): Uint8Array => { const c = d.slice(); f(c); return c; };
-    expect(() => decodeLevGuardV22(bad((x) => { x[16 + 74] = 1; }))).toThrow();
-    expect(() => decodeLevGuardV22(bad((x) => { x[16 + 130] = 1; }))).toThrow();
-    expect(() => decodeLevGuardV22(d.slice(0, 4599))).toThrow();
-    expect(() => decodeLevGuardV22(new Uint8Array([...d, 0]))).toThrow();
+    expect(() => decodeLevGuardV22(bad((x) => { x[16 + 74] = 1; }))).toThrow(UnknownLayoutError);
+    expect(() => decodeLevGuardV22(bad((x) => { x[16 + 130] = 1; }))).toThrow(UnknownLayoutError);
+    expect(() => decodeLevGuardV22(d.slice(0, 4599))).toThrow(UnknownLayoutError);
+    expect(() => decodeLevGuardV22(new Uint8Array([...d, 0]))).toThrow(UnknownLayoutError);
   });
   it("v1 records keep decoding with empty marks (4456 and 4472)", () => {
     for (const len of [4456, 4472]) {
@@ -112,8 +112,8 @@ describe("v2 guard (4600 B account, prog#721)", () => {
       expect(g.pbMarksPx).toEqual([]);
     }
   });
-  it("a v1 version byte on a 4472 B account is still accepted and v2 byte on it refused", () => {
+  it("a v2 version byte on a 4472 B (v1-length) account is refused", () => {
     const d = synth(); d[16 + 74] = 2;
-    expect(() => decodeLevGuardV22(d)).toThrow();
+    expect(() => decodeLevGuardV22(d)).toThrow(UnknownLayoutError);
   });
 });
