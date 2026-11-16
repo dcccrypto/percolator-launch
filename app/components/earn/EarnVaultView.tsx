@@ -14,14 +14,14 @@ import { isDevnetV22Enabled } from '@/lib/v22/flag';
 import { V22_COPY } from '@/lib/v22/copy';
 
 // The deposit rail (deposit/withdraw panel, exit/tranche panels, bond + rescue cards and their
-// hooks) is the bulk of the Vaults tab's JS and only renders once the stats have picked a vault, so
-// it loads after the page. The placeholder matches the rail's empty card so nothing shifts.
+// hooks) is the bulk of the Vaults tab's JS, so it loads after the page. The placeholder is a sized
+// panel (the empty card is shorter, so the column can settle once the rail mounts).
 const VaultDepositRail = dynamic(
   () => import('@/components/earn/VaultDepositRail').then((m) => m.VaultDepositRail),
   {
     ssr: false,
     loading: () => (
-      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-8 min-h-[16rem]" aria-busy="true">
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-8 min-h-[16rem] hud-corners" aria-busy="true">
         <ShimmerSkeleton className="mx-auto h-3 w-32" />
         <ShimmerSkeleton className="mx-auto mt-3 h-3 w-56 max-w-full" />
       </div>
