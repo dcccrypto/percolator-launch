@@ -562,6 +562,8 @@ function PositionCard({
     } catch (e) {
       const msg = stakeErrorMessage(e); // #26: never raw chain text
       setTxStatus({ type: "error", msg });
+      // #3755: a refusal can mean the quote went stale; re-read so the retry is quoted on current data.
+      onWithdrawSuccess?.();
     }
   }, [withdraw, position, onWithdrawSuccess]);
 
@@ -984,6 +986,8 @@ function DepositWidget({
     } catch (e) {
       const msg = stakeErrorMessage(e); // #26: never raw chain text
       setWithdrawTxStatus({ type: "error", msg });
+      // #3755: re-read the position so the max and the next quote are current.
+      setWithdrawRefreshKey((k) => k + 1);
     }
   }, [pool, withdrawPosition, withdrawAmount, withdraw, withdrawLoading, onTxSuccess]);
 

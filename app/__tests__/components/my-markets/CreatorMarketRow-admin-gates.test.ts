@@ -49,7 +49,10 @@ describe("CreatorMarketRow admin-action gates", () => {
 
     it("the toast no longer says the market leaves Your Markets", () => {
       expect(SRC).not.toMatch(/no longer appear in Your Markets/);
-      expect(SRC).toContain("The market stays in Your Markets because your wallet still owns its liquidity position.");
+      // #3751: nor does it promise the market stays: a market listed by asset_admin alone leaves after a burn.
+      const toastLine = SRC.split("\n").find((l) => l.includes("Admin key burned."));
+      expect(toastLine).toBeDefined();
+      expect(toastLine).not.toMatch(/Your Markets|liquidity position/);
     });
 
     it("the burn button says it is burned instead of asking to connect the creator wallet", () => {
