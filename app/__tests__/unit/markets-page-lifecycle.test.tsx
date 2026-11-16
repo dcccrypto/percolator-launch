@@ -38,7 +38,7 @@ vi.mock("@/lib/slabCache", () => ({ prefetchSlab: vi.fn(), prefetchSlabsBatch: v
 vi.mock("@/components/market/LiveRowPrice", () => ({ LiveRowPrice: () => null }));
 vi.mock("@/components/market/MarketLogo", () => ({ MarketLogo: () => null }));
 vi.mock("@/components/market/WatchButton", () => ({ WatchButton: () => null }));
-vi.mock("@/components/market/MarketHealthBadges", () => ({ MarketHealthBadges: () => null }));
+vi.mock("@/components/market/MarketHealthChips", () => ({ MarketHealthBadges: () => null }));
 vi.mock("@/components/ui/ScrollReveal", () => ({ ScrollReveal: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 
 import MarketsPage from "@/app/markets/page";
