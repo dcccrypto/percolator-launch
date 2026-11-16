@@ -47,6 +47,7 @@ import { isAdlReduceOnly } from "@/lib/limits/adl-reduce-only";
 import { limitsFlags } from "@/lib/limits/flags";
 import { COPY } from "@/lib/limits/copy";
 import { closeOnlyDurationLine } from "@/lib/adl-since";
+import { MAX_HEALTH_SLABS } from "@/lib/market-health-limits";
 
 // Geometry comes from the layout table of the account's VERSION (lib/v22/layout.ts): the group / slot numbers below are the
 // v2.1 row (592 / 758 / 1024 / 2325, h-lock bytes at mode-5..mode-3, source credit 595/779, backing 963/1060) and
@@ -383,7 +384,7 @@ export function healthBadges(h: MarketHealth, adlSinceMs: number | null = null, 
 
 // ── /api/markets/health wire (route + client hook share these) ──────────────
 
-export const MAX_HEALTH_SLABS = 50;
+export { MAX_HEALTH_SLABS };
 
 /** JSON row served by /api/markets/health (bigints as decimal strings). */
 export interface MarketHealthRow {

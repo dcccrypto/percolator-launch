@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
-import { MAX_HEALTH_SLABS } from "@/lib/market-health";
+import { MAX_HEALTH_SLABS } from "@/lib/market-health-limits";
 import type { MarketHealthRow } from "@/lib/market-health";
 
 /**
