@@ -51,7 +51,9 @@ describe("v2.2 env market list: parser", () => {
       "x",
       entry({ slab: "not-a-key" }),
       entry({ lp_portfolio_address: undefined }),
-      entry({ mainnet_ca: ` ${key()}x` }),
+      // "!" is not in the base58 alphabet, so this is never a valid key. (A random key + "x" is itself a valid
+      // 32-byte key ~1.5% of the time - a 43-char key plus one char - which made this test flaky.)
+      entry({ mainnet_ca: ` ${key()}!` }),
       entry({ symbol: "" }),
       entry({ symbol: "A".repeat(17) }),
       entry({ name: "<script>" }),

@@ -22,6 +22,8 @@ export default defineConfig({
       // call unless they opt in (see __tests__/lib/market-registry-memo.test.ts).
       MARKET_ROWS_MEMO_MS: '0',
       REGISTERED_MARKETS_DB_MEMO_MS: '0',
+      // lib/discovered-market-rows.ts memo (no-Supabase path); off in tests like the two above.
+      DISCOVERY_MEMO_MS: '0',
     },
     coverage: {
       provider: 'v8',
