@@ -100,6 +100,7 @@ const MATH_SPEC: Record<string, Kind[]> = {
 const BAND_SPEC: Record<string, Kind[]> = {
   rentRateE9V22: ["u128", "u128", "bps", "u128"], rentRateE9FailClosedV22: ["u128", "u128", "bps", "u128"],
   usersSideOiQV22: ["u128", "u128", "bool"], rentPercentPerDayV22: ["u64"],
+  rentOccupancyRateE9V22: ["u64", "u64", "u64"], rentSideRateE9V22: ["u128", "u128", "bps", "u64", "u64", "u64"],
 };
 
 const counts: Record<string, number> = {};
@@ -207,8 +208,7 @@ describe("struct-input functions", () => {
     // maths) or 15 on K+amount overflow (app would return a quote / 123).
     const known = new Set(["app=ok sdk=107", "app=123 sdk=107", "app=124 sdk=107", "app=107 sdk=15", "app=123 sdk=15", "app=ok sdk=15", "app=124 sdk=15", "app=107 sdk=123", "app=ok sdk=123", "app=124 sdk=123", "app=123 sdk=124", "app=107 sdk=124", "app=ok sdk=124"]);
     for (const k of Object.keys(diffs)) expect(known.has(k), `unexplained divergence class ${k}: ${JSON.stringify(diffs)}`).toBe(true);
-    // eslint-disable-next-line no-console
-    console.log("quoteBondDepositV22 divergence classes (n/10000):", JSON.stringify(diffs));
+    process.stdout.write(`quoteBondDepositV22 divergence classes (n/${N_CASES}): ${JSON.stringify(diffs)}\n`);
   });
   it(`quoteBondWithdrawV22 (zero-coupon regime): ${N_CASES} inputs`, () => {
     const diffs: Record<string, number> = {};
@@ -225,8 +225,7 @@ describe("struct-input functions", () => {
       }
     }
     counts.quoteBondWithdrawV22 = N_CASES; total += N_CASES;
-    // eslint-disable-next-line no-console
-    console.log("quoteBondWithdrawV22 divergence classes (n/10000):", JSON.stringify(diffs));
+    process.stdout.write(`quoteBondWithdrawV22 divergence classes (n/${N_CASES}): ${JSON.stringify(diffs)}\n`);
     // shares == 0 is a 109 (cooldown) refusal in the SDK, 110 in the app: the only class that may appear.
     for (const k of Object.keys(diffs)) expect(["app=110 sdk=109"].includes(k), `unexplained divergence class ${k}: ${JSON.stringify(diffs)}`).toBe(true);
   });
@@ -255,8 +254,7 @@ describe("struct-input functions", () => {
       }
     }
     counts.rentRatesFromStateV22 = N_CASES; total += N_CASES;
-    // eslint-disable-next-line no-console
-    console.log(`rentRatesFromStateV22: ${diverged}/${N_CASES} diverge (${withOccupancyAbove85} inputs had a side above the 85% knee). First: ${firstRow}`);
+    process.stdout.write(`rentRatesFromStateV22: ${diverged}/${N_CASES} diverge (${withOccupancyAbove85} above the 85% knee)\n`);
     expect(diverged, `app rentRatesFromStateV22 omits occupancy rent + growth gate; first: ${firstRow}`).toBe(0);
   });
 });
@@ -269,8 +267,7 @@ describe("layout parity for band / rent decoding", () => {
 
 describe("summary", () => {
   it("reports input counts", () => {
-    // eslint-disable-next-line no-console
-    console.log(`differential inputs: ${total} across ${Object.keys(counts).length} functions`);
+    process.stdout.write(`differential inputs: ${total} across ${Object.keys(counts).length} functions\n`);
     expect(Object.values(counts).every((n) => n >= 10_000)).toBe(true);
   });
 });
