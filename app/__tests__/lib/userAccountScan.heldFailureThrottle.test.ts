@@ -20,7 +20,8 @@ describe("held-NFT scan failure throttle", () => {
     const connection = { getProgramAccounts } as unknown as Connection;
     const nftProgramId = new PublicKey(new Uint8Array(32).fill(7));
     const wallet = new PublicKey(new Uint8Array(32).fill(9));
-    const fire = (n: number) => triggerHeldNftScan({ connection, nftProgramId, wallet, raw: new Uint8Array([n]), minIntervalMs: SCAN_MIN_INTERVAL_MS });
+    // A failed first scan rejects (so callers keep last-good instead of reading "holds none"); the throttle is what's under test.
+    const fire = (n: number) => triggerHeldNftScan({ connection, nftProgramId, wallet, raw: new Uint8Array([n]), minIntervalMs: SCAN_MIN_INTERVAL_MS }).catch(() => []);
 
     await fire(0);
     const afterFirst = getProgramAccounts.mock.calls.length;

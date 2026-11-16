@@ -701,6 +701,13 @@ export interface HeldNftScanParams {
   minIntervalMs?: number;
 }
 
+/** No scan in flight: serve the snapshot, or reject if none has ever succeeded (never `[]` = "holds none"). */
+function heldNftSnapshotOrReject(entry: HeldNftEntry): Promise<HeldNftRaw[]> {
+  return entry.snapshot !== null
+    ? Promise.resolve(entry.snapshot)
+    : Promise.reject(new Error("held-NFT scan has no successful result yet"));
+}
+
 /**
  * Kick off (or join) the shared held-NFT scan for this (nft program, wallet)
  * key. Same dedup/keep-last-good/awaitable contract as `triggerPortfolioScan`
@@ -711,7 +718,7 @@ export function triggerHeldNftScan(params: HeldNftScanParams): Promise<HeldNftRa
   const entry = getOrCreateHeldNftEntry(key);
 
   if (entry.lastTriggerRaw === params.raw) {
-    return entry.inFlight ?? Promise.resolve(entry.snapshot ?? []);
+    return entry.inFlight ?? heldNftSnapshotOrReject(entry);
   }
 
   const wait = throttleDelayMs(entry.throttle, params.minIntervalMs, entry.scanned, false);
@@ -722,10 +729,11 @@ export function triggerHeldNftScan(params: HeldNftScanParams): Promise<HeldNftRa
         entry.throttle.trailingTimer = null;
         const latest = latestHeldNftParams.get(key);
         latestHeldNftParams.delete(key);
-        if (latest) void triggerHeldNftScan({ ...latest, minIntervalMs: undefined });
+        // A first-scan failure now rejects; the trailing fire-and-forget has no caller, so swallow it (already logged).
+        if (latest) triggerHeldNftScan({ ...latest, minIntervalMs: undefined }).catch(() => {});
       }, wait);
     }
-    return entry.inFlight ?? Promise.resolve(entry.snapshot ?? []);
+    return entry.inFlight ?? heldNftSnapshotOrReject(entry);
   }
 
   entry.throttle.lastScanStartedAt = Date.now();
@@ -755,7 +763,12 @@ async function runHeldNftScan(entry: HeldNftEntry, params: HeldNftScanParams): P
     // throttled and every raw change re-fires the failing query.
     entry.scanned = true;
     entry.throttle.failures = (entry.throttle.failures ?? 0) + 1;
-    return entry.snapshot ?? [];
+    // Release the dedup claim (as runPortfolioScan does) so the same `raw` can retry.
+    if (entry.lastTriggerRaw === params.raw) entry.lastTriggerRaw = null;
+    // Never-succeeded + failed is NOT "wallet holds none": reject so callers' catch keeps their
+    // last-good state instead of resolving an empty list. Once a snapshot exists, serve it.
+    if (entry.snapshot === null) throw e;
+    return entry.snapshot;
   }
 }
 
