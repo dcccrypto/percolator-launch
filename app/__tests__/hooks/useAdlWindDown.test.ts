@@ -82,7 +82,7 @@ describe("useAdlWindDown", () => {
     sendTx.mockReturnValue(new Promise<string>((r) => { release = r; }));
     const { result } = renderHook(() => useAdlWindDown(SLAB));
     let p!: Promise<string | null>;
-    act(() => { p = result.current.windDown(); });
+    await act(async () => { p = result.current.windDown(); });
     await vi.waitFor(() => expect(result.current.busy).toBe(true));
     expect(result.current.done).toBe(false);
     await act(async () => { release("SIG2"); await p; });
@@ -98,7 +98,10 @@ describe("useAdlWindDown", () => {
     expect(findV17Portfolio).toHaveBeenCalledTimes(1);
     expect(getAccountInfo).toHaveBeenCalledWith(portfolioKey, "confirmed");
     const [, accts, args, tail] = buildIx.mock.calls[0] as unknown as [unknown, Record<string, unknown>, Record<string, unknown>, unknown[]];
-    expect(accts).toMatchObject({ caller: walletKey, portfolio: portfolioKey, collateralMint: mint });
+    expect((buildIx.mock.calls[0] as unknown[])[0]).toEqual(new PublicKey(PROGRAM));
+    expect(accts).toMatchObject({ caller: walletKey, market: new PublicKey(SLAB), portfolio: portfolioKey, collateralMint: mint });
+    expect(readIdentity).toHaveBeenCalledWith(new Uint8Array(16));
+    expect(sendTx.mock.calls[0][0]).toMatchObject({ connection, wallet, instructions: [{ ix: true }] });
     expect(args).toMatchObject({ portfolioId: 7n, positionEpoch: 3n, assetIndex: 0, nowSlot: 0n });
     expect(tail).toEqual([]);
     expect(sendTx.mock.calls[0][0]).toMatchObject({ computeUnitsFromSim: { cap: 600_000 } });
@@ -144,6 +147,7 @@ describe("useAdlWindDown", () => {
     await act(async () => { out = await result.current.windDown(); });
     expect(out).toBeNull();
     expect(result.current.error).toBeTruthy();
+    expect(result.current.error).not.toContain("RPC down");
     expect(result.current.done).toBe(false);
     expect(invalidate).not.toHaveBeenCalled();
 
@@ -159,5 +163,15 @@ describe("useAdlWindDown", () => {
     expect(result.current.error).toBeTruthy();
     expect(result.current.done).toBe(false);
     expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("clears done when a later wind-down fails", async () => {
+    const { result } = renderHook(() => useAdlWindDown(SLAB));
+    await act(async () => { await result.current.windDown(); });
+    expect(result.current.done).toBe(true);
+    sendTx.mockRejectedValue(new Error("boom"));
+    await act(async () => { await result.current.windDown(); });
+    expect(result.current).toMatchObject({ done: false });
+    expect(result.current.error).toBeTruthy();
   });
 });
