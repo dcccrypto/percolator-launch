@@ -4,7 +4,7 @@
  * Wrapper: percolator-prog feat/v22-rc23-2026-10-22 @ d27f3d73, src/v16_program.rs `enum PercolatorError` (line numbers below
  * are the variant lines at that commit; ordinals were counted from the enum and cross-checked against its own
  * `assert!(PercolatorError::X as u32 == N)` lines, 0 mismatches over 137 variants 0..=136).
- * Stake: percolator-stake release/v22-stake @ 9712e3c src/error.rs (3..=45); 46..=48 come from the installed SDK table.
+ * Stake: percolator-stake release/v22-stake @ 9712e3c src/error.rs (3..=45); 46..=48 are not in that error.rs and are pinned only to the app's copied SDK table (lib/v22/sdk/v22-stake.ts), not to the program.
  * Custom 137 is only in prog #695 and is NOT counted here.
  */
 import { describe, expect, it } from "vitest";
@@ -134,13 +134,6 @@ describe("v22WrapperMessage: every case matches the prog enum", () => {
     expect(r?.body.length).toBeGreaterThan(0);
   });
 
-  it("maps the prog name to the right kind (name and code agree, not just the code)", () => {
-    for (const [name, code] of PROG_WRAPPER) {
-      if (code === 9) continue; // the bare 9 is covered below
-      expect(wrap(code), `${name} (${code})`).not.toBeNull();
-    }
-  });
-
   it("a bare Custom(9) off the ticket is refused plainly; on the trade ticket it stays unmapped on purpose", () => {
     expect(wrap(9, { surface: "earn-deposit" })?.kind).toBe("request-refused");
     expect(wrap(9, { surface: "trade" })).toBeNull();
@@ -155,11 +148,12 @@ describe("v22WrapperMessage: every case matches the prog enum", () => {
   it("lock/wait-style errors never tell the user to add margin or collateral", () => {
     for (const code of [104, 108, 109, 111, 112, 118, 124, 125, 132, 133]) {
       const r = wrap(code);
+      expect(r, `Custom(${code})`).not.toBeNull();
       expect(`${r?.title} ${r?.body}`, `Custom(${code})`).not.toMatch(/add (more )?(margin|collateral|funds)|top up|deposit more/i);
     }
   });
 
-  it("variants: 104 waits (not an error), 117/124 re-quote, 118 retries itself, 117 does not", () => {
+  it("variants: 104 waits (not an error), 117 re-quotes and retries, 124 re-quotes only, 118 retries itself", () => {
     expect(wrap(104)?.variant).toBe("wait");
     expect(wrap(117)).toMatchObject({ requote: true, autoRetry: true });
     expect(wrap(124)?.requote).toBe(true);
@@ -186,7 +180,7 @@ describe("v22StakeMessage: every case matches the stake error enum", () => {
   it.each(PROG_STAKE)("Custom(%i) is %s (percolator-stake error.rs:%i) and shows %s", (code, name, _line, kind) => {
     const r = v22StakeMessage(code, m);
     expect(r?.kind).toBe(kind);
-    if (code >= 33) expect(STAKE_ERRORS_V5[code]?.name).toBe(name);
+    if (code >= 28) expect(STAKE_ERRORS_V5[code]?.name).toBe(name);
   });
 
   it("the named constants carry the prog ordinals", () => {
