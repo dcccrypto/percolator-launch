@@ -26,6 +26,7 @@ import { clearInFlightMarket } from "@/lib/inFlightMarket";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult, isVerifiedPool } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount } from "@/lib/parseAmount";
+import { strictAmountNumber } from "@/lib/createMarketValidation";
 import { MAX_FUNDABLE_REQUIREMENT } from "@/lib/prefund-requirement";
 import { backingSeedPerDomain, deriveLaunchMarketParams, leverageFromMarginBps } from "@/lib/market-params";
 import { LP_EXPOSURE_DEFAULT_BPS, clampLpExposureBps } from "@/lib/matcher-params";
@@ -516,8 +517,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     wizard.tradingFeeBps <= 1000 &&
     wizard.initialMarginBps >= 100 &&
     !feeConflict &&
-    parseFloat(wizard.lpCollateral || "0") > 0 &&
-    parseFloat(wizard.insuranceAmount) >= 100;
+    strictAmountNumber(wizard.lpCollateral || "0", decimals) > 0 &&
+    strictAmountNumber(wizard.insuranceAmount, decimals) >= 100;
 
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
   // (wizardSlabBytes = v17MarketAccountLen(1): every new launch allocates one asset slot) — v17

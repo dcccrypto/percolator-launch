@@ -14,6 +14,20 @@ const MIN_LP_COLLATERAL: Record<number, number> = {
 /** Minimum insurance fund as a percentage of LP collateral */
 const MIN_INSURANCE_PCT = 5; // 5% of LP collateral
 
+/**
+ * Strict plain-decimal check, same grammar parseHumanAmount accepts for a positive amount
+ * ("5", "5.5", ".5", "5."). parseFloat would accept "5abc", " 12" or "1e400" (Infinity) that the
+ * amount conversion reads differently or as 0. Returns NaN for anything else.
+ */
+export function strictAmountNumber(input: string, decimals?: number): number {
+  const t = (input ?? "").trim();
+  if (!/^(\d+\.?\d*|\.\d+)$/.test(t)) return NaN;
+  // parseHumanAmount throws when the fraction is longer than the token's decimals.
+  if (decimals !== undefined && (t.split(".")[1] ?? "").length > decimals) return NaN;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+}
+
 /** Maximum token decimals allowed (overflow protection) */
 const MAX_DECIMALS = 12;
 
@@ -123,7 +137,7 @@ export function validateCreateForm(values: CreateFormValues): ValidationError[] 
   }
 
   // LP Collateral
-  const lpNum = parseFloat(lpCollateral);
+  const lpNum = strictAmountNumber(lpCollateral, decimals);
   if (!lpCollateral || isNaN(lpNum) || lpNum <= 0) {
     errors.push({ field: "LP Collateral", message: "A positive LP collateral amount is required.", severity: "error" });
   } else {
@@ -138,7 +152,7 @@ export function validateCreateForm(values: CreateFormValues): ValidationError[] 
   }
 
   // Insurance
-  const insNum = parseFloat(insuranceAmount);
+  const insNum = strictAmountNumber(insuranceAmount, decimals);
   if (!insuranceAmount || isNaN(insNum) || insNum <= 0) {
     errors.push({ field: "Insurance Fund", message: "A positive insurance amount is required.", severity: "error" });
   } else if (lpNum > 0 && insNum < lpNum * MIN_INSURANCE_PCT / 100) {
