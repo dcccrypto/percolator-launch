@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
- * Fail-closed coverage for lib/v22/sign-guard.ts: every path where the guard cannot prove the transaction is for
- * devnet must refuse before the wallet opens (sign() never called), and the paths that are documented as "proves
- * nothing" are pinned so a refactor cannot silently flip them.
+ * Fail-closed coverage for lib/v22/sign-guard.ts: a transaction the guard can show is NOT for devnet (wrong genesis,
+ * blockhash devnet reports unknown) is refused before the wallet opens (sign() never called). Where an RPC error or
+ * timeout proves nothing (genesis lookup, untagged-blockhash lookup), the guard lets it through by design
+ * (devnet-guard.ts); those cases are pinned so a refactor cannot silently flip them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
@@ -66,7 +67,7 @@ describe("sign-guard fail-closed paths", () => {
     expect(signLog()[0].wallet).toBe("not-asked");
   });
 
-  it("transaction with no blockhash at all (unknown to devnet) is refused, not allowed", async () => {
+  it("empty blockhash that the RPC reports as unknown is refused (the guard has no empty-blockhash rule of its own)", async () => {
     const sign = vi.fn(async () => "s");
     await expect(guardSign(params(conn({ valid: false }), [tx(null)], sign))).rejects.toBeInstanceOf(SignGuardError);
     expect(sign).not.toHaveBeenCalled();
@@ -102,6 +103,14 @@ describe("sign-guard fail-closed paths", () => {
     await expect(guardSign(params(conn({ genesis: new Error("down"), valid: false }), [tx()], sign))).rejects.toBeInstanceOf(SignGuardError);
     expect(sign).not.toHaveBeenCalled();
     expect(lastSignProblem()?.verdict).toBe("REFUSED-blockhash-not-on-devnet");
+  });
+
+  it("genesis RPC error + tagged valid blockhash: not refused (cluster unproven), signed", async () => {
+    const c = conn({ genesis: new Error("down") });
+    noteBlockhash(BH, "p", c, 4_000);
+    const sign = vi.fn(async () => "s");
+    await expect(guardSign(params(c, [tx()], sign))).resolves.toBe("s");
+    expect(signLog()[0].verdict).toBe("ok");
   });
 
   it("tagged on devnet origin, but the app connection is mainnet: refused via the second check", async () => {
@@ -206,7 +215,7 @@ describe("sign-guard fail-closed paths", () => {
       expect(signLog()[0].classified).toContain("expired: rpc-invalid");
     });
 
-    it("expiry check with an RPC error or a missing blockhash proves nothing: stays a plain decline", async () => {
+    it("expiry check whose RPC call errors proves nothing: stays a plain decline", async () => {
       const k = c();
       let calls = 0;
       k.isBlockhashValid.mockImplementation(async () => { if (++calls > 1) throw new Error("down"); return { context: { slot: 1 }, value: true }; });
@@ -264,6 +273,7 @@ describe("sign-guard fail-closed paths", () => {
 
     it("dismissSignProblem clears the last problem and notifies subscribers; unsubscribe stops it", async () => {
       await expect(guardSign(params(conn({ genesis: MAINNET_GENESIS }), [tx()], async () => "s"))).rejects.toBeInstanceOf(SignGuardError);
+      expect(lastSignProblem()).not.toBeNull();
       const fn = vi.fn();
       const off = subscribeSignGuard(fn);
       dismissSignProblem();
