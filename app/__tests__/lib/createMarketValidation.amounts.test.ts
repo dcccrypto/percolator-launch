@@ -30,7 +30,8 @@ function built(s: string, decimals: number): bigint | null {
   }
 }
 
-const BAD = ["5abc", "1e400", "Infinity", "0x10", "1,000", "-0", "", " 12", "1e3", "-5", "5.", ".5.5"];
+const BAD = ["5abc", "1e400", "Infinity", "0x10", "1,000", "-0", "", "1e3", "-5", ".5.5", "1.0000000001"];
+const OK = [" 12", "5.", ".5", "12"];
 
 describe("LP / insurance amount: validator agrees with the instruction builder", () => {
   for (const field of ["lpCollateral", "insuranceAmount"] as const) {
@@ -39,12 +40,16 @@ describe("LP / insurance amount: validator agrees with the instruction builder",
         it(`${JSON.stringify(v)}: validator error unless builder sends a positive amount`, () => {
           const errors = validateCreateForm(form({ [field]: v })).filter((e) => e.severity === "error");
           const sent = built(v, 9);
-          const accepted = errors.length === 0;
-          if (accepted) {
-            // anything the validator lets through must be a positive amount the builder reads the same way
-            expect(sent !== null && sent > 0n).toBe(true);
-            expect(Number(sent) / 1e9).toBe(parseFloat(v));
-          }
+          expect(errors.length).toBeGreaterThan(0);
+          expect(sent === null || sent <= 0n).toBe(true);
+        });
+      }
+      for (const v of OK) {
+        it(`${JSON.stringify(v)}: accepted and builder sends the same positive amount`, () => {
+          expect(validateCreateForm(form({ [field]: v })).filter((e) => e.severity === "error")).toHaveLength(0);
+          const sent = built(v, 9)!;
+          expect(sent > 0n).toBe(true);
+          expect(Number(sent) / 1e9).toBe(parseFloat(v));
         });
       }
       it("value above the wallet balance is an error", () => {
