@@ -28,6 +28,8 @@ vi.mock("@/lib/bounded-ttl-cache", () => ({
 }));
 const owner = vi.hoisted(() => ({ classify: vi.fn() }));
 vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn(), captureMessage: vi.fn() }));
+const detail = vi.hoisted(() => ({ get: vi.fn() }));
+vi.mock("@/app/api/markets/[slab]/route", () => ({ GET: detail.get }));
 vi.mock("@/lib/dex-pool-owner", async (orig) => ({ ...(await orig<typeof import("@/lib/dex-pool-owner")>()), classifyPoolsByOwner: owner.classify }));
 
 import { GET } from "@/app/api/oracle/resolve/[ca]/route";
@@ -190,9 +192,9 @@ describe("/api/prices/[slab]: 24h stats from GeckoTerminal, never Pyth Benchmark
   const POOL = "BGm1tav58oGcsQJehL9WXBFXF7D27vZsKefj4xJKD5Y";
 
   it("looks up the market's DEX pool and reads its GeckoTerminal OHLCV; no Pyth call", async () => {
+    detail.get.mockResolvedValue(new Response(JSON.stringify({ market: { dex_pool_address: POOL } }), { status: 200 }));
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       calls.push(url);
-      if (url.includes(`/api/markets/${SLAB}`)) return new Response(JSON.stringify({ market: { dex_pool_address: POOL } }), { status: 200 });
       if (url.includes("api.geckoterminal.com")) {
         // newest first: [ts, o, h, l, c, v], both inside the last 24h
         const t = Math.floor(Date.now() / 1000);

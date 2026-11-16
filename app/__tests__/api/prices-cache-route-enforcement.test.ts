@@ -17,6 +17,8 @@ import { NextRequest } from "next/server";
 const boundedSet = vi.fn();
 vi.mock("@/lib/bounded-map", () => ({ boundedSet }));
 vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn(), captureMessage: vi.fn() }));
+// marketRes.ok === false -> gecko takes the `return setCache(null)` path, the write we want to observe.
+vi.mock("@/app/api/markets/[slab]/route", () => ({ GET: async () => Response.json({ error: "Market not found" }, { status: 404 }) }));
 
 process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
 

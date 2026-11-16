@@ -8,7 +8,8 @@
  * Response shape matches the StakePool interface used on the /stake page.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+import { createSwrMemo, marketMemoCapMs } from "@/lib/swr-memo";
 import { MAINNET_PROGRAM_IDS, resolveDevnetProgramIds } from "@/lib/program-ids";
 import { PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
@@ -149,7 +150,32 @@ function calcPoolValue(p: ParsedStakePool): bigint {
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
+/**
+ * One per-instance copy of the pool list (every caller gets the same answer): a request re-ran the stake-program
+ * getProgramAccounts, three chunked account reads and the registration Blob, ~690 ms on public devnet RPC. Fresh for
+ * 5 s, then served for up to 20 s more while ONE background read refreshes it, inside this response's own
+ * `s-maxage=30, stale-while-revalidate=60`. Only a 200 with at least one pool is stored (a 500 or an empty list is
+ * never cached); MARKET_ROWS_MEMO_MS=0 turns it off.
+ */
+type PoolsSnapshot = { status: number; body: { pools?: unknown[] }; headers: Record<string, string> };
+const poolsMemo = createSwrMemo<string, PoolsSnapshot>({
+  freshMs: 5_000,
+  staleMs: 20_000,
+  max: 1,
+  shouldStore: (s) => s.status === 200 && (s.body.pools?.length ?? 0) > 0,
+  ttlCapMs: marketMemoCapMs,
+  onBackground: (p) => after(p),
+});
+
 export async function GET() {
+  const snap = await poolsMemo.get("pools", async () => {
+    const res = await loadStakePools();
+    return { status: res.status, body: await res.json(), headers: Object.fromEntries(res.headers.entries()) };
+  });
+  return NextResponse.json(snap.body, { status: snap.status, headers: snap.headers });
+}
+
+async function loadStakePools(): Promise<NextResponse> {
   try {
     // Resolve stake program: devnet v17 vault program, else mainnet stake program.
     const net = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
