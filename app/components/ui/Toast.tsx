@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useEffect, useRef } from "react";
-import gsap from "gsap";
+import { withGsap } from "@/lib/gsap-lazy";
 import { useToastContext, type ToastItem } from "@/hooks/useToast";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
@@ -42,10 +42,18 @@ const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({
       // Fast slide/fade — a trading terminal needs toasts to feel snappy, not
       // bouncy. Previously a 500ms elastic overshoot; that reads as sluggish
       // against sub-second price ticks elsewhere in the UI.
-      gsap.fromTo(
-        el,
-        { opacity: 0, x: 40 },
-        { opacity: 1, x: 0, duration: 0.18, ease: "power2.out" }
+      withGsap(
+        (gsap) => {
+          gsap.fromTo(
+            el,
+            { opacity: 0, x: 40 },
+            { opacity: 1, x: 0, duration: 0.18, ease: "power2.out" }
+          );
+        },
+        () => {
+          el.style.opacity = "1";
+          el.style.transform = "none";
+        },
       );
     }
 
@@ -53,13 +61,18 @@ const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({
     if (duration === null) return;
     const timer = setTimeout(() => {
       if (!prefersReduced && el) {
-        gsap.to(el, {
-          opacity: 0,
-          x: 40,
-          duration: 0.15,
-          ease: "power2.in",
-          onComplete: () => onDismiss(item.id),
-        });
+        withGsap(
+          (gsap) => {
+            gsap.to(el, {
+              opacity: 0,
+              x: 40,
+              duration: 0.15,
+              ease: "power2.in",
+              onComplete: () => onDismiss(item.id),
+            });
+          },
+          () => onDismiss(item.id),
+        );
       } else {
         onDismiss(item.id);
       }
@@ -73,13 +86,18 @@ const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({
   const handleDismiss = () => {
     const el = elRef.current;
     if (!prefersReduced && el) {
-      gsap.to(el, {
-        opacity: 0,
-        x: 40,
-        duration: 0.15,
-        ease: "power2.in",
-        onComplete: () => onDismiss(item.id),
-      });
+      withGsap(
+        (gsap) => {
+          gsap.to(el, {
+            opacity: 0,
+            x: 40,
+            duration: 0.15,
+            ease: "power2.in",
+            onComplete: () => onDismiss(item.id),
+          });
+        },
+        () => onDismiss(item.id),
+      );
     } else {
       onDismiss(item.id);
     }

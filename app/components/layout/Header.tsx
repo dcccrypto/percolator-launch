@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
-import gsap from "gsap";
+import { withGsap } from "@/lib/gsap-lazy";
 import { type Network, getConfig, setNetwork } from "@/lib/config";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { NavDropdown, type NavItem } from "./NavDropdown";
@@ -122,12 +122,18 @@ export const Header: FC = () => {
 
     if (mobileOpen) {
       menu.style.display = "block";
-      gsap.fromTo(
-        menu,
-        { height: 0, opacity: 0 },
-        { height: "auto", opacity: 1, duration: 0.3, ease: "power2.out" }
-      );
-    } else {
+      return withGsap((gsap) => {
+        gsap.fromTo(
+          menu,
+          { height: 0, opacity: 0 },
+          { height: "auto", opacity: 1, duration: 0.3, ease: "power2.out" }
+        );
+      }, () => {
+        menu.style.height = "auto";
+        menu.style.opacity = "1";
+      });
+    }
+    return withGsap((gsap) => {
       gsap.to(menu, {
         height: 0,
         opacity: 0,
@@ -135,7 +141,9 @@ export const Header: FC = () => {
         ease: "power2.in",
         onComplete: () => { menu.style.display = "none"; },
       });
-    }
+    }, () => {
+      menu.style.display = "none";
+    });
   }, [mobileOpen, prefersReduced]);
 
   // Escape closes the mobile menu and hands focus back to its toggle, like the app's other sheets.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import gsap from "gsap";
+import { withGsap } from "@/lib/gsap-lazy";
 
 interface AnimatedNumberProps {
   value: number;
@@ -35,18 +35,26 @@ export function AnimatedNumber({
       return;
     }
 
-    gsap.to(numRef.current, {
-      val: value,
-      duration,
-      ease: "power2.out",
-      onUpdate: () => {
-        if (spanRef.current) {
-          const v = numRef.current.val;
-          const formatted = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toLocaleString();
-          spanRef.current.textContent = `${prefix}${formatted}${suffix}`;
-        }
+    const render = (v: number) => {
+      if (spanRef.current) {
+        const formatted = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toLocaleString();
+        spanRef.current.textContent = `${prefix}${formatted}${suffix}`;
+      }
+    };
+    withGsap(
+      (gsap) => {
+        gsap.to(numRef.current, {
+          val: value,
+          duration,
+          ease: "power2.out",
+          onUpdate: () => render(numRef.current.val),
+        });
       },
-    });
+      () => {
+        numRef.current.val = value;
+        render(value);
+      },
+    );
   }, [value, prefix, suffix, decimals, duration, prefersReduced]);
 
   return (

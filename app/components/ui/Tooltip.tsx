@@ -2,7 +2,7 @@
 
 import { FC, useState, useRef, useEffect, useId } from "react";
 import { createPortal } from "react-dom";
-import gsap from "gsap";
+import { withGsap } from "@/lib/gsap-lazy";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 interface TooltipProps {
@@ -52,23 +52,33 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
         el.style.opacity = "1";
         el.style.visibility = "visible";
       } else {
-        gsap.fromTo(
-          el,
-          { opacity: 0, scale: 0.95, visibility: "visible" },
-          { opacity: 1, scale: 1, duration: 0.15, ease: "power2.out" }
-        );
+        return withGsap((gsap) => {
+          gsap.fromTo(
+            el,
+            { opacity: 0, scale: 0.95, visibility: "visible" },
+            { opacity: 1, scale: 1, duration: 0.15, ease: "power2.out" }
+          );
+        }, () => {
+          el.style.visibility = "visible";
+          el.style.opacity = "1";
+        });
       }
     } else {
       if (prefersReduced) {
         el.style.visibility = "hidden";
         el.style.opacity = "0";
       } else {
-        gsap.to(el, {
-          opacity: 0,
-          scale: 0.95,
-          duration: 0.1,
-          ease: "power2.in",
-          onComplete: () => { el.style.visibility = "hidden"; },
+        return withGsap((gsap) => {
+          gsap.to(el, {
+            opacity: 0,
+            scale: 0.95,
+            duration: 0.1,
+            ease: "power2.in",
+            onComplete: () => { el.style.visibility = "hidden"; },
+          });
+        }, () => {
+          el.style.visibility = "hidden";
+          el.style.opacity = "0";
         });
       }
     }

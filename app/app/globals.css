@@ -440,6 +440,25 @@ body::before {
 @keyframes reveal-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .reveal-up { animation: none; } }
 
+/* ScrollReveal (components/ui/ScrollReveal.tsx): the same fade-up, delay from --reveal-delay. With a stagger and
+   more than one child the children play it in turn instead of the wrapper (as the gsap version did). */
+.scroll-reveal { animation: reveal-up 0.7s cubic-bezier(0.215, 0.61, 0.355, 1) var(--reveal-delay, 0s) both; }
+.scroll-reveal-stagger:has(> :nth-child(2)) { animation: none; }
+.scroll-reveal-stagger:has(> :nth-child(2)) > * {
+  animation: reveal-up 0.7s cubic-bezier(0.215, 0.61, 0.355, 1) calc(var(--reveal-delay, 0s) + var(--reveal-stagger, 0s) * var(--reveal-i, 0)) both;
+}
+.scroll-reveal-stagger > :nth-child(2) { --reveal-i: 1; }
+.scroll-reveal-stagger > :nth-child(3) { --reveal-i: 2; }
+.scroll-reveal-stagger > :nth-child(4) { --reveal-i: 3; }
+.scroll-reveal-stagger > :nth-child(5) { --reveal-i: 4; }
+.scroll-reveal-stagger > :nth-child(6) { --reveal-i: 5; }
+.scroll-reveal-stagger > :nth-child(7) { --reveal-i: 6; }
+.scroll-reveal-stagger > :nth-child(n+8) { --reveal-i: 7; }
+@media (prefers-reduced-motion: reduce) {
+  .scroll-reveal, .scroll-reveal-stagger > * { animation: none !important; }
+  .scroll-reveal { will-change: auto !important; }
+}
+
 .delay-100 { animation-delay: 100ms; }
 .delay-200 { animation-delay: 200ms; }
 .delay-300 { animation-delay: 300ms; }
