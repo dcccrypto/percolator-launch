@@ -755,7 +755,12 @@ async function runHeldNftScan(entry: HeldNftEntry, params: HeldNftScanParams): P
     // throttled and every raw change re-fires the failing query.
     entry.scanned = true;
     entry.throttle.failures = (entry.throttle.failures ?? 0) + 1;
-    return entry.snapshot ?? [];
+    // Release the dedup claim (as runPortfolioScan does) so the same `raw` can retry.
+    if (entry.lastTriggerRaw === params.raw) entry.lastTriggerRaw = null;
+    // Never-succeeded + failed is NOT "wallet holds none": reject so callers' catch keeps their
+    // last-good state instead of resolving an empty list. Once a snapshot exists, serve it.
+    if (entry.snapshot === null) throw e;
+    return entry.snapshot;
   }
 }
 
