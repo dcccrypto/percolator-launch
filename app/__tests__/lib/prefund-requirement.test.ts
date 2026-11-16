@@ -5,8 +5,9 @@
  *
  * The route tests exercise these through HTTP; this file pins the pure functions
  * directly: u64 edges, the backing-seed floor, the default floor in
- * fundingRequirement, the MAX_FUNDABLE_REQUIREMENT ceiling as a number the route
- * compares against, malformed inputs, and every classifyPreFundRefusal outcome.
+ * fundingRequirement, where requirements land relative to MAX_FUNDABLE_REQUIREMENT
+ * (the refusal itself is enforced and tested in the route), malformed inputs,
+ * and every classifyPreFundRefusal outcome.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -103,9 +104,8 @@ describe("fundingRequirement", () => {
       expect(fundingRequirement(DEFAULT_LP_COLLATERAL, DEFAULT_INSURANCE_AMOUNT) <= MAX_FUNDABLE_REQUIREMENT).toBe(true);
     });
 
-    it("an LP seed of 3,300 tokens is fundable (the ~3x-default claim in the doc)", () => {
-      expect(fundingRequirement(3_300_000_000n, 0n)).toBe(9_900_000_000n);
-      expect(fundingRequirement(3_300_000_000n, 0n) <= MAX_FUNDABLE_REQUIREMENT).toBe(true);
+    it("an LP seed of 3,300 tokens with default insurance lands exactly on the ceiling", () => {
+      expect(fundingRequirement(3_300_000_000n, DEFAULT_INSURANCE_AMOUNT)).toBe(MAX_FUNDABLE_REQUIREMENT);
     });
 
     it("lands exactly on the ceiling and one atom over it", () => {
@@ -117,8 +117,9 @@ describe("fundingRequirement", () => {
       expect(fundingRequirement(lp, ins + 1n) > MAX_FUNDABLE_REQUIREMENT).toBe(true);
     });
 
-    it("u64-max inputs are far over the ceiling, not clamped", () => {
+    it("u64-max inputs come back unclamped and over the ceiling the route refuses against", () => {
       expect(fundingRequirement(U64_MAX, 0n)).toBe(3n * U64_MAX);
+      expect(fundingRequirement(U64_MAX, 0n) > MAX_FUNDABLE_REQUIREMENT).toBe(true);
     });
   });
 });
@@ -157,6 +158,8 @@ describe("parseAtomicAmount", () => {
     expect(parseAtomicAmount("99999999999999999999", FALLBACK)).toBeNull();
   });
 
+  // Pinned on purpose: the bound counts characters, so a zero-padded small value
+  // over 20 characters is refused even though it fits in u64.
   it("leading zeros do not defeat the 20-digit bound", () => {
     expect(parseAtomicAmount("00000000000000000001", FALLBACK)).toBe(1n);
     expect(parseAtomicAmount("000000000000000000001", FALLBACK)).toBeNull();
