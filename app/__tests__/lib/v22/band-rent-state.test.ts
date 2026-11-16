@@ -33,7 +33,7 @@ function putI128(d: Uint8Array, o: number, x: bigint) {
   v.setBigInt64(o + 8, x >> 64n, true);
 }
 
-interface Opts { maxStepBps?: number; maxDt?: number; pinSince?: bigint; bandBps?: number; epoch?: number; pin?: number; rentMax?: number; minLeg?: bigint; mark?: bigint; target?: bigint; lotExp?: number; kink?: number; nCap?: bigint; bound?: boolean; lpNet?: bigint; oiLong?: bigint; oiShort?: bigint }
+interface Opts { maxStepBps?: number; maxDt?: number; pinSince?: bigint; bandBps?: number; epoch?: number; pin?: number; rentMax?: number; minLeg?: bigint; mark?: bigint; target?: bigint; lotExp?: number; kink?: number; nCap?: bigint; bound?: boolean; lpNet?: bigint; oiLong?: bigint; oiShort?: bigint; growthOn?: boolean; cap?: bigint; countLong?: bigint; countShort?: bigint }
 function build(o: Opts): Uint8Array {
   const d = market();
   const cfg = L.marketGroupOff + L.group.config;
@@ -42,6 +42,7 @@ function build(o: Opts): Uint8Array {
   put64(d, cfg + B.config.bandMaxPinSlots, BigInt(o.pin ?? 9000));
   put64(d, cfg + B.config.rentMaxE9PerSlot, BigInt(o.rentMax ?? 0));
   put64(d, cfg + B.config.bandMinLegNotional, o.minLeg ?? 0n);
+  put64(d, cfg + B.config.bandMaxPositionsPerSide, o.cap ?? 0n);
   put64(d, cfg + B.config.maxPriceMoveBpsPerSlot, BigInt(o.maxStepBps ?? 4));
   put64(d, cfg + B.config.maxAccrualDtSlots, BigInt(o.maxDt ?? 100));
   const slot = L.marketGroupOff + L.marketGroupLen;
@@ -49,9 +50,12 @@ function build(o: Opts): Uint8Array {
   put64(d, eng + L.assetState.effectivePrice, o.mark ?? 50_000_000n);
   put64(d, eng + L.assetState.rawOracleTargetPrice, o.target ?? 50_000_000n);
   put64(d, eng + B.assetState.bandPinSinceSlot, o.pinSince ?? 0n);
+  put64(d, eng + B.assetState.storedPosCountLong, o.countLong ?? 0n);
+  put64(d, eng + B.assetState.storedPosCountShort, o.countShort ?? 0n);
   putI128(d, eng + L.assetState.oiEffLongQ, o.oiLong ?? 1_000_000n);
   putI128(d, eng + L.assetState.oiEffShortQ, o.oiShort ?? 0n);
   d[slot + L.wrapperSlot.profileLotExp] = o.lotExp ?? 0;
+  d[slot + L.wrapperSlot.growth + B.growth.version] = o.growthOn === false ? 0 : 1;
   put16(d, slot + L.wrapperSlot.growth + 42, o.kink ?? 5000);
   put64(d, slot + L.wrapperSlot.growth + 48, o.nCap ?? 0n);
   d[slot + L.wrapperSlot.vaultLp + 90] = o.bound ? 1 : 0;
@@ -121,6 +125,18 @@ describe("readBandRentView", () => {
     // Not bound (or N_cap not measured yet): the wrapper charges nothing, so the view says 0 rather than guessing.
     expect(readBandRentView(build({ rentMax: 1000, kink: 5000, nCap: 1000n, bound: false, lpNet: 250n, oiLong: 1000n }))!.rent.rateLongE9).toBe(0n);
     expect(readBandRentView(build({ rentMax: 1000, kink: 5000, nCap: 0n, bound: true, oiLong: 1000n }))!.rent.rateLongE9).toBe(0n);
+    // Growth record off (version 0): the program charges no rent at all.
+    expect(readBandRentView(build({ rentMax: 1000, kink: 5000, nCap: 1000n, bound: true, lpNet: 250n, oiLong: 1000n, growthOn: false }))!.rent.rateLongE9).toBe(0n);
+  });
+  it("occupancy rent (prog#572): a side past 85% of band_max_positions_per_side pays max(utilisation, occupancy)", () => {
+    // Band on, cap 256 slots/side, rent max 100. Utilisation is 0 (no LP bound OI): only the occupancy term can charge.
+    const base = { bandBps: 130, cap: 256n, rentMax: 100, kink: 5000, nCap: 1000n, bound: true, lpNet: 0n, oiLong: 0n, oiShort: 0n };
+    const rate = (countLong: bigint, countShort = 0n) => readBandRentView(build({ ...base, countLong, countShort }))!.rent;
+    expect(rate(217n).rateLongE9).toBe(0n); // at / below the knee (217 <= 0.85 * 256)
+    expect(rate(218n).rateLongE9).toBe(1n); // just past it: ceil(max * x^2) >= 1
+    expect(rate(256n).rateLongE9).toBe(100n); // a full side pays the ceiling
+    expect(rate(256n).rateShortE9).toBe(0n); // per side
+    expect(rate(300n).rateLongE9).toBe(100n); // count clamps to the cap
   });
 });
 
