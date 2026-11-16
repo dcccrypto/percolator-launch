@@ -129,7 +129,7 @@ function guard(over: Partial<LevGuardV22> = {}): LevGuardV22 {
   return {
     market: MARKET, riskKey: PublicKey.default, t0Slot: T0, assetIndex: 0, version: 1, bump: 255, flags: 0, mintAuthLive: false, freezeAuthLive: false,
     roundActive: false, roundLpLong: false, repJDumpBps: 0, repMIndBps: 0, repLCapX100: 0, repNMultBps: 0, repSlot: 0n, holderDumpBps: 0, roundKeepBps: 0,
-    touchedN: 0, holderDumpSlot: 0n, pbLastPx: 0n, pbLastSlot: 0n, pbRefPx: 0n, pbRefSlot: 0n, pbFreezeUntil: 0n, pbOracleUntil: 0n, frozenLX100: 0, frozenNQ: 0n,
+    touchedN: 0, holderDumpSlot: 0n, pbLastPx: 0n, pbLastSlot: 0n, pbRefPx: 0n, pbRefSlot: 0n, pbMarksPx: [], pbMarksSlot: [], pbFreezeUntil: 0n, pbOracleUntil: 0n, frozenLX100: 0, frozenNQ: 0n,
     navps: 0n, navLastEquity: 0n, navLastIn: 0n, navLastOut: 0n, navPeakCur: 0n, navPeakPrev: 0n, navRef: 0n, navBucketStart: 0n, navLastSlot: 0n, roundId: 0n,
     roundTargetQ: 0n, roundOpenSlot: 0n, burstVarPeakX100: 0, burstPeakSlot: 0n, touchedTags: [], ...over,
   };

@@ -55,11 +55,24 @@ export const LEV_GUARD_KEY_TAG_LEN_V22 = 16;
 export const LEV_GUARD_TOUCHED_CAP_V22 = 256;
 /** Touched-set byte length (`KEY_TAG_LEN * W1_TOUCHED_CAP`): 4096, unchanged by the widening. */
 export const LEV_GUARD_TOUCHED_LEN_V22 = LEV_GUARD_KEY_TAG_LEN_V22 * LEV_GUARD_TOUCHED_CAP_V22;
+/**
+ * v2 record (prog#721 / #688, sliding 1-h price window; percolator-sdk #491): 488 B. `pb_ref_px`/`pb_ref_slot` (record 128..144) became
+ * zero padding and 8 marks (px, then slot, 8 x u64 each) were appended at 360 and 424. Version byte is 2.
+ */
+export const LEV_GUARD_REC_LEN_V2_V22 = 488;
+/** Number of price-band marks in a v2 record (`BAND_MARKS`). */
+export const LEV_GUARD_BAND_MARKS_V22 = 8;
+/** v2 body length: 488 + 4096 = 4584 (prog#721). */
+export const LEV_GUARD_BODY_LEN_V2_V22 = LEV_GUARD_REC_LEN_V2_V22 + LEV_GUARD_TOUCHED_LEN_V22;
+/** v2 account length: 16-byte header + 4584 = 4600. */
+export const LEV_GUARD_ACCOUNT_LEN_V2_V22 = 16 + LEV_GUARD_BODY_LEN_V2_V22;
+/** Record version written by prog#721. */
+export const LEV_GUARD_VERSION_V2_V22 = 2;
 /** Body length (record + touched set). */
 export const LEV_GUARD_BODY_LEN_V22 = LEV_GUARD_REC_LEN_V22 + LEV_GUARD_TOUCHED_LEN_V22;
 /** Account length: 16-byte header + body = 4456. */
 export const LEV_GUARD_ACCOUNT_LEN_V22 = 16 + LEV_GUARD_BODY_LEN_V22;
-/** The only record version (`LEV_GUARD_VERSION`). */
+/** The v1 record version (records of 344 / 360 B); prog#721 writes {@link LEV_GUARD_VERSION_V2_V22}. */
 export const LEV_GUARD_VERSION_V22 = 1;
 
 /** `flags` bits. */

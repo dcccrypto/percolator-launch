@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import {
   LEV_GUARD_ACCOUNT_LEN_BURST_V22, LEV_GUARD_ACCOUNT_LEN_V22, LEV_GUARD_FIELD_OFF_V22, LEV_GUARD_KEY_TAG_LEN_V22,
-  LEV_GUARD_TOUCHED_CAP_V22, LEV_GUARD_TOUCHED_LEN_V22, decodeLevGuardV22, levKeyTagV22,
+  LEV_GUARD_TOUCHED_CAP_V22, LEV_GUARD_TOUCHED_LEN_V22, LEV_GUARD_ACCOUNT_LEN_V2_V22, LEV_GUARD_BODY_LEN_V2_V22, decodeLevGuardV22, levKeyTagV22,
 } from "@/lib/v22/sdk";
 import { LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC } from "@/lib/v22/sdk/layout";
 
@@ -66,5 +66,54 @@ describe("W1 touched set: 16-byte tags, cap 256 (prog#611)", () => {
     d.set(key.toBytes().subarray(0, 16), 16 + 360);
     setN(d, 1);
     expect(decodeLevGuardV22(d).touchedTags.includes(levKeyTagV22(key))).toBe(true);
+  });
+});
+
+// percolator-prog #721 / SDK #491: the v2 guard is a 488 B record (body 4584, account 4600).
+describe("v2 guard (4600 B account, prog#721)", () => {
+  const v2 = (): Uint8Array => {
+    const v1 = synth();
+    const d = new Uint8Array(4600);
+    d.set(v1.subarray(0, 16 + 360), 0);
+    d.set(v1.subarray(16 + 360, 16 + 360 + 4096), 16 + 488);
+    d[16 + LEV_GUARD_FIELD_OFF_V22.version] = 2;
+    const dv = new DataView(d.buffer);
+    for (let i = 0; i < 8; i++) { dv.setBigUint64(16 + 360 + 8 * i, BigInt(2000 + i), true); dv.setBigUint64(16 + 424 + 8 * i, BigInt(500 - i), true); }
+    return d;
+  };
+  it("geometry: body 4584, account 4600", () => {
+    expect(LEV_GUARD_BODY_LEN_V2_V22).toBe(4584);
+    expect(LEV_GUARD_ACCOUNT_LEN_V2_V22).toBe(4600);
+  });
+  it("decodes the marks, derives the reference from the oldest mark and reads the touched tags after the 488 B record", () => {
+    const d = v2();
+    d.set(new Uint8Array(16).fill(0x11), 16 + 488);
+    new DataView(d.buffer).setUint16(16 + LEV_GUARD_FIELD_OFF_V22.touchedN, 1, true);
+    const g = decodeLevGuardV22(d);
+    expect(g.version).toBe(2);
+    expect(g.pbMarksPx).toEqual([2000n, 2001n, 2002n, 2003n, 2004n, 2005n, 2006n, 2007n]);
+    expect(g.pbMarksSlot[7]).toBe(493n);
+    expect(g.pbRefPx).toBe(2007n);
+    expect(g.pbRefSlot).toBe(493n);
+    expect(g.touchedTags).toEqual([0x11111111111111111111111111111111n]);
+  });
+  it("refuses a v1 version byte, non-zero _pad4, and lengths 4599 / 4601", () => {
+    const d = v2();
+    const bad = (f: (x: Uint8Array) => void): Uint8Array => { const c = d.slice(); f(c); return c; };
+    expect(() => decodeLevGuardV22(bad((x) => { x[16 + 74] = 1; }))).toThrow();
+    expect(() => decodeLevGuardV22(bad((x) => { x[16 + 130] = 1; }))).toThrow();
+    expect(() => decodeLevGuardV22(d.slice(0, 4599))).toThrow();
+    expect(() => decodeLevGuardV22(new Uint8Array([...d, 0]))).toThrow();
+  });
+  it("v1 records keep decoding with empty marks (4456 and 4472)", () => {
+    for (const len of [4456, 4472]) {
+      const g = decodeLevGuardV22(synth(len));
+      expect(g.version).toBe(1);
+      expect(g.pbMarksPx).toEqual([]);
+    }
+  });
+  it("a v1 version byte on a 4472 B account is still accepted and v2 byte on it refused", () => {
+    const d = synth(); d[16 + 74] = 2;
+    expect(() => decodeLevGuardV22(d)).toThrow();
   });
 });

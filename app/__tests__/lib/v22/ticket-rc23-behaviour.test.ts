@@ -45,7 +45,7 @@ describe("leverage guard present (growth guard bit set)", () => {
   const guardAccount: any = {
     market: new PublicKey(new Uint8Array(32).fill(9)), t0Slot: T0, assetIndex: 0, flags: 0, mintAuthLive: false, freezeAuthLive: false, roundActive: false,
     roundOpenSlot: 0n, repJDumpBps: 0, repMIndBps: 0, repLCapX100: 0, repNMultBps: 0, repSlot: 0n, holderDumpBps: 0, holderDumpSlot: 0n, pbLastPx: 0n,
-    pbLastSlot: 0n, pbRefPx: 0n, pbRefSlot: 0n, pbFreezeUntil: 0n, pbOracleUntil: 0n, frozenLX100: 0, frozenNQ: 0n, burstVarPeakX100: 0, burstPeakSlot: 0n,
+    pbLastSlot: 0n, pbRefPx: 0n, pbRefSlot: 0n, pbMarksPx: [], pbMarksSlot: [], pbFreezeUntil: 0n, pbOracleUntil: 0n, frozenLX100: 0, frozenNQ: 0n, burstVarPeakX100: 0, burstPeakSlot: 0n,
   };
   const view = (now: bigint, account: unknown = guardAccount) => {
     const raw = marketRaw({ launch: 500, tier: 1_000, ceil: 500, lambda: 10_000 });
