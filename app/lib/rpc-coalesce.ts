@@ -95,8 +95,9 @@ export function createAccountInfoCoalescer(send: Sender, windowMs = 5) {
       return;
     }
 
-    const byKey = new Map<string, unknown>();
-    let context: unknown;
+    // Each key keeps the context of the chunk it was fetched in: chunks are fetched one after another,
+    // so a later chunk can be at a newer slot and a caller using context.slot must see the data's own slot.
+    const byKey = new Map<string, { value: unknown; context: unknown }>();
     try {
       for (let i = 0; i < uniqueKeys.length; i += MAX_KEYS_PER_CALL) {
         const chunk = uniqueKeys.slice(i, i + MAX_KEYS_PER_CALL);
@@ -106,14 +107,14 @@ export function createAccountInfoCoalescer(send: Sender, windowMs = 5) {
         if (r.error || !r.result || typeof r.result !== "object") return fail(r.error);
         const res = r.result as { context?: unknown; value?: unknown };
         if (!Array.isArray(res.value) || res.value.length !== chunk.length) return fail(undefined);
-        context = context ?? res.context;
-        chunk.forEach((k, j) => byKey.set(k, (res.value as unknown[])[j]));
+        chunk.forEach((k, j) => byKey.set(k, { value: (res.value as unknown[])[j], context: res.context }));
       }
     } catch {
       return fail(undefined);
     }
     for (const w of g.waiters) {
-      w.resolve({ jsonrpc: "2.0", id: w.id, result: { context, value: byKey.get(w.key) ?? null } });
+      const hit = byKey.get(w.key);
+      w.resolve({ jsonrpc: "2.0", id: w.id, result: { context: hit?.context, value: hit?.value ?? null } });
     }
   }
 

@@ -76,6 +76,28 @@ describe("createAccountInfoCoalescer", () => {
     expect(u.calls.map((x) => (x.params[0] as string[]).length)).toEqual([100, 100, 30]);
   });
 
+  it("reports each key's own chunk slot, not the first chunk's (>100 keys, slot advances between chunks)", async () => {
+    let slot = 100;
+    const send = (async (b: Body) => {
+      const keys = b.params[0] as string[];
+      slot += 5;
+      return { jsonrpc: "2.0", id: b.id, result: { context: { slot }, value: keys.map((k) => ({ lamports: 1, data: [k, "base64"] })) } };
+    }) as unknown as Parameters<typeof createAccountInfoCoalescer>[0];
+    const c = createAccountInfoCoalescer(send, 2);
+    const rs = await Promise.all(Array.from({ length: 230 }, (_, i) => c.read(K(i), CFG, i)));
+    const slotOf = (i: number) => ((rs[i].result as { context: { slot: number } }).context.slot);
+    expect(slotOf(0)).toBe(105);
+    expect(slotOf(150)).toBe(110);
+    expect(slotOf(229)).toBe(115);
+  });
+
+  it("singleton path keeps an upstream error and rewrites id/jsonrpc", async () => {
+    const send = (async (b: Body) => ({ jsonrpc: "2.0", id: b.id, error: { code: -32016, message: "min context slot not reached" } })) as unknown as Parameters<typeof createAccountInfoCoalescer>[0];
+    const c = createAccountInfoCoalescer(send, 2);
+    const r = await c.read(K(1), { minContextSlot: 9 }, "mine");
+    expect(r).toEqual({ jsonrpc: "2.0", id: "mine", error: { code: -32016, message: "min context slot not reached" } });
+  });
+
   it("maps a null (missing) account to value null", async () => {
     const send = (async (b: Body) => ({ jsonrpc: "2.0", id: b.id, result: { context: { slot: 1 }, value: [null, { lamports: 1 }] } })) as unknown as Parameters<typeof createAccountInfoCoalescer>[0];
     const c = createAccountInfoCoalescer(send, 2);
