@@ -209,6 +209,42 @@ describe("candles-api provider", () => {
     off();
   });
 
+  it("lead 3: a probe fetch resolving after unsubscribe must not call onReset", async () => {
+    vi.useFakeTimers();
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((r) => { release = r; });
+    const h = harness(async (u) => {
+      if (u.startsWith("/api/markets/")) return json({ market: {} });
+      await gate;
+      return json(udf([b(3600, 1)]));
+    });
+    const onReset = vi.fn();
+    const off = h.provider.subscribeBars(SLAB, "60", { onBar: vi.fn(), onReset }, null, "oracle");
+    await vi.advanceTimersByTimeAsync(HISTORY_PROBE_INTERVAL_MS); // probe in flight
+    off(); // chart unsubscribed (symbol/resolution change)
+    release!();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(onReset).not.toHaveBeenCalled();
+  });
+
+  it("lead 1: UDF null / short arrays never yield zero or NaN priced bars", () => {
+    const out = parseUdf({ s: "ok", t: [60, 120, 180, 240], o: [1, null, 1, 1], h: [1, 1, 1], l: [1, 1, 1, 1], c: [1, 1, null, 1], v: [null, 1, 1, 1] });
+    expect(out.map((x) => [x.timeSec, x.volume])).toEqual([[60, 0]]);
+    expect(out.every((x) => x.open > 0 && x.high > 0 && x.low > 0 && x.close > 0)).toBe(true);
+  });
+
+  it("lead 2: a market reply without lot_exp is unscaled, and a later resolveSymbol with lot_exp rescales", async () => {
+    if (!isDevnetV22Enabled()) return;
+    let lot: number | undefined;
+    const h = harness((u) => (u.startsWith("/api/markets/") ? json({ market: lot === undefined ? {} : { lot_exp: lot } }) : json(udf([b(3600 * 15, 1000, 2)]))));
+    const a = await h.provider.getBars(req());
+    expect(a.bars[0].close).toBe(1000);
+    lot = 3;
+    await h.provider.resolveSymbol(SLAB);
+    const c = await h.provider.getBars(req({ firstRequest: false }));
+    expect(c.bars[0]).toMatchObject({ close: 1, volume: 2000 });
+  });
+
   it("resolveSymbol strips -PERP, falls back to a short address and the live mark", async () => {
     const h = harness((u) => (u.startsWith("/api/markets/") ? json({ market: { symbol: "sol-perp", name: null, mark_price: 151.2 } }) : json({})));
     await expect(h.provider.resolveSymbol(SLAB)).resolves.toMatchObject({ symbol: "SOL", description: "SOL perpetual", referencePrice: 151.2 });

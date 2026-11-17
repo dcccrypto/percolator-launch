@@ -251,6 +251,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
       // Mark-built series: keep asking whether real history exists now (first
       // indexed fill, or the candles route recovering) and reset once it does.
       let probe: ReturnType<typeof setInterval> | null = null;
+      let closed = false; // set on unsubscribe: an in-flight probe must not reset a chart that left
       if (source === "oracle" && !candlesUnavailable) {
         probe = setInterval(() => {
           if (flipped || candlesUnavailable) return;
@@ -258,7 +259,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
           const nowSec = Math.floor(now() / 1000);
           fetchWindow(slab, resolution, nowSec - HISTORY_PROBE_LOOKBACK_SEC, nowSec).then(
             (bars) => {
-              if (bars.length > 0 && !flipped) {
+              if (bars.length > 0 && !flipped && !closed) {
                 flipped = true;
                 handlers.onReset?.();
               }
@@ -270,6 +271,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
         }, HISTORY_PROBE_INTERVAL_MS);
       }
       return () => {
+        closed = true;
         offTrades();
         offMarks();
         if (probe) clearInterval(probe);
