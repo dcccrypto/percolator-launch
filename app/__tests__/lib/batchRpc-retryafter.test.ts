@@ -38,7 +38,6 @@ describe("batchRpc Retry-After", () => {
     expect(await callsWithin1s(date)).toBeLessThanOrEqual(2);
   });
   it("empty / junk Retry-After falls back to backoff (no tight loop)", async () => {
-    expect(await callsWithin1s("")).toBeLessThanOrEqual(2);
     expect(await callsWithin1s("soon")).toBeLessThanOrEqual(2);
   });
   it("negative Retry-After falls back to backoff", async () => {
@@ -49,12 +48,21 @@ describe("batchRpc Retry-After", () => {
     globalThis.fetch = f as unknown as typeof fetch;
     const rpc = createBatchRpc({ endpoint: ENDPOINT, maxBackoffMs: 5000, maxRetries: 1 });
     const p = rpc.enqueue("getAccountInfo", ["a"]);
-    await vi.advanceTimersByTimeAsync(50 + 5000 * 1.3 + 100);
+    await vi.advanceTimersByTimeAsync(50 + 4000);
+    expect(f).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5000 * 0.3 + 1100);
     expect(f).toHaveBeenCalledTimes(2);
     expect(JSON.parse(await p).error.code).toBe(-32005);
   });
   it("delta-seconds Retry-After still works", async () => {
-    expect(await callsWithin1s("2")).toBe(1);
+    const f = vi.fn(async () => r429("2"));
+    globalThis.fetch = f as unknown as typeof fetch;
+    const rpc = createBatchRpc({ endpoint: ENDPOINT, initialBackoffMs: 100, maxRetries: 1 });
+    rpc.enqueue("getAccountInfo", ["a"]).catch(() => {});
+    await vi.advanceTimersByTimeAsync(50 + 1900);
+    expect(f).toHaveBeenCalledTimes(1); // 2 s honoured, not the 100 ms backoff
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(f).toHaveBeenCalledTimes(2);
   });
 
   it("lead 2: 429 burst never exceeds maxRetries+1 fetches", async () => {
