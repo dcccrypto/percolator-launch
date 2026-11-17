@@ -110,6 +110,25 @@ export interface BatchRpcConfig {
 }
 
 /**
+ * Parse a Retry-After header (RFC 9110: delta-seconds or HTTP-date) into ms, clamped to
+ * `maxMs`. Returns null for missing / empty / unparseable / negative values so the caller
+ * falls back to its own backoff (never NaN, which setTimeout treats as 0 = instant retry).
+ */
+export function parseRetryAfterMs(header: string | null, maxMs: number): number | null {
+  const v = header?.trim();
+  if (!v) return null;
+  let ms: number;
+  if (/^\d+$/.test(v)) ms = Number(v) * 1000;
+  else {
+    const at = Date.parse(v);
+    if (Number.isNaN(at)) return null;
+    ms = at - Date.now();
+  }
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.min(ms, maxMs);
+}
+
+/**
  * Create a batching RPC manager.
  * Returns a `fetchMiddleware` compatible with @solana/web3.js Connection options.
  */
@@ -194,7 +213,7 @@ export function createBatchRpc(config: BatchRpcConfig) {
             return "transport-failure";
           }
           const retryAfter = response.headers.get("Retry-After");
-          const retryMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : currentBackoff;
+          const retryMs = parseRetryAfterMs(retryAfter, maxBackoffMs) ?? currentBackoff;
           const jitter = Math.random() * 0.3 * retryMs;
           await new Promise((r) => setTimeout(r, retryMs + jitter));
           currentBackoff = Math.min(currentBackoff * 2, maxBackoffMs);
