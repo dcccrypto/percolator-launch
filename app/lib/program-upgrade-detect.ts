@@ -33,6 +33,7 @@
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
+import { isFresh } from "@/lib/ttl-fresh";
 
 export type UpgradeState = "pre" | "post" | "unknown";
 
@@ -111,7 +112,7 @@ export function programUpgradeState(connection: Connection, programId: PublicKey
   if (forced) return Promise.resolve(PRE_SYNC_FINGERPRINTS[id] ? forced : "pre");
   if (!PRE_SYNC_FINGERPRINTS[id]) return Promise.resolve("pre");
   const hit = cache.get(id);
-  if (hit && Date.now() - hit.ts < (hit.v === "unknown" ? FAIL_TTL_MS : TTL_MS)) return Promise.resolve(hit.v);
+  if (hit && isFresh(Date.now(), hit.ts, hit.v === "unknown" ? FAIL_TTL_MS : TTL_MS)) return Promise.resolve(hit.v);
   const running = inflight.get(id);
   if (running) return running;
   const p = (async () => {
