@@ -212,6 +212,8 @@ interface Health {
   coolUntil: number;
   /** Time of an ambiguous failure not yet acted on (the first strike), or 0. */
   strikeAt: number;
+  /** When `fails` last grew, or 0. A long quiet spell lets the count start over. */
+  failAt: number;
 }
 
 export interface PoolResult {
@@ -247,7 +249,15 @@ export class UpstreamPool {
   }
 
   private coolUntil(u: UpstreamSpec): number {
-    return this.health.get(u.id)?.coolUntil ?? 0;
+    const h = this.health.get(u.id);
+    if (!h) return 0;
+    const now = this.now();
+    // A wall clock stepped back must not stretch a cooldown past the configured maximum: re-anchor the remainder to the new time.
+    if (h.failAt > now && h.coolUntil > 0) {
+      h.coolUntil = now + Math.min(Math.max(h.coolUntil - h.failAt, 0), this.max);
+      h.failAt = now;
+    }
+    return h.coolUntil;
   }
 
   /**
@@ -255,19 +265,26 @@ export class UpstreamPool {
    * another ambiguous failure lands within STRIKE_WINDOW_MS; for a heavy read it is ignored entirely.
    */
   private markFail(u: UpstreamSpec, how: { ambiguous: boolean; heavy?: boolean } = { ambiguous: false }): void {
-    const h = this.health.get(u.id) ?? { fails: 0, coolUntil: 0, strikeAt: 0 };
+    const h = this.health.get(u.id) ?? { fails: 0, coolUntil: 0, strikeAt: 0, failAt: 0 };
     if (how.ambiguous) {
       if (how.heavy) return;
       const now = this.now();
-      if (h.strikeAt === 0 || now - h.strikeAt > STRIKE_WINDOW_MS) {
+      const gap = now - h.strikeAt;
+      // A negative gap (clock stepped back) is not "within the window": count it as a fresh first strike.
+      if (h.strikeAt === 0 || gap < 0 || gap > STRIKE_WINDOW_MS) {
         h.strikeAt = now;
         this.health.set(u.id, h);
         return;
       }
     }
     h.strikeAt = 0;
+    const at = this.now();
+    // Escalation decays: after two max-cooldowns without a counted failure (or a backward clock step) start from the base again.
+    const quiet = at - h.failAt;
+    if (h.failAt !== 0 && (quiet < 0 || quiet > 2 * this.max)) h.fails = 0;
+    h.failAt = at;
     h.fails += 1;
-    h.coolUntil = this.now() + Math.min(this.base * 2 ** (h.fails - 1), this.max);
+    h.coolUntil = at + Math.min(this.base * 2 ** (h.fails - 1), this.max);
     this.health.set(u.id, h);
   }
 
