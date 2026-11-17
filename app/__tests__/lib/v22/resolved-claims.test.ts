@@ -162,11 +162,14 @@ describe("owner-only window", () => {
     const w = ownerWindow({ resolvedSlot: 1_000n, forceCloseDelaySlots: huge }, 5n, 1_700_000_000_000);
     expect(w.ownerOnly).toBe(true);
     expect(w.endsAtSlot).toBe(1_000n + huge);
-    if (w.endsAtMs !== null) {
-      expect(Number.isFinite(w.endsAtMs)).toBe(true);
-      expect(Number.isNaN(new Date(w.endsAtMs).getTime())).toBe(false);
-      expect(() => new Intl.DateTimeFormat("en", { timeZone: "UTC" }).format(new Date(w.endsAtMs as number))).not.toThrow();
-    }
+    expect(w.endsAtMs).toBeNull();
+  });
+  it("just inside the Date range keeps an end time that formats; just outside gives null", () => {
+    const fmt = (ms: number): string => new Intl.DateTimeFormat("en", { timeZone: "UTC" }).format(new Date(ms));
+    const inside = ownerWindow({ resolvedSlot: 0n, forceCloseDelaySlots: 21_600_000_000_000n }, 0n, 0); // 8.64e15 ms exactly
+    expect(inside.endsAtMs).toBe(8.64e15);
+    expect(() => fmt(inside.endsAtMs as number)).not.toThrow();
+    expect(ownerWindow({ resolvedSlot: 0n, forceCloseDelaySlots: 21_600_000_000_001n }, 0n, 0).endsAtMs).toBeNull();
   });
   it("no delay configured = no window; unknown clock claims nothing", () => {
     expect(ownerWindow({ ...m, forceCloseDelaySlots: 0n }, 5n, 0).configured).toBe(false);
