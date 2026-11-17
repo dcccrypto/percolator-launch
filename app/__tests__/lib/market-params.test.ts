@@ -211,3 +211,19 @@ describe("leverageFromMarginBps — the inverse must survive the round trip", ()
     expect(leverageFromMarginBps(Number.NaN)).toBe(0);
   });
 });
+
+describe("deriveLaunchMarketParams matcher leverage round-trip", () => {
+  it.each([3, 6, 7, 9])("%ix launch sizes the matcher at the full %ix", async (lev) => {
+    const { deriveLaunchMarketParams } = await import("@/lib/market-params");
+    const lp = 1_000_000_000n;
+    const bps = Math.ceil(10_000 / lev);
+    const d = deriveLaunchMarketParams({ initialMarginBps: bps, lpCollateral: lp, initialPriceE6: 1_000_000n });
+    expect(d.initialMarginBps).toBe(bps);
+    expect(d.matcher.liquidityNotionalE6).toBe(lp * BigInt(lev));
+  });
+  it("keeps 4.5x (2222 bps) at the conservative 4x matcher cap", async () => {
+    const { deriveLaunchMarketParams } = await import("@/lib/market-params");
+    const d = deriveLaunchMarketParams({ initialMarginBps: 2222, lpCollateral: 1_000_000n, initialPriceE6: 1_000_000n });
+    expect(d.matcher.liquidityNotionalE6).toBe(4_000_000n);
+  });
+});
