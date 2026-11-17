@@ -2,7 +2,7 @@
 // Defensive branches of planLaunchV22 that real SDK defaults can never reach (the SDK's own defaults always
 // validate and the default band clears its genesis floor at every legal price). The SDK is mocked at the seam
 // to prove the plan turns each refusal into one calm issue and never into params.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ genesisOk: true, minAnchor: 1231n as bigint | null, rentThrows: false }));
 
@@ -27,6 +27,11 @@ __setLotMarketsEnabledForTest(true);
 const input = { tokenPriceE6: 25_000_000n, collateralDecimals: 6, oracleMode: "keeper" as const, growthOn: true };
 
 describe("planLaunchV22 defensive refusals", () => {
+  afterEach(() => {
+    mocks.genesisOk = true;
+    mocks.minAnchor = 1231n;
+    mocks.rentThrows = false;
+  });
   it("band genesis price too low: band-price-floor issue with the needed price, no params", () => {
     mocks.genesisOk = false;
     const p = planLaunchV22(input);
