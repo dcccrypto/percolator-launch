@@ -5,15 +5,17 @@ import {
   boundVaultLpCap,
   closeLimitNotice,
   deriveTicketLimits,
+  type TicketLimitsInput,
   feeFitSizeQ,
   growthSideHalt,
   maxFillWithHeadroomQ,
   shrinkSizeInput,
   sizeQToInput,
 } from "@/lib/limits/ticket";
-import type { GrowthMarketView } from "@/lib/v21/growth-market";
 import type { SideLimit } from "@/lib/limits/risk-limits";
 import { COPY } from "@/lib/limits/copy";
+import { growthMarketView, type GrowthMarketView } from "@/lib/v21/growth-market";
+import { ENGINE, LP, marketRaw } from "../v21/fixtures";
 import { marketLimits, OWNER_A, OWNER_LP, vaultBoundLp } from "./fixtures";
 
 const input = (over: Partial<Parameters<typeof deriveTicketLimits>[0]> = {}) => ({
@@ -382,5 +384,120 @@ describe("growthSideHalt", () => {
     expect(growthSideHalt(v, "long", 0n, 1n)).toBe("min-leg");
     expect(growthSideHalt(v, "long", -4n, 1n, 1n)).toBeNull();
     expect(growthSideHalt(v, "short", 4n, 1n, 1n)).toBeNull();
+  });
+});
+
+const growth = (oiLong: bigint, lpQ: bigint): GrowthMarketView =>
+  growthMarketView({ raw: marketRaw({}), engine: { ...ENGINE, oiEffLongQ: oiLong }, lp: LP, lpEffectiveQ: lpQ, bound: true })!;
+const OPEN = () => growth(30_000_000n, -20_000_000n); // long room 70M, short room 100M
+const BUSY = () => growth(60_000_000n, -50_000_000n); // long room 40M
+const FULL = () => growth(100_000_000n, -50_000_000n); // long closed
+const fmt = { size: (q: bigint) => `S${q}`, collateral: (a: bigint) => `$${a}` };
+
+const g = (over: Partial<TicketLimitsInput> & { growth: GrowthMarketView }) =>
+  deriveTicketLimits({
+    limits: marketLimits(),
+    direction: "long",
+    sizeQ: 20_000_000n,
+    takerPosQ: 0n,
+    takerOwner: OWNER_A,
+    leverage: 8,
+    limitPriceE6: 0n,
+    ...over,
+  });
+
+describe("deriveTicketLimits: growth caps, gate and halts", () => {
+  it("unknown equity: Max is capped to the side's room, leverage over the cap is flagged", () => {
+    const t = g({ growth: OPEN() });
+    expect(t.growthRoomQ).toBe(70_000_000n);
+    expect(t.growthCapQ).toBe(70_000_000n);
+    expect(t.growthGate).toBeNull();
+    const lev = t.issues.find((x) => x.kind === "growth-leverage")!;
+    expect(lev.title).toBe("Leverage adjusted");
+    expect(lev.message).toContain("5.49x");
+    expect(g({ growth: OPEN(), direction: "short" }).growthCapQ).toBe(100_000_000n);
+  });
+
+  it("a busy side shrinks the room and the max leverage", () => {
+    const t = g({ growth: BUSY() });
+    expect(t.growthCapQ).toBe(40_000_000n);
+    expect(t.issues.find((x) => x.kind === "growth-leverage")!.message).toContain("2.89x");
+  });
+
+  it("known equity replaces the slider check by the gate: too little equity trims and names the extra collateral", () => {
+    const t = g({ growth: OPEN(), takerEquity: 1_000_000n, format: fmt });
+    expect(t.growthGate).toMatchObject({ passes: false, maxPassingQ: 5_408_328n, extraEquityNeeded: 2_698_000n, clipQ: 20_000_000n });
+    expect(t.growthCapQ).toBe(5_408_328n);
+    const backing = t.issues.find((x) => x.kind === "growth-backing")!;
+    expect(backing.title).toBe("More collateral needed");
+    expect(backing.message).toContain("S5408328");
+    expect(backing.message).toContain("$2698000");
+    expect(t.issues.map((x) => x.kind)).not.toContain("growth-leverage");
+  });
+
+  it("no format helpers: the gate is computed but no backing issue is worded", () => {
+    const t = g({ growth: OPEN(), takerEquity: 1_000_000n });
+    expect(t.growthGate!.passes).toBe(false);
+    expect(t.issues.map((x) => x.kind)).not.toContain("growth-backing");
+  });
+
+  it("enough equity: gate passes, cap is the side room", () => {
+    const t = g({ growth: OPEN(), takerEquity: 100_000_000n, format: fmt });
+    expect(t.growthGate).toMatchObject({ passes: true, maxPassingQ: 20_000_000n, extraEquityNeeded: 0n });
+    expect(t.growthCapQ).toBe(70_000_000n);
+    expect(t.issues.map((x) => x.kind)).not.toContain("growth-backing");
+  });
+
+  it("maxEquity (order-independent) bounds Max while the order's own gate stays on takerEquity", () => {
+    const t = g({ growth: OPEN(), takerEquity: null, maxEquity: 1_000_000n });
+    expect(t.growthCapQ).toBe(5_408_328n);
+    expect(t.growthGate).toBeNull();
+  });
+
+  it("zero size runs no gate", () => {
+    expect(g({ growth: OPEN(), takerEquity: 1_000_000n, sizeQ: 0n }).growthGate).toBeNull();
+  });
+
+  it("a full side: halted + full + a growth-closed error, Max 0", () => {
+    const t = g({ growth: FULL(), takerEquity: 100_000_000n });
+    expect(t.growthCapQ).toBe(0n);
+    expect(t.growthRoomQ).toBe(0n);
+    expect(t.halted).toEqual({ long: true, short: false });
+    expect(t.fullSides).toEqual({ long: true, short: false });
+    expect(t.issues.find((x) => x.kind === "growth-closed")!.title).toBe("This side is full");
+    expect(t.growthGate).toBeNull();
+  });
+
+  it("a short holder buying on a full long side is closing: not blocked, room = the close", () => {
+    const t = g({ growth: FULL(), takerPosQ: -10_000_000n, sizeQ: 10_000_000n });
+    expect(t.issues.map((x) => x.kind)).not.toContain("growth-closed");
+    expect(t.growthRoomQ).toBe(10_000_000n);
+    expect(t.growthCapQ).toBe(10_000_000n);
+  });
+
+  it("an empty ticket of the opposite holder on a full side is not paused", () => {
+    const t = g({ growth: FULL(), takerPosQ: -10_000_000n, sizeQ: 0n });
+    expect(t.halted.long).toBe(false);
+  });
+
+  it("the other side's tab pauses when that side is closed, whatever the selected direction", () => {
+    const t = g({ growth: FULL(), direction: "short", sizeQ: 0n });
+    expect(t.halted).toEqual({ long: true, short: false });
+    expect(t.fullSides).toEqual({ long: true, short: false });
+  });
+
+  it("room under one size step pauses the side as full ('step')", () => {
+    const t = g({ growth: OPEN(), sizeStepQ: 80_000_000n });
+    expect(t.halted.long).toBe(true);
+    expect(t.fullSides.long).toBe(true);
+    expect(t.issues.map((x) => x.kind)).toContain("growth-closed");
+    expect(g({ growth: OPEN(), sizeStepQ: 70_000_000n }).halted.long).toBe(false);
+  });
+
+  it("band market: a flat taker whose room is under the minimum leg is paused ('min-leg')", () => {
+    const t = g({ growth: BUSY(), minLegQ: 50_000_000n });
+    expect(t.halted.long).toBe(true);
+    expect(t.issues.map((x) => x.kind)).toContain("growth-closed");
+    expect(g({ growth: BUSY(), minLegQ: 40_000_000n }).halted.long).toBe(false);
   });
 });
