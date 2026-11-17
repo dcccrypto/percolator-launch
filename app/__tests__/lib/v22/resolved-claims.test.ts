@@ -129,6 +129,21 @@ describe("claim action ordering", () => {
   });
 });
 
+describe("leads checked, not bugs", () => {
+  it("stakeRecoverState with terminalCapacity 0: no offer, amount 0 (book-only)", () => {
+    expect(stakeRecoverState({ resolved: true, terminalCapacity: 0n, materializedPortfolioCount: 0n })).toEqual({ resolved: true, amount: 0n, blockedByPositions: false, offer: false });
+  });
+  it("a viewer with positions, Earn and stake gets all three rows, earn waiting while the market is not flat", () => {
+    const m: ClaimMarketState = { mode: 1, resolvedSlot: 1n, forceCloseDelaySlots: 0n, cTot: 5n, materializedPortfolioCount: 1n };
+    const rows = planClaimRows(m, { positions: 1, earnShares: 1n, stakeShares: 1n, stakeNeedsRecover: true });
+    expect(rows.map((r) => [r.kind, r.status])).toEqual([["positions", "ready"], ["earn", "waiting"], ["stake", "ready"]]);
+    expect(rows[2].actions).toEqual(["recover-to-stakers", "withdraw-stake"]);
+  });
+  it("a now slot past the end gives no end time", () => {
+    expect(ownerWindow({ resolvedSlot: 1n, forceCloseDelaySlots: 10n }, 10n ** 12n, 0)).toMatchObject({ ownerOnly: false, endsAtMs: null });
+  });
+});
+
 describe("owner-only window", () => {
   const m = { resolvedSlot: 1_000n, forceCloseDelaySlots: 216_000n };
   it("ends at resolved_slot + force_close_delay_slots (216,000 slots, about 24 h)", () => {
@@ -141,6 +156,20 @@ describe("owner-only window", () => {
     expect(ownerWindow(m, 216_999n, 0).ownerOnly).toBe(true);
     expect(ownerWindow(m, 217_000n, 0).ownerOnly).toBe(false);
     expect(ownerWindow(m, 217_000n, 0).endsAtMs).toBeNull();
+  });
+  it("a delay near u64::MAX gives a finite slot and an end time a Date can show (or null), never an Invalid Date", () => {
+    const huge = 2n ** 64n - 1n;
+    const w = ownerWindow({ resolvedSlot: 1_000n, forceCloseDelaySlots: huge }, 5n, 1_700_000_000_000);
+    expect(w.ownerOnly).toBe(true);
+    expect(w.endsAtSlot).toBe(1_000n + huge);
+    expect(w.endsAtMs).toBeNull();
+  });
+  it("just inside the Date range keeps an end time that formats; just outside gives null", () => {
+    const fmt = (ms: number): string => new Intl.DateTimeFormat("en", { timeZone: "UTC" }).format(new Date(ms));
+    const inside = ownerWindow({ resolvedSlot: 0n, forceCloseDelaySlots: 21_600_000_000_000n }, 0n, 0); // 8.64e15 ms exactly
+    expect(inside.endsAtMs).toBe(8.64e15);
+    expect(() => fmt(inside.endsAtMs as number)).not.toThrow();
+    expect(ownerWindow({ resolvedSlot: 0n, forceCloseDelaySlots: 21_600_000_000_001n }, 0n, 0).endsAtMs).toBeNull();
   });
   it("no delay configured = no window; unknown clock claims nothing", () => {
     expect(ownerWindow({ ...m, forceCloseDelaySlots: 0n }, 5n, 0).configured).toBe(false);

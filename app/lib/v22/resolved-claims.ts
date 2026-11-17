@@ -25,6 +25,9 @@ import { SLOT_MS } from "@/lib/limits/resolved-eta";
 /** `constants::LP_VAULT_BACKING_EXPIRY_SLOT` (percolator-prog aca02ba6 v16_program.rs:967). */
 export const LP_VAULT_BACKING_EXPIRY_SLOT = (2n ** 64n - 1n) / 2n;
 
+/** Largest time value a JS Date holds. */
+const MAX_DATE_MS = 8.64e15;
+
 /** `BackingBucketStatusV16::Empty` (engine v16.rs:4546). */
 const BUCKET_EMPTY = 0;
 
@@ -151,7 +154,10 @@ export function ownerWindow(m: Pick<ClaimMarketState, "resolvedSlot" | "forceClo
   const endsAtSlot = m.resolvedSlot + m.forceCloseDelaySlots;
   if (nowSlot === null) return { configured: true, ownerOnly: false, endsAtSlot, endsAtMs: null };
   const ownerOnly = nowSlot < endsAtSlot;
-  return { configured: true, ownerOnly, endsAtSlot, endsAtMs: ownerOnly ? nowMs + Number(endsAtSlot - nowSlot) * SLOT_MS : null };
+  if (!ownerOnly) return { configured: true, ownerOnly, endsAtSlot, endsAtMs: null };
+  const endsAtMs = nowMs + Number(endsAtSlot - nowSlot) * SLOT_MS;
+  // A delay near u64::MAX lands past the range a Date can hold (+-8.64e15 ms); `Intl.DateTimeFormat.format` throws on that. No estimate then.
+  return { configured: true, ownerOnly, endsAtSlot, endsAtMs: Math.abs(endsAtMs) <= MAX_DATE_MS ? endsAtMs : null };
 }
 
 // ── Stake recovery ─────────────────────────────────────────────────────────────────────────────
