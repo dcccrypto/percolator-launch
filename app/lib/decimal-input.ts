@@ -65,7 +65,7 @@ function firstSeparatorIsDecimal(f: string): DecimalReading {
 
 /** Text that is notation, not a plain amount: a minus sign, an exponent ("1e3") or hex ("0x10"). Stripping the
  *  letters/sign turned "-5" into 5 and "1e3" into 13, and the field submitted that. Such text holds no amount. */
-const NOT_PLAIN_AMOUNT = /[-−‒–]|^\s*[0-9.,+]*[eE][0-9.,eE+]*\s*$|^\s*0[xX]/;
+const NOT_PLAIN_AMOUNT = /[-−‒–‐—－]|[0-9.][eE][+]?[0-9.]|(?:^|[^0-9])0[xX]/;
 
 function readDecimal(raw: string): DecimalReading {
   if (NOT_PLAIN_AMOUNT.test(raw)) return { value: "", grouped: false, decimalChar: null };

@@ -18,6 +18,15 @@ describe("lenient reader refuses sign / exponent / hex instead of rewriting", ()
     },
   );
 
+  it.each(["1e3 SOL", "$1e3", "~1e3", "$0x10", "－5", "—5", "‐5"])("%s holds no amount", (raw) => {
+    expect(sanitizeDecimalInput(raw)).toBe("");
+  });
+
+  it("a trailing stray e does not erase the typed amount", () => {
+    expect(sanitizeDecimalInput("5e")).toBe("5");
+    expect(sanitizeDecimalInput("5 EUR")).toBe("5");
+  });
+
   it("leverage field: -2 does not become 2x", () => {
     expect(nextLeverageInputState("-2", 20)).toEqual({ text: "", leverage: null });
   });
