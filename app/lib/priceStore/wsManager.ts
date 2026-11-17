@@ -133,6 +133,9 @@ function connect(state: ManagerState): void {
   try {
     ws = new WebSocket(state.url);
   } catch {
+    // No socket exists: report "closed" so the UI doesn't sit on "connecting" forever once the
+    // breaker trips, and so revive() (which requires "closed") can recover it.
+    setStatus(state, "closed");
     scheduleReconnect(state);
     return;
   }
