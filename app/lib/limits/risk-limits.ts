@@ -155,7 +155,6 @@ export function lpTradeHeadroomQ(
 }
 
 /** Position contribution to a side's OI (basis; effective OI is A-scaled <= basis). */
-const DEFAULT_OI_SEARCH_MAX_Q = MAX_OI_SIDE_Q * 2n;
 const pos = (x: bigint): bigint => (x > 0n ? x : 0n);
 const neg = (x: bigint): bigint => (x < 0n ? -x : 0n);
 
@@ -189,28 +188,18 @@ export function sideOiHeadroomQ(
   lpPosQ: bigint,
   side: Side,
   capQ: bigint,
-  searchMaxQ: bigint = DEFAULT_OI_SEARCH_MAX_Q,
+  searchMaxQ: bigint = MAX_OI_SIDE_Q * 2n,
 ): bigint {
-  // Loop-invariant legs hoisted out of the search; the predicate is `sideOiAfterFill` +
-  // `sideOiGrowthAllowed` on both sides, inlined so each probe allocates nothing.
-  const long0 = oiLong - pos(takerPosQ) - pos(lpPosQ);
-  const short0 = oiShort - neg(takerPosQ) - neg(lpPosQ);
-  const long = side === "long";
   const ok = (m: bigint): boolean => {
-    const sz = long ? m : -m;
-    const t1 = takerPosQ + sz;
-    const l1 = lpPosQ - sz;
-    let nl = long0 + pos(t1) + pos(l1);
-    let ns = short0 + neg(t1) + neg(l1);
-    if (nl < 0n) nl = 0n;
-    if (ns < 0n) ns = 0n;
-    return (nl <= capQ || nl <= oiLong) && (ns <= capQ || ns <= oiShort);
+    const s = side === "long" ? m : -m;
+    const a = sideOiAfterFill(oiLong, oiShort, takerPosQ, lpPosQ, s);
+    return sideOiGrowthAllowed(oiLong, a.long, capQ) && sideOiGrowthAllowed(oiShort, a.short, capQ);
   };
   if (ok(searchMaxQ)) return searchMaxQ;
   let lo = 0n;
   let hi = searchMaxQ;
   while (hi - lo > 1n) {
-    const mid = (lo + hi) >> 1n;
+    const mid = (lo + hi) / 2n;
     if (ok(mid)) lo = mid;
     else hi = mid;
   }
