@@ -358,3 +358,42 @@ describe("D4", () => {
     expect(h.sigCalls).toBe(before); // not retried within the window
   });
 });
+
+describe("a rebuild that rejects (RPC failure inside entryFromChain)", () => {
+  it("(1) no attempt is recorded, so the next poll retries at once (no cooldown starts); it returns skipped", async () => {
+    let t = 1_000_000;
+    h.entryFromChain.mockRejectedValueOnce(new Error("429")).mockResolvedValueOnce(chain());
+    expect(await syncChainEntry(conn, target(), () => t)).toBe("skipped");
+    expect(localStorage.getItem(`perc:entrychain:v1:${portfolio.toBase58()}`)).toBeNull();
+    t += 1_000; // well inside COOLDOWN_MS
+    expect(await syncChainEntry(conn, target(), () => t)).toBe("chain");
+    expect(h.entryFromChain).toHaveBeenCalledTimes(2);
+    expect(getSavedEntry(SLAB, 0, WALLET)?.entryPriceE6).toBe(101_000_000n);
+  });
+  it("(2) a stale record for an OLDER size is never returned after a failure", async () => {
+    let t = 1_000_000;
+    h.entryFromChain.mockResolvedValueOnce(chain());
+    await syncChainEntry(conn, target(2n * T), () => t);
+    h.nowQ = 3n * T;
+    h.entryFromChain.mockRejectedValueOnce(new Error("429"));
+    expect(await syncChainEntry(conn, target(3n * T), () => t + 1)).toBe("skipped");
+  });
+  it("(2b) a same-size record that is due again keeps its prior verdict when the re-read rejects (not a new fact)", async () => {
+    let t = 1_000_000;
+    h.entryFromChain.mockResolvedValueOnce({ verdict: "unreadable", entry: null, txRead: 0 });
+    expect(await syncChainEntry(conn, target(), () => t)).toBe("unreadable");
+    t += COOLDOWN_MS;
+    h.entryFromChain.mockRejectedValueOnce(new Error("429"));
+    expect(await syncChainEntry(conn, target(), () => t)).toBe("unreadable");
+  });
+  it("two concurrent calls on different portfolios: the first rejecting does not block or fail the second", async () => {
+    const other = Keypair.generate().publicKey;
+    h.entryFromChain.mockRejectedValueOnce(new Error("429")).mockResolvedValueOnce(chain());
+    const [a, b] = await Promise.all([
+      syncChainEntry(conn, target()),
+      syncChainEntry(conn, { ...target(), idx: 1, portfolio: other }),
+    ]);
+    expect(a).toBe("skipped");
+    expect(b).toBe("chain");
+  });
+});
