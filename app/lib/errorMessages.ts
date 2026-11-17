@@ -287,13 +287,13 @@ export type WalletErrorKind = "locked" | "rejected";
 export const USER_DECLINED_RE =
   /user rejected|rejected the request|rejected by the user|user declined|user denied|user disapproved|request declined|signing cancell?ed by user|transaction cancell?ed|user exited the modal|\b0x6985\b/i;
 
+const WALLET_LOCKED_RE = /has not been authori[sz]ed by the user|\b4100\b.*authori[sz]|wallet is locked|locked wallet|WalletNotConnected|wallet not connected|please unlock/i;
+// USER_DECLINED_RE plus the broader "rejected" wording, merged into one pass (same language, one scan).
+const WALLET_REJECTED_RE = new RegExp(`${USER_DECLINED_RE.source}|transaction rejected|request rejected|\\b4001\\b`, "i");
+
 export function detectWalletError(msg: string): WalletErrorKind | null {
-  if (/has not been authori[sz]ed by the user|\b4100\b.*authori[sz]|wallet is locked|locked wallet|WalletNotConnected|wallet not connected|please unlock/i.test(msg)) {
-    return "locked";
-  }
-  if (USER_DECLINED_RE.test(msg) || /transaction rejected|request rejected|\b4001\b/i.test(msg)) {
-    return "rejected";
-  }
+  if (WALLET_LOCKED_RE.test(msg)) return "locked";
+  if (WALLET_REJECTED_RE.test(msg)) return "rejected";
   return null;
 }
 
@@ -310,7 +310,11 @@ export function failingProgramId(msg: string): string | null {
 const MATCHER_PROGRAM_ID = resolveDevnetProgramIds().matcher;
 const WRAPPER_PROGRAM_ID = resolveDevnetProgramIds().wrapper;
 
+const EXTRACT_PREFILTER_RE = /Custom|0x/i;
+
 export function extractErrorCode(msg: string): number | null {
+  // Every pattern below needs "Custom" (case-sensitive) or a hex literal "0x" (any case): skip all four scans otherwise.
+  if (!EXTRACT_PREFILTER_RE.test(msg)) return null;
   const m = msg.match(/(?:custom program error|Error Code)[:\s]+0x([0-9a-fA-F]+)/i);
   if (m) return parseInt(m[1], 16);
   // Match JSON format from getSignatureStatuses: {"Custom":14}
@@ -347,9 +351,18 @@ function extractCustomIndex(msg: string): number | null {
 const TRANSIENT_CODES = new Set<number>([WRAPPER_ERR.EngineBStale, WRAPPER_ERR.OracleInvalid, WRAPPER_ERR.OracleStale]);
 
 /** HTTP 429 / provider rate-limit wording. A bare "429" is NOT enough (base58 signatures contain digit runs). */
-export function isRateLimitText(msg: string): boolean {
-  if (/confirmation timeout|may still land/i.test(msg)) return false;
+const CONFIRM_TIMEOUT_RE = /confirmation timeout|may still land/i;
+const RATE_LIMIT_RE = /too many requests|rate.?limits? exceeded|rate.?limited|(?:\b429\b[\s\S]*rate.?limit)|(?:rate.?limit[\s\S]*\b429\b)|"code"\s*:\s*-32429\b/i;
+
+function rateLimitBody(msg: string): boolean {
+  // "code":-32429 has no letters except 'code' (case-sensitive originally) — keep that exact: re-check case-sensitively.
+  if (!RATE_LIMIT_RE.test(msg)) return false;
   return /too many requests|rate.?limits? exceeded|rate.?limited/i.test(msg) || (/\b429\b/.test(msg) && /rate.?limit/i.test(msg)) || /"code"\s*:\s*-32429\b/.test(msg);
+}
+
+export function isRateLimitText(msg: string): boolean {
+  if (CONFIRM_TIMEOUT_RE.test(msg)) return false;
+  return rateLimitBody(msg);
 }
 
 export function isTransientError(msg: string): boolean {
@@ -359,7 +372,7 @@ export function isTransientError(msg: string): boolean {
   // trade double-fills. pollConfirmation's message also embeds a base58
   // signature whose digit runs ("429") used to false-positive the old
   // substring rate-limit check. Guard first, before any other match.
-  if (/confirmation timeout|may still land/i.test(msg)) return false;
+  if (CONFIRM_TIMEOUT_RE.test(msg)) return false;
   const code = extractErrorCode(msg);
   if (code !== null && TRANSIENT_CODES.has(code)) return true;
   if (msg.includes("Blockhash not found")) return true;
@@ -369,10 +382,8 @@ export function isTransientError(msg: string): boolean {
   // "429" substring is NOT enough — base58 signatures and arbitrary numbers
   // can contain it — so require explicit rate-limit phrasing, optionally
   // alongside a word-bounded 429 status code.
-  if (/too many requests/i.test(msg)) return true;
-  if (isRateLimitText(msg)) return true;
-  if (/\b429\b/.test(msg) && /rate.?limit/i.test(msg)) return true;
-  return false;
+  // (the timeout guard already ran above, so skip isRateLimitText's own copy of it).
+  return rateLimitBody(msg);
 }
 
 export function isOracleStaleError(msg: string): boolean {
@@ -387,7 +398,7 @@ export function isOracleStaleError(msg: string): boolean {
 
 /** C1: a send that failed with EngineStale (19) and never confirmed (a timeout may have landed, so it never counts). */
 export function isEngineStaleAtSend(msg: string): boolean {
-  if (/confirmation timeout|may still land/i.test(msg)) return false;
+  if (CONFIRM_TIMEOUT_RE.test(msg)) return false;
   return extractErrorCode(msg) === WRAPPER_ERR.EngineStale;
 }
 
