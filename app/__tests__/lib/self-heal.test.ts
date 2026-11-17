@@ -31,12 +31,6 @@ import {
   isRepairableFailure,
   planLivenessRepairs,
   planSelfHeal,
-} from "@/lib/self-heal";
-import type { SelfHealDeps } from "@/lib/self-heal";
-import { modeFixtures } from "../helpers/v22-fixtures";
-import { __setDevnetV22ForTest } from "@/lib/v22/flag";
-import { decodeAssetVaultLp } from "@/lib/limits/decode";
-import {
   CATCH_UP_CRANK_CU,
   CATCH_UP_TOTAL_CU,
   MAX_REPAIRS,
@@ -48,6 +42,10 @@ import {
   parseCustomInstructionError,
   planCatchUp,
 } from "@/lib/self-heal";
+import type { SelfHealDeps } from "@/lib/self-heal";
+import { modeFixtures } from "../helpers/v22-fixtures";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { decodeAssetVaultLp } from "@/lib/limits/decode";
 
 vi.mock("@/lib/limits/decode", async (orig) => {
   const actual = await orig<typeof import("@/lib/limits/decode")>();
@@ -310,6 +308,7 @@ afterEach(() => {
   __setDevnetV22ForTest(null);
   vi.mocked(decodeAssetVaultLp).mockClear();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("small helpers", () => {
@@ -390,7 +389,9 @@ describe("planCatchUp", () => {
   });
   it("v2.2 flag on + unknown layout: offsets null → no plan, no throw", () => {
     __setDevnetV22ForTest(true);
-    const r = planCatchUp(new Uint8Array(4096), 5000n, 1);
+    const unknown = new Uint8Array(4096);
+    new DataView(unknown.buffer).setBigUint64(MAX_DT_OFF, 100n, true); // dt readable: only the null offsets can explain k=0
+    const r = planCatchUp(unknown, 5000n, 1);
     expect(r.k).toBe(0);
     expect(r.beyondCap).toBe(false);
   });
@@ -476,7 +477,7 @@ describe("planSelfHeal — catch-up and give-up paths", () => {
     expect(sims).toHaveLength(0);
   });
 
-  it("repair-did-not-help carries catchUpBeyondCap=false and a repair+crank mix leaves repairs recorded", async () => {
+  it("a liveness repair plus catch-up cranks: both prepended, repairs recorded", async () => {
     const paid = fixture("paid-market-v18-lapsed").slice();
     const dv = new DataView(paid.buffer, paid.byteOffset, paid.byteLength);
     dv.setBigUint64(SLOT_LAST_OFF, CAPTURE_SLOT - 200n, true);
@@ -491,6 +492,7 @@ describe("planSelfHeal — catch-up and give-up paths", () => {
     expect(r.catchUpCranks).toBe(2);
     expect(r.computeUnits).toBe(400_000 + REPAIR_CU + 2 * CATCH_UP_CRANK_CU);
     // cranks first, then the repair, then the user ix
+    expect(r.instructions.map((ix) => ix.keys.length)).toEqual([3, 3, 1, 0]);
     expect(r.instructions.map((ix) => ix.data[0]).slice(-2)).toEqual([EXPIRE_BACKING_BUCKET_TAG, 10]);
   });
 
@@ -540,7 +542,7 @@ describe("planSelfHeal — catch-up and give-up paths", () => {
     expect(simulate).not.toHaveBeenCalled();
   });
 
-  it("repair-did-not-help with a failing matcher-side error is NOT a give-up (repaired list used)", async () => {
+  it("a different remaining error (Custom 49) after cranks still uses the repaired list", async () => {
     const { deps } = sim([stale(2), { InstructionError: [3, { Custom: 49 }] }]);
     const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio } }, deps);
     expect(r.outcome).toBe("repaired");
