@@ -64,15 +64,17 @@ describe("lead 2: expiry boundaries", () => {
   });
   it("a non-finite clock refuses instead of treating the token as unexpired", async () => {
     const tok = await mintSession("u1", 5, SECRET, NOW);
-    expect(await readSession(tok, SECRET, NaN)).toBeNull();
-    expect(await sessionGrantsAccess(tok, ENV, NaN)).toBe(false);
+    for (const bad of [NaN, -Infinity, Infinity]) {
+      expect(await readSession(tok, SECRET, bad)).toBeNull();
+      expect(await sessionGrantsAccess(tok, ENV, bad)).toBe(false);
+    }
   });
   it("a non-finite clock closes the judge door", () => {
     const env = {
       PLAYGROUND_JUDGE_ACCESS_CODE: "j".repeat(30),
       PLAYGROUND_JUDGE_ACCESS_UNTIL: "2026-12-31T23:59:59Z",
     };
-    expect(judgeAccessCode(env, NaN)).toBeNull();
+    for (const bad of [NaN, -Infinity, Infinity]) expect(judgeAccessCode(env, bad)).toBeNull();
   });
 });
 

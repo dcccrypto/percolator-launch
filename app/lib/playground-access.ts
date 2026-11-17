@@ -155,7 +155,7 @@ async function open(
   if (typeof claims.pos !== "number" || !Number.isFinite(claims.pos)) return null;
   if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp)) return null;
   // `!(a < b)` also refuses a NaN clock, which `a >= b` would let through (fail open).
-  if (!(nowSec < claims.exp)) return null;
+  if (!Number.isFinite(nowSec) || !(nowSec < claims.exp)) return null;
   // Optional and never a reason to refuse: an odd value is dropped, the token still opens.
   const { ref, uid, ...rest } = claims;
   return {
@@ -262,7 +262,7 @@ export function judgeAccessCode(
   if (until) {
     if (!ISO_WITH_ZONE_RE.test(until)) return null;
     const t = Date.parse(until);
-    if (!Number.isFinite(t) || !(nowMs < t)) return null;
+    if (!Number.isFinite(t) || !Number.isFinite(nowMs) || !(nowMs < t)) return null;
   }
   return s;
 }
