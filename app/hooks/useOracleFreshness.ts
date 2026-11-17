@@ -146,6 +146,7 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
   const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
   const prevPriceRef = useRef<bigint | null>(null);
   const prevSlotRef = useRef<bigint | null>(null);
+  const futureStampRef = useRef<{ ts: bigint; seenAtMs: number } | null>(null);
 
   // Guard: detectOracleMode requires both PublicKey fields — skip if either is missing
   // (e.g. partial mock configs in test environments).
@@ -181,7 +182,22 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
       // Admin mode: authorityTimestamp is a real unix timestamp
       const ts = config.authorityTimestamp;
       if (ts > 0n) {
-        setLastUpdateMs(Number(ts) * 1000);
+        // A stamp ahead of the client clock (chain/client skew or a bad
+        // timestamp) must never read as fresher than "now". Pin such a stamp to
+        // the moment we first saw it, so slab re-polls with the same stamp
+        // can't keep re-freshening it; it ages normally from there.
+        const stampMs = Number(ts) * 1000;
+        const nowMs = Date.now();
+        let effectiveMs = stampMs;
+        if (futureStampRef.current !== null && futureStampRef.current.ts === ts) {
+          effectiveMs = futureStampRef.current.seenAtMs;
+        } else if (stampMs > nowMs) {
+          futureStampRef.current = { ts, seenAtMs: nowMs };
+          effectiveMs = nowMs;
+        } else {
+          futureStampRef.current = null;
+        }
+        setLastUpdateMs(effectiveMs);
       } else {
         // Fallback: admin price is set but timestamp is zero (legacy/static markets).
         // Use authorityPriceE6 (the canonical admin price, matching resolveMarketPriceE6)
