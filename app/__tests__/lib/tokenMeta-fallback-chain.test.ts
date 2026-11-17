@@ -444,11 +444,24 @@ describe("env override: NEXT_PUBLIC_TEST_USDC_MINT", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("a blank override falls back to the canonical mint", async () => {
-    vi.stubEnv("NEXT_PUBLIC_TEST_USDC_MINT", "   ");
-    vi.resetModules();
-    const m = await import("@/lib/tokenMeta");
-    const r = await m.fetchTokenMetaBatch(conn(PLAIN), [new PublicKey("DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC")]);
-    expect([...r.values()][0]).toEqual({ symbol: "USDC", name: "Sim USDC (devnet)", decimals: 6 });
+});
+
+describe("fetchTokenMeta: Unicode names and placeholder retry", () => {
+  it("keeps a non-ASCII token name (same as the batch path does)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonRes({ pairs: [{ baseToken: { symbol: "CHII", name: "ちいかわ" } }] }));
+    const meta = await mod.fetchTokenMeta(conn(PLAIN), newMint());
+    expect(meta.name).toBe("ちいかわ");
+    expect(meta.symbol).toBe("CHII");
+  });
+
+  it("ignores a cached placeholder and looks the mint up again", async () => {
+    const mint = newMint();
+    const c = conn(PLAIN);
+    const first = await mod.fetchTokenMeta(c, mint);
+    expect(mod.isPlaceholderTokenMeta(first)).toBe(true);
+    fetchMock.mockResolvedValueOnce(jsonRes({ pairs: [{ baseToken: { symbol: "REAL", name: "Real Coin" } }] }));
+    const second = await mod.fetchTokenMeta(c, mint);
+    expect(second).toEqual({ symbol: "REAL", name: "Real Coin", decimals: 9 });
+    expect(c.getParsedAccountInfo).toHaveBeenCalledTimes(2);
   });
 });

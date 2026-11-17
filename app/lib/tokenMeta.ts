@@ -594,7 +594,7 @@ export async function fetchTokenMeta(
 
   // R2-S14: Sanitize metadata — strip unsafe characters, limit length
   symbol = sanitizeTokenString(symbol, 16);
-  name = sanitizeTokenString(name, 32);
+  name = sanitizeTokenName(name, 32);
 
   const meta: TokenMeta = { decimals, symbol, name };
   cacheSet(key, meta);
