@@ -39,6 +39,12 @@ const BOUND = (() => {
   d.set(Buffer.from(layouts.assetVaultLpHex, "hex"), M.wrapperOff(0) + C.ASSET_VAULT_LP_OFF);
   return d;
 })();
+/** The same market with the AssetVaultLp record zeroed: explicitly unbound whatever the fixture holds. */
+const UNBOUND = (() => {
+  const d = BASE.slice();
+  d.fill(0, M.wrapperOff(0) + C.ASSET_VAULT_LP_OFF, M.wrapperOff(0) + C.ASSET_VAULT_LP_OFF + C.ASSET_VAULT_LP_LEN);
+  return d;
+})();
 const VAULT_LP = new PublicKey(BOUND.slice(M.wrapperOff(0) + C.ASSET_VAULT_LP_OFF, M.wrapperOff(0) + C.ASSET_VAULT_LP_OFF + 32));
 
 const vaultLpState = (claim: bigint): Uint8Array => {
@@ -109,7 +115,7 @@ describe("planSeniorDrawRepair: 87 draw-required", () => {
   it("not-repairable when the market is unreadable or has no bound vault LP", async () => {
     const simulate = vi.fn(async (ixs: TransactionInstruction[]) => ({ err: fail87(ixs.length) }));
     expect((await planSeniorDrawRepair(base, { read: async () => null, simulate })).outcome).toBe("not-repairable");
-    expect((await planSeniorDrawRepair(base, { read: async () => BASE, simulate })).outcome).toBe("not-repairable");
+    expect((await planSeniorDrawRepair(base, { read: async () => UNBOUND, simulate })).outcome).toBe("not-repairable");
     expect((await planSeniorDrawRepair(base, { read: async () => new Uint8Array(8), simulate })).outcome).toBe("not-repairable");
     expect(simulate).toHaveBeenCalledTimes(3); // only the original sim ran each time
   });
@@ -159,8 +165,9 @@ describe("planSeniorDrawRepair: early outcomes", () => {
 
 describe("planSeniorDrawRepair: 88 redeem variants", () => {
   const ks = keys15();
-  const ix77 = new TransactionInstruction({ programId: PROG, keys: ks, data: Buffer.from([77, 0, 0]) });
   const market = k();
+  ks[1] = { ...ks[1], pubkey: market }; // a real 77 carries the market at [1]
+  const ix77 = new TransactionInstruction({ programId: PROG, keys: ks, data: Buffer.from([77, 0, 0]) });
   const p = { programId: PROG, market, cranker: k(), instructions: [ix77], computeUnits: 250_000 };
   const state = new Map<string, Uint8Array>([[ks[13].pubkey.toBase58(), vaultLpState(1n << 62n)]]);
   const read = async (pk: PublicKey) => (pk.equals(market) ? BASE : state.get(pk.toBase58()) ?? null);
@@ -210,7 +217,10 @@ describe("planSeniorDrawRepair: 88 redeem variants", () => {
     expect(withExt.outcome).toBe("recalled");
     const rc = withExt.instructions.find((i) => i.data[0] === 98)!;
     expect(rc.keys.some((m) => m.pubkey.equals(ext))).toBe(true);
+    // v2.2 requires the ext at [8] (withNavFlowTailV22 throws without it => rpc-error), so the no-ext path is v2.1-only.
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     const noExt = await planSeniorDrawRepair(p, { read, simulate });
+    if (isDevnetV22Enabled()) return expect(noExt.outcome).toBe("rpc-error");
     expect(noExt.outcome).toBe("recalled");
     expect(noExt.instructions.find((i) => i.data[0] === 98)!.keys.some((m) => m.pubkey.equals(ext))).toBe(false);
   });
