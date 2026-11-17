@@ -217,12 +217,10 @@ describe("planSeniorDrawRepair: 88 redeem variants", () => {
     expect(withExt.outcome).toBe("recalled");
     const rc = withExt.instructions.find((i) => i.data[0] === 98)!;
     expect(rc.keys.some((m) => m.pubkey.equals(ext))).toBe(true);
-    // v2.2 requires the ext at [8] (withNavFlowTailV22 throws without it => rpc-error), so the no-ext path is v2.1-only.
-    vi.spyOn(console, "warn").mockImplementation(() => {});
     const noExt = await planSeniorDrawRepair(p, { read, simulate });
-    if (isDevnetV22Enabled()) return expect(noExt.outcome).toBe("rpc-error");
     expect(noExt.outcome).toBe("recalled");
-    expect(noExt.instructions.find((i) => i.data[0] === 98)!.keys.some((m) => m.pubkey.equals(ext))).toBe(false);
+    // v2.2's tail adds the (derived) ext itself; the read-gated ext is a v2.1-only distinction.
+    if (!isDevnetV22Enabled()) expect(noExt.instructions.find((i) => i.data[0] === 98)!.keys.some((m) => m.pubkey.equals(ext))).toBe(false);
   });
 
   it("a missing vault-LP state account => not-repairable", async () => {
