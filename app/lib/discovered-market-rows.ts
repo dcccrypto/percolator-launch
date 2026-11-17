@@ -48,12 +48,20 @@ const PLAYGROUND_REGISTRY_PATH = process.env.PLAYGROUND_REGISTRY_PATH || path.jo
  *
  * Module-level singleton so additions survive within the same hot-reload cycle.
  */
+function isValidSlabAddress(v: string): boolean {
+  try {
+    return new PublicKey(v).toBase58() === v;
+  } catch {
+    return false;
+  }
+}
+
 const _playgroundAllowedSlabs: Set<string> = (() => {
   const s = new Set(Object.keys(PLAYGROUND_SLAB_META));
   try {
     const raw = fs.readFileSync(PLAYGROUND_REGISTRY_PATH, "utf-8");
     const arr: string[] = JSON.parse(raw);
-    if (Array.isArray(arr)) arr.forEach((v) => typeof v === "string" && s.add(v));
+    if (Array.isArray(arr)) arr.forEach((v) => typeof v === "string" && isValidSlabAddress(v) && s.add(v));
   } catch { /* file missing or malformed — start with curated only */ }
   return s;
 })();
@@ -68,15 +76,23 @@ function getPlaygroundAllowedSlabs(): Set<string> {
  * Persists to playground-created-markets.json so the set survives process restarts.
  */
 export function registerPlaygroundSlab(slabAddress: string): void {
+  if (typeof slabAddress !== "string" || !isValidSlabAddress(slabAddress)) {
+    console.warn("[playground] Ignoring registration of a non-address slab:", String(slabAddress).slice(0, 64));
+    return;
+  }
   _playgroundAllowedSlabs.add(slabAddress);
+  const tmp = `${PLAYGROUND_REGISTRY_PATH}.${process.pid}.tmp`;
   try {
     // Write only the user-created addresses (not the curated seeds, which come from
     // PLAYGROUND_SLAB_META at startup — no need to duplicate them in the JSON file).
     const userCreated = [..._playgroundAllowedSlabs].filter(
       (s) => !PLAYGROUND_SLAB_META[s],
     );
-    fs.writeFileSync(PLAYGROUND_REGISTRY_PATH, JSON.stringify(userCreated, null, 2));
+    // Atomic: a crash mid-write must not leave a truncated file (load would then drop every user market).
+    fs.writeFileSync(tmp, JSON.stringify(userCreated, null, 2));
+    fs.renameSync(tmp, PLAYGROUND_REGISTRY_PATH);
   } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
     console.warn("[playground] Failed to persist registry:", e);
   }
 }
