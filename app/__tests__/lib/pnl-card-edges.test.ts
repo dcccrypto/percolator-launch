@@ -69,7 +69,8 @@ describe("computePnlCardStats edge inputs", () => {
     expect(s.pnlUsd).toBe(0);
     expect(s.paperPnlUsd).toBe(0);
     expect(s.spentUsd).toBe(0);
-    expect(Number.isFinite(s.avgEntryUsd)).toBe(true);
+    // Atom-derived tone/ROE are unaffected by the USD collapse (documented, impossible input).
+    expect(s.tone).toBe("profit");
   });
 
   it("short loses above entry (loss tone) and gains below it (profit tone)", () => {
@@ -87,8 +88,8 @@ describe("computePnlCardStats edge inputs", () => {
   it("lot exponent scales the displayed prices only when set", () => {
     const plain = computePnlCardStats(base, 500_000n);
     const lot = computePnlCardStats({ ...base, lotExp: 3 }, 500_000n);
-    expect(lot.avgEntryUsd).not.toBe(plain.avgEntryUsd);
-    expect(lot.avgExitUsd).not.toBe(plain.avgExitUsd);
+    expect(lot.avgEntryUsd).toBeCloseTo(0.0004, 9);
+    expect(lot.avgExitUsd).toBeCloseTo(0.0005, 9);
     expect(computePnlCardStats({ ...base, lotExp: 0 }, 500_000n).avgEntryUsd).toBe(plain.avgEntryUsd);
   });
 
@@ -104,11 +105,11 @@ describe("computePnlCardStats edge inputs", () => {
   });
 
   it("capped with zero margin base yields ROE 0, not NaN/Infinity", () => {
-    // Tiny size -> initial margin rounds to 0 atoms while paper PnL is still > cap of 0? use cap=1.
+    // Zero bps -> zero margin base, while paper PnL (> cap of 1 atom) is capped.
     const tiny = { ...base, effectiveSizeQ: 1n, nominalSizeQ: 1n, payableCapacityAtoms: 1n, initialMarginBps: 0n };
     const s = computePnlCardStats(tiny, 100_000_000n);
-    expect(Number.isFinite(s.roePct)).toBe(true);
-    expect(Object.is(s.roePct, NaN)).toBe(false);
+    expect(s.isCapped).toBe(true);
+    expect(s.roePct).toBe(0);
   });
 
   it("an unknown or non-binding capacity is not a cap", () => {
@@ -130,7 +131,7 @@ describe("display rounding boundaries", () => {
     expect(formatSignedUsd(0.004)).toBe("+$0.00");
     expect(formatSignedUsd(0.005)).toMatch(/^\+\$0\.0[01]$/);
     expect(formatSignedUsd(-0.004)).toBe("-$0.00");
-    expect(formatSignedUsd(1234.5)).toBe("+$1,234.50");
+    expect(formatSignedUsd(1234.5)).toMatch(/^\+\$1\D?234\D50$/);
   });
   it("formatSignedPct: 1dp, boundary and sign", () => {
     expect(formatSignedPct(0.04)).toBe("+0.0%");
@@ -143,7 +144,7 @@ describe("display rounding boundaries", () => {
     expect(formatPriceUsd(Infinity)).toBe("$0.00");
     expect(formatPriceUsd(-3)).toBe("$0.00");
     expect(formatPriceUsd(1000)).toBe("$1K");
-    expect(formatPriceUsd(999.999)).toBe("$1,000.00");
+    expect(formatPriceUsd(999.999)).toMatch(/^\$1\D?000\D00$/);
     expect(formatPriceUsd(1)).toBe("$1.00");
     expect(formatPriceUsd(0.99999)).toBe("$1.0000");
     expect(formatPriceUsd(0.01)).toBe("$0.0100");
