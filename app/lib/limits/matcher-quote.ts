@@ -132,11 +132,68 @@ function impactAndSkew(q: AdaptiveQuoteIn, fill: bigint): { impact: bigint; skew
   return { impact, skew };
 }
 
-function grossPosBps(q: AdaptiveQuoteIn, fill: bigint): bigint {
-  if (fill === 0n) return 0n;
-  const { impact, skew } = impactAndSkew(q, fill);
-  const s = BigInt(q.baseSpreadBps) + q.feeBps + impact + (skew > 0n ? skew : 0n);
-  return s > U128_MAX ? U128_MAX : s;
+/** `skew_potential_num` constants hoisted out of the binary-search loop (same math as `skewPotentialNum`). */
+interface SkewPot {
+  active: boolean;
+  m: bigint;
+  c2: bigint; // 2·refInv·cap
+  knee: bigint;
+  mKneeSq: bigint; // m·knee²
+}
+
+function skewPot(multBps: number, capBps: number, refInv: bigint): SkewPot {
+  if (multBps === 0 || capBps === 0) return { active: false, m: 0n, c2: 0n, knee: 0n, mKneeSq: 0n };
+  const m = BigInt(multBps);
+  const c = BigInt(capBps);
+  const knee = (c * refInv) / m;
+  return { active: true, m, c2: 2n * refInv * c, knee, mKneeSq: m * knee * knee };
+}
+
+function potAt(sp: SkewPot, x: bigint): bigint {
+  if (!sp.active || x === 0n) return 0n;
+  return x <= sp.knee ? sp.m * x * x : sp.mKneeSq + sp.c2 * (x - sp.knee);
+}
+
+/**
+ * `grossPosBps(q, fill) <= maxTotal` with the per-call constants hoisted. Identical result: impact, skew+ and
+ * the base are all >= 0, so once base+impact alone exceeds maxTotal the skew term can't change the answer
+ * (and the U128_MAX saturation is above any maxTotal <= 9000). Domain: k, multipliers, caps, refInv and fill are all >= 0 (u16/u32/u64 decodes).
+ */
+function makeGrossWithin(q: AdaptiveQuoteIn, maxTotal: bigint): (fill: bigint) => boolean {
+  const baseFee = BigInt(q.baseSpreadBps) + q.feeBps;
+  const { oracleE6, depthE6, invPre, takerBuys, refInv } = q;
+  const kBig = BigInt(q.impactKBps);
+  const kPos = q.impactKBps > 0;
+  const skewOff = refInv === 0n || (q.sMultBps === 0 && q.rMultBps === 0);
+  const ws = skewPot(q.sMultBps, q.skewCapBps, refInv);
+  const wr = skewPot(q.rMultBps, q.rebateCapBps, refInv);
+  const a = invPre < 0n ? -invPre : invPre;
+  const wsA = potAt(ws, a);
+  const wrA = potAt(wr, a);
+  return (fill: bigint): boolean => {
+    if (fill === 0n) return 0n <= maxTotal;
+    const notional = (fill * oracleE6) / 1_000_000n;
+    if (kPos && notional >= depthE6) return false; // impact = U128_MAX
+    const impact = !kPos || notional === 0n ? 0n : divCeil(kBig * notional, depthE6 - notional);
+    const pre = baseFee + impact;
+    if (pre > maxTotal) return false;
+    if (skewOff) return true;
+    const invPost = takerBuys ? invPre - fill : invPre + fill;
+    const b = invPost < 0n ? -invPost : invPost;
+    let p: bigint;
+    let n: bigint;
+    if ((invPre > 0n && invPost < 0n) || (invPre < 0n && invPost > 0n)) {
+      p = potAt(ws, b);
+      n = wrA;
+    } else if (b >= a) {
+      p = potAt(ws, b) - wsA;
+      n = 0n;
+    } else {
+      return true; // p = 0 => skew is a rebate or zero, no positive surcharge
+    }
+    if (p < n) return true;
+    return pre + divCeil(p - n, 2n * refInv * fill) <= maxTotal;
+  };
 }
 
 export interface AdaptiveQuote {
@@ -156,7 +213,8 @@ export function quoteAdaptive(q: AdaptiveQuoteIn): AdaptiveQuote | null {
   const zero: AdaptiveQuote = { fill: 0n, priceE6: q.oracleE6, totalBps: 0n, impactBps: 0n, skewBps: 0n, clippedByTotal: false };
   if (q.fill === 0n) return zero;
   let fill: bigint;
-  if (grossPosBps(q, q.fill) <= maxTotal) {
+  const within = makeGrossWithin(q, maxTotal);
+  if (within(q.fill)) {
     fill = q.fill;
   } else {
     let lo = 0n;
@@ -164,7 +222,7 @@ export function quoteAdaptive(q: AdaptiveQuoteIn): AdaptiveQuote | null {
     let i = 0;
     while (hi - lo > 1n && i < 128) {
       const mid = lo + (hi - lo) / 2n;
-      if (grossPosBps(q, mid) <= maxTotal) lo = mid;
+      if (within(mid)) lo = mid;
       else hi = mid;
       i++;
     }
