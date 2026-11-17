@@ -4,8 +4,15 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  bandCatchUpMs,
+  bandMinLeg,
+  bandMinLegExactQ,
   closeBlockedByBand,
+  legBelowBandMin,
   legBelowHalfMin,
+  minNotionalUnitsUp,
+  orderBlockedByBand,
+  type BandRentView,
   readBandRentView,
   rentPercentPerDay,
   rentRateE9,
@@ -189,5 +196,129 @@ describe("F7: the wrapper's floor-stuck exemption", () => {
   it("any mark/target difference counts as lag (wrapper has no target != 0 condition)", () => {
     const v = readBandRentView(build({ bandBps: 130, mark: 60_000_000n, target: 0n }))!;
     expect(v.price.lagging).toBe(true);
+  });
+});
+
+// Hand-written views (not produced by readBandRentView) so the pure helpers are tested against their documented rules.
+function view(o: { enabled?: boolean; lagging?: boolean; floorStuck?: boolean; side?: "long" | "short" | null; lotExp?: number; mark?: bigint; target?: bigint; cap?: bigint; bandBps?: number; minLeg?: bigint } = {}): BandRentView {
+  return {
+    assetIndex: 0,
+    lotExp: o.lotExp ?? 3,
+    band: { enabled: o.enabled ?? true, bandBps: o.bandBps ?? 130, epochSlots: 600n, pinSlots: 9000n, maxPositionsPerSide: 10n, minLegNotionalAtoms: o.minLeg ?? 100_000_000n, recoveryMinutes: 64 },
+    price: { capBpsPerSlot: o.cap ?? 4n, markE6: o.mark ?? 32_120_000n, targetE6: o.target ?? 32_120_000n, lagging: o.lagging ?? false, floorStuck: o.floorStuck ?? false, favourableCloseSide: o.side ?? null },
+    rent: { enabled: false, maxE9PerSlot: 0n, kinkBps: 5000, rateLongE9: 0n, rateShortE9: 0n },
+  };
+}
+
+describe("bandCatchUpMs", () => {
+  // mark 60, target 50 (per lot e6): gap = ceil(10/60 * 10_000) = 1667 bps. Sweep = 26 slots.
+  const lag = { lagging: true, mark: 60_000_000n, target: 50_000_000n };
+  it("null without a view, on a market without a band, or while not lagging", () => {
+    expect(bandCatchUpMs(null)).toBeNull();
+    expect(bandCatchUpMs(view({ ...lag, enabled: false }))).toBeNull();
+    expect(bandCatchUpMs(view({ ...lag, lagging: false }))).toBeNull();
+  });
+  it("cap 4 bps/slot x 26 = 104 bps per sweep (band 130 is wider): ceil(1667/104)=17 sweeps = 442 slots = 176.8 s", () => {
+    expect(bandCatchUpMs(view(lag))).toBe(176_800);
+  });
+  it("a narrower band (50 bps) limits the step: 34 sweeps = 884 slots", () => {
+    expect(bandCatchUpMs(view({ ...lag, bandBps: 50 }))).toBe(353_600);
+  });
+  it("slotMs scales the answer", () => {
+    expect(bandCatchUpMs(view(lag), 1000)).toBe(442_000);
+  });
+  it("null when there is no estimate (cap 0) or the walk needs no time (mark == target)", () => {
+    expect(bandCatchUpMs(view({ ...lag, cap: 0n }))).toBeNull();
+    expect(bandCatchUpMs(view({ lagging: true }))).toBeNull();
+  });
+});
+
+describe("closeBlockedByBand (hand-built views)", () => {
+  it("blocked only for lagging + not floor-stuck + matching favourable side", () => {
+    expect(closeBlockedByBand(view({ lagging: true, side: "short" }), "short")).toBe(true);
+    expect(closeBlockedByBand(view({ lagging: true, side: "short" }), "long")).toBe(false);
+    expect(closeBlockedByBand(view({ lagging: true, floorStuck: true, side: "short" }), "short")).toBe(false);
+    expect(closeBlockedByBand(view({ lagging: false, side: "short" }), "short")).toBe(false);
+  });
+});
+
+describe("orderBlockedByBand (#3609: only the reducing part of a fill is refused)", () => {
+  const longFav = view({ lagging: true, side: "long" });
+  it("flat position: never refused", () => {
+    expect(orderBlockedByBand(longFav, 0n, -5n)).toBe(false);
+  });
+  it("partial close, full close and flip of a long are refused", () => {
+    expect(orderBlockedByBand(longFav, 10n, -4n)).toBe(true);
+    expect(orderBlockedByBand(longFav, 10n, -10n)).toBe(true);
+    expect(orderBlockedByBand(longFav, 10n, -15n)).toBe(true);
+  });
+  it("growing the position is not refused", () => {
+    expect(orderBlockedByBand(longFav, 10n, 5n)).toBe(false);
+    expect(orderBlockedByBand(longFav, -10n, -5n)).toBe(false);
+  });
+  it("the side rule applies: a short being reduced is fine when only longs are blocked, refused when shorts are", () => {
+    expect(orderBlockedByBand(longFav, -10n, 4n)).toBe(false);
+    expect(orderBlockedByBand(view({ lagging: true, side: "short" }), -10n, 4n)).toBe(true);
+    expect(orderBlockedByBand(view({ lagging: true, side: "short" }), -10n, 15n)).toBe(true);
+  });
+  it("no view: not refused", () => {
+    expect(orderBlockedByBand(null, 10n, -10n)).toBe(false);
+  });
+});
+
+describe("bandMinLeg / bandMinLegExactQ / legBelowBandMin", () => {
+  it("null when there is no view, no band, no minimum or no price", () => {
+    for (const v of [null, view({ enabled: false }), view({ minLeg: 0n }), view({ mark: 0n })]) {
+      expect(bandMinLeg(v)).toBeNull();
+      expect(bandMinLegExactQ(v)).toBeNull();
+      expect(legBelowBandMin(v, 0n, 1n)).toBe(false);
+    }
+  });
+  it("lotExp > 0: whole lots, min 100 USDC at 32.12 per lot -> 4 lots = 128.48 USDC (the swordcat case)", () => {
+    expect(bandMinLeg(view())).toEqual({ lots: 4n, minQ: 4_000_000n, notionalAtoms: 128_480_000n, wholeLots: true });
+    // an exact multiple needs no rounding: min 96.36 = 3 lots
+    expect(bandMinLeg(view({ minLeg: 96_360_000n }))!.lots).toBe(3n);
+  });
+  it("lotExp 0: the exact minimum Q, not a whole token ($5,000 token, 100 USDC min -> 0.02 token)", () => {
+    expect(bandMinLeg(view({ lotExp: 0, mark: 5_000_000_000n }))).toEqual({ lots: 0n, minQ: 20_000n, notionalAtoms: 100_000_000n, wholeLots: false });
+  });
+  it("lotExp 0 notional is rounded UP so typing it reaches the minimum", () => {
+    // mark 10.003001 -> minQ 9,997,000 (ceil), product 100_000_000.997 atoms -> rounded up to 100_000_001
+    const m = bandMinLeg(view({ lotExp: 0, mark: 10_003_001n }))!;
+    expect(m.minQ).toBe(9_997_000n);
+    expect(m.notionalAtoms).toBe(100_000_001n); // product is 100_000_000.997 atoms, rounded up
+    expect(m.notionalAtoms * 1_000_000n >= m.minQ * 10_003_001n).toBe(true);
+  });
+  it("exact Q is the smallest q with floor(q*mark/1e6) >= min", () => {
+    const v = view();
+    const q = bandMinLegExactQ(v)!;
+    expect((q * 32_120_000n) / 1_000_000n >= 100_000_000n).toBe(true);
+    expect(((q - 1n) * 32_120_000n) / 1_000_000n < 100_000_000n).toBe(true);
+  });
+  it("legBelowBandMin: under the whole-lot minimum is below, at it is not, full close to zero is fine, either side", () => {
+    const v = view(); // minQ 4_000_000
+    expect(legBelowBandMin(v, 0n, 3_000_000n)).toBe(true);
+    expect(legBelowBandMin(v, 0n, 4_000_000n)).toBe(false);
+    expect(legBelowBandMin(v, 0n, -3_000_000n)).toBe(true);
+    expect(legBelowBandMin(v, 5_000_000n, -5_000_000n)).toBe(false);
+    expect(legBelowBandMin(v, 5_000_000n, -2_000_000n)).toBe(true); // leaves 3 lots
+  });
+});
+
+describe("minNotionalUnitsUp", () => {
+  it("rounds UP to the cent in whole units", () => {
+    expect(minNotionalUnitsUp(100_000_000n, 6)).toBe(100);
+    expect(minNotionalUnitsUp(100_000_004n, 6)).toBe(100.01);
+    expect(minNotionalUnitsUp(128_480_000n, 6)).toBe(128.48);
+    expect(minNotionalUnitsUp(1n, 9)).toBe(0.01);
+    expect(minNotionalUnitsUp(0n, 6)).toBe(0);
+  });
+});
+
+describe("readBandRentView: a band market read from bytes feeds the helpers", () => {
+  it("catch-up and minimum leg from a SDK-layout fixture", () => {
+    const v = readBandRentView(build({ bandBps: 130, minLeg: 100_000_000n, mark: 60_000_000n, target: 50_000_000n, lotExp: 3, maxStepBps: 4 }))!;
+    expect(bandCatchUpMs(v)).toBe(176_800);
+    expect(bandMinLeg(v)!.lots).toBe(2n); // ceil(100 / 60)
   });
 });
