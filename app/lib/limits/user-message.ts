@@ -419,7 +419,8 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
         action: { id: "try-again", label: "Try again" },
       });
     }
-    if (/account not found: [1-9a-hj-np-z]{32,44}/i.test(p.raw)) {
+    // Real base58 (no 0 O I l, case-sensitive); under /i the old lowercase class dropped every address containing an i or o.
+    if (/[Aa]ccount [Nn]ot [Ff]ound: [1-9A-HJ-NP-Za-km-z]{32,44}/.test(p.raw)) {
       return m("out-of-date", "error", "Page out of date", "Part of this market couldn't be read. Refresh to continue. Nothing was sent.", {
         action: { id: "refresh", label: "Refresh" },
       });
