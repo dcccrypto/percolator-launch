@@ -157,7 +157,7 @@ function potAt(sp: SkewPot, x: bigint): bigint {
 /**
  * `grossPosBps(q, fill) <= maxTotal` with the per-call constants hoisted. Identical result: impact, skew+ and
  * the base are all >= 0, so once base+impact alone exceeds maxTotal the skew term can't change the answer
- * (and the U128_MAX saturation is above any maxTotal <= 9000).
+ * (and the U128_MAX saturation is above any maxTotal <= 9000). Domain: k, multipliers, caps, refInv and fill are all >= 0 (u16/u32/u64 decodes).
  */
 function makeGrossWithin(q: AdaptiveQuoteIn, maxTotal: bigint): (fill: bigint) => boolean {
   const baseFee = BigInt(q.baseSpreadBps) + q.feeBps;
