@@ -283,10 +283,10 @@ describe("bandMinLeg / bandMinLegExactQ / legBelowBandMin", () => {
     expect(bandMinLeg(view({ lotExp: 0, mark: 5_000_000_000n }))).toEqual({ lots: 0n, minQ: 20_000n, notionalAtoms: 100_000_000n, wholeLots: false });
   });
   it("lotExp 0 notional is rounded UP so typing it reaches the minimum", () => {
-    // mark 10.003001 -> minQ 9,997,000 (ceil), product 100.0000000003 USDC -> atoms rounded up to 100_000_001
+    // mark 10.003001 -> minQ 9,997,000 (ceil), product 100_000_000.997 atoms -> rounded up to 100_000_001
     const m = bandMinLeg(view({ lotExp: 0, mark: 10_003_001n }))!;
     expect(m.minQ).toBe(9_997_000n);
-    expect(m.notionalAtoms).toBe((m.minQ * 10_003_001n + 999_999n) / 1_000_000n);
+    expect(m.notionalAtoms).toBe(100_000_001n); // product is 100_000_000.997 atoms, rounded up
     expect(m.notionalAtoms * 1_000_000n >= m.minQ * 10_003_001n).toBe(true);
   });
   it("exact Q is the smallest q with floor(q*mark/1e6) >= min", () => {
