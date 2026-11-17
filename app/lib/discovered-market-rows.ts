@@ -41,13 +41,7 @@ const PLAYGROUND_CURATED_ONLY = process.env.PLAYGROUND_SHOW_ALL_MARKETS !== "tru
 // PLAYGROUND_REGISTRY_PATH overrides the file (the test setup points it at a temp file so test runs never write the tracked JSON).
 const PLAYGROUND_REGISTRY_PATH = process.env.PLAYGROUND_REGISTRY_PATH || path.join(process.cwd(), "lib", "playground-created-markets.json");
 
-/**
- * Process-local registry of playground-created slab addresses.
- * Initialized from PLAYGROUND_SLAB_META (curated seeds) + any slabs previously
- * written to playground-created-markets.json (user creations). Augmented on POST.
- *
- * Module-level singleton so additions survive within the same hot-reload cycle.
- */
+/** A canonical base58 32-byte address (the registry only ever holds real slab keys). */
 function isValidSlabAddress(v: string): boolean {
   try {
     return new PublicKey(v).toBase58() === v;
@@ -56,6 +50,13 @@ function isValidSlabAddress(v: string): boolean {
   }
 }
 
+/**
+ * Process-local registry of playground-created slab addresses.
+ * Initialized from PLAYGROUND_SLAB_META (curated seeds) + any slabs previously
+ * written to playground-created-markets.json (user creations). Augmented on POST.
+ *
+ * Module-level singleton so additions survive within the same hot-reload cycle.
+ */
 const _playgroundAllowedSlabs: Set<string> = (() => {
   const s = new Set(Object.keys(PLAYGROUND_SLAB_META));
   try {
