@@ -13,6 +13,9 @@ import {
   parseGeckoTrending,
   safeLogoUrl,
   keeperFloorUsd,
+  accelMultiplier,
+  liqDampener,
+  momentumScores,
 } from "@/lib/trending-tokens";
 
 const WSOL = "So11111111111111111111111111111111111111112";
@@ -254,5 +257,39 @@ describe("safeLogoUrl / keeperFloorUsd", () => {
     expect(keeperFloorUsd("")).toBe(1000);
     expect(keeperFloorUsd("2500")).toBe(2500);
     expect(keeperFloorUsd("junk")).toBe(1000);
+  });
+});
+
+describe("keeperFloorUsd matches the keeper's decimal-only grammar", () => {
+  it.each(["0x10", "1e4", "1_000", "+5", "-5", "Infinity", "1,000", "5."])("falls back to 1000 for %j", (raw) => {
+    expect(keeperFloorUsd(raw)).toBe(1000);
+  });
+  it.each([["2500", 2500], [" 250.5 ", 250.5], ["0", 0]] as const)("accepts decimal %j", (raw, want) => {
+    expect(keeperFloorUsd(raw)).toBe(want);
+  });
+});
+
+describe("upstream numeric strings are decimal-only", () => {
+  const body = (liq: string) => ({
+    data: [{
+      relationships: { base_token: { data: { id: `solana_${M("aaa")}` } } },
+      attributes: { reserve_in_usd: liq },
+    }],
+  });
+  it.each(["0x1A", "0b11", "0o7"])("rejects non-decimal %j", (s) => {
+    expect(parseGeckoTrending(body(s))[0].geckoMarket?.liquidityUsd).toBeNull();
+  });
+  it("still accepts decimal and exponent strings", () => {
+    expect(parseGeckoTrending(body("1234.5"))[0].geckoMarket?.liquidityUsd).toBe(1234.5);
+    expect(parseGeckoTrending(body("1.2e-7"))[0].geckoMarket?.liquidityUsd).toBe(1.2e-7);
+  });
+});
+
+describe("momentum scoring never yields NaN", () => {
+  it("zero baseline and zero liquidity are finite", () => {
+    expect(accelMultiplier(5, 0)).toBe(1);
+    expect(liqDampener(0)).toBe(0.3);
+    const s = momentumScores({ volume1hUsd: 10, volume24hUsd: 10, liquidityUsd: 0, txns1h: 0, txns6h: 0 });
+    expect(Number.isFinite(s.score1h) && Number.isFinite(s.score24h)).toBe(true);
   });
 });

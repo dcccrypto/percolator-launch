@@ -62,8 +62,12 @@ export const MIN_LIQUIDITY_USD = 5_000;
  * module pulls in web3.js + the SDK). The wizard enforces the real check on-chain.
  */
 export function keeperFloorUsd(env: string | undefined = process.env.MIN_POOL_LIQUIDITY_USD): number {
-  const n = Number((env ?? "").trim() || "1000");
-  return Number.isFinite(n) && n >= 0 ? n : 1000;
+  // Keeper grammar (pool-liquidity parseUsdToE6): decimal digits with an optional fraction only.
+  // Number() would also accept 0x10, 1e4, +5, 5. which the keeper rejects.
+  const raw = (env ?? "").trim() || "1000";
+  if (!/^\d+(\.\d+)?$/.test(raw)) return 1000;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 1000;
 }
 
 const FETCH_TIMEOUT_MS = 6_000;
@@ -191,8 +195,10 @@ export function isTrendingDataUnavailable(args: {
 
 // ── pure helpers (unit-tested) ───────────────────────────────────────────────
 
+const NON_DECIMAL_RE = /^[+-]?0[xXbBoO]/;
 const num = (v: unknown): number | null => {
-  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : typeof v === "number" ? v : NaN;
+  // Number() reads "0x1A" as 26; upstream payloads are decimal (exponent form allowed).
+  const n = typeof v === "string" && v.trim() !== "" && !NON_DECIMAL_RE.test(v.trim()) ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : null;
 };
 
