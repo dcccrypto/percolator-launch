@@ -2,6 +2,7 @@
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/v22-fill-events.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
+ * LOCAL DELTA (perf, output-identical; SDK-PERF-FILLEVENTSFRAME): `runtimeProgramLine` memoises ids proven canonical (CANONICAL_IDS). Mirror upstream or drop on re-port.
  */
 /**
  * v2.2 wrapper events: FILL, REDUCE, MOVE (incl. MOVE sub 4 `G9_RESTORE_PNL`) and the strict log attribution rule.
@@ -237,15 +238,28 @@ export function decodeWrapperEventTokenV22(token: string): { event: WrapperEvent
 const RUNTIME_LINE = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) (.*)$/s;
 const INVOKE_TAIL = /^invoke \[([0-9]+)\]$/;
 
+// Ids already proven canonical (`new PublicKey(id).toBase58() === id`). Only successes are stored (a hostile log cannot evict them with
+// junk ids that fail), and the set is bounded: when full it is cleared. Pure memo: the result is identical to re-running the round trip.
+const CANONICAL_IDS = new Set<string>();
+const CANONICAL_IDS_MAX = 512;
+
+function isCanonicalProgramId(id: string): boolean {
+  if (CANONICAL_IDS.has(id)) return true;
+  try {
+    if (new PublicKey(id).toBase58() !== id) return false;
+  } catch {
+    return false;
+  }
+  if (CANONICAL_IDS.size >= CANONICAL_IDS_MAX) CANONICAL_IDS.clear();
+  CANONICAL_IDS.add(id);
+  return true;
+}
+
 /** `Program <id> <tail>` -> `{id, tail}` only when `id` is a canonical 32-byte base58 key. */
 function runtimeProgramLine(line: string): { id: string; tail: string } | null {
   const m = RUNTIME_LINE.exec(line);
   if (!m) return null;
-  try {
-    if (new PublicKey(m[1]).toBase58() !== m[1]) return null;
-  } catch {
-    return null;
-  }
+  if (!isCanonicalProgramId(m[1])) return null;
   return { id: m[1], tail: m[2] };
 }
 
