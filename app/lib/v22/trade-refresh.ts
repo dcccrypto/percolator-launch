@@ -104,7 +104,8 @@ export function marketAssetSlots(marketData: Uint8Array): number | null {
   }
 }
 
-function activeLegs(data: Uint8Array | null): number {
+/** Active legs of a portfolio; 0 when there is no account (data null); null when the bytes cannot be parsed (unknown, NOT flat). */
+function activeLegs(data: Uint8Array | null): number | null {
   if (!data) return 0;
   try {
     // Flag on: the wrapper-bound parser, so the old 6kpg2wi7 build reads a pre-#299 portfolio with its own row instead of a swallowed
@@ -113,14 +114,14 @@ function activeLegs(data: Uint8Array | null): number {
     const p = isDevnetV22Enabled() ? parsePortfolio(data) : v22Slab.parsePortfolioV17(data);
     return p.legs.filter((l) => l.active).length;
   } catch {
-    return 0;
+    return null;
   }
 }
 
 /** True when the Q-7 shape is needed: a multi-asset market and the taker or the LP at >= 3 legs. */
 export function needsMultiAssetShape(i: Pick<TradeRefreshInput, "marketData" | "takerData" | "lpData">): boolean {
   const slots = marketAssetSlots(i.marketData);
-  return slots !== null && slots > 1 && Math.max(activeLegs(i.takerData), activeLegs(i.lpData)) >= WRAPPER_PRE_CRANK_MIN_LEGS_V22;
+  return slots !== null && slots > 1 && Math.max(activeLegs(i.takerData) ?? WRAPPER_PRE_CRANK_MIN_LEGS_V22, activeLegs(i.lpData) ?? WRAPPER_PRE_CRANK_MIN_LEGS_V22) >= WRAPPER_PRE_CRANK_MIN_LEGS_V22;
 }
 
 function codeAt(err: unknown): { index: number; code: number | null } | null {
@@ -274,7 +275,8 @@ export async function executeV22MultiAssetOrder(i: MultiAssetOrderInput, deps: M
   const slots = Math.max(marketAssetSlots(i.marketData) ?? 1, 1);
   const tradeIdx = body.length - 1;
   const refreshSignatures: string[] = [];
-  const takerLegs = activeLegs(i.takerData);
+  // An existing taker whose data could not be read or parsed is unknown, not flat: it is cranked (a refused crank sim fails closed).
+  const takerLegs = i.takerPortfolio && !i.takerData ? WRAPPER_PRE_CRANK_MIN_LEGS_V22 : activeLegs(i.takerData) ?? WRAPPER_PRE_CRANK_MIN_LEGS_V22;
 
   /** The trade (the body's last instruction, after `lead` cranks) was refused 121 / 19. */
   const needsRefresh = (sim: RefreshSim, lead = 0): boolean => {

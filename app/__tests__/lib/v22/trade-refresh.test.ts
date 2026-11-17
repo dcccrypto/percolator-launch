@@ -294,6 +294,29 @@ describe("multi-asset order flow (fresh-taker fix): the body alone, cranks only 
     expect(r.refreshSignatures).toEqual([]);
   });
 
+  it("fail closed: an existing taker portfolio that cannot be read (garbage bytes / failed fetch) is NOT assumed flat; it is cranked", async () => {
+    for (const takerData of [new Uint8Array(64).fill(7), null]) {
+      const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs, 19) : { ...ok, consumed: 600_000 }), []);
+      await executeV22MultiAssetOrder(input({ takerData }), d);
+      expect(cranksOf(sent[0].ixs).map(crankTarget)).toEqual([P, LP].map((x) => x.toBase58()));
+    }
+  });
+
+  it("retry bound: a combined tx that keeps losing the same-slot race (22) stops after 1 + MAX_TWO_TX_REPEATS sends", async () => {
+    const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : { ...ok, consumed: 800_000 }), []);
+    (d.send as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => { throw new Error("custom program error: 0x16"); });
+    await expect(executeV22MultiAssetOrder(input(), d)).rejects.toBeInstanceOf(HealthCheckStaleError);
+    expect(d.send).toHaveBeenCalledTimes(1 + MAX_TWO_TX_REPEATS);
+    expect(sent).toEqual([]);
+  });
+
+  it("retry bound: a 2-tx refresh that keeps raining 22 at send is bounded and records no refresh signature", async () => {
+    const { d } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : ixs.some((ix) => !isCrank(ix)) ? { ...ok, consumed: 1_300_000 } : { ...ok, consumed: 300_000 }), [k()]);
+    (d.send as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => { throw new Error("custom program error: 0x16"); });
+    await expect(executeV22MultiAssetOrder(input(), d)).rejects.toBeInstanceOf(HealthCheckStaleError);
+    expect(d.send).toHaveBeenCalledTimes(1 + MAX_TWO_TX_REPEATS);
+  });
+
   it("2-tx path: any other refusal of the refresh tx is still thrown, and no order is sent", async () => {
     const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : ixs.some((ix) => !isCrank(ix)) ? { ...ok, consumed: 1_300_000 } : { ...ok, consumed: 300_000 }), [k()]);
     (d.send as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (_ixs: TransactionInstruction[], kind: MultiAssetSendKind) => {
