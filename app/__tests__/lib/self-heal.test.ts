@@ -12,7 +12,7 @@
  * Negative controls are inline: every positive assertion has a paired case
  * where the triggering condition is removed and the repair must NOT appear.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ComputeBudgetProgram, Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
@@ -34,6 +34,25 @@ import {
 } from "@/lib/self-heal";
 import type { SelfHealDeps } from "@/lib/self-heal";
 import { modeFixtures } from "../helpers/v22-fixtures";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { decodeAssetVaultLp } from "@/lib/limits/decode";
+import {
+  CATCH_UP_CRANK_CU,
+  CATCH_UP_TOTAL_CU,
+  MAX_REPAIRS,
+  buildCatchUpCrankIx,
+  computeBudgetPrefix,
+  connectionSelfHealDeps,
+  describeRepair,
+  isSelfHealEnabled,
+  parseCustomInstructionError,
+  planCatchUp,
+} from "@/lib/self-heal";
+
+vi.mock("@/lib/limits/decode", async (orig) => {
+  const actual = await orig<typeof import("@/lib/limits/decode")>();
+  return { ...actual, decodeAssetVaultLp: vi.fn(actual.decodeAssetVaultLp) };
+});
 
 const fixture = (name: string): Uint8Array =>
   new Uint8Array(
@@ -269,5 +288,289 @@ describe("planSelfHeal flow", () => {
     });
     expect(r.outcome).toBe("rpc-error");
     expect(r.instructions).toBe(base.instructions);
+  });
+});
+
+// ── Coverage extension: catch-up planning, give-up paths, connection deps ──────
+const SLOT_LAST_OFF = 592 + 758 + 1024 + 41; // v2.1 constants (flag off)
+const MAX_DT_OFF = 592 + 32 + 118;
+const CUR_SLOT_OFF = 592 + 613;
+
+/** A v2.1 healthy market with the clock fields set explicitly. */
+function clockMarket(o: { slotLast: bigint; dt: bigint; headerSlot?: bigint }): Uint8Array {
+  const d = fixture("pengu-market-v18-healthy").slice();
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  dv.setBigUint64(SLOT_LAST_OFF, o.slotLast, true);
+  dv.setBigUint64(MAX_DT_OFF, o.dt, true);
+  dv.setBigUint64(CUR_SLOT_OFF, o.headerSlot ?? 0n, true);
+  return d;
+}
+
+afterEach(() => {
+  __setDevnetV22ForTest(null);
+  vi.mocked(decodeAssetVaultLp).mockClear();
+  vi.unstubAllEnvs();
+});
+
+describe("small helpers", () => {
+  it("describeRepair names both repair kinds and both sides", () => {
+    expect(describeRepair({ kind: "expire", domain: 3 })).toBe("ExpireBackingBucket(domain 3)");
+    expect(describeRepair({ kind: "finalize", assetIndex: 1, side: 0 })).toBe("FinalizeResetSide(asset 1, long)");
+    expect(describeRepair({ kind: "finalize", assetIndex: 1, side: 1 })).toBe("FinalizeResetSide(asset 1, short)");
+  });
+  it("parseCustomInstructionError rejects every malformed shape", () => {
+    expect(parseCustomInstructionError({ InstructionError: [1, { Custom: 5 }] })).toEqual({ index: 1, code: 5 });
+    for (const bad of [null, undefined, "x", {}, { InstructionError: [1] }, { InstructionError: ["1", { Custom: 1 }] },
+      { InstructionError: [1, null] }, { InstructionError: [1, { Custom: "1" }] }, { InstructionError: [1, "Err"] }]) {
+      expect(parseCustomInstructionError(bad)).toBeNull();
+    }
+  });
+  it("computeBudgetPrefix is heap frame then CU limit", () => {
+    const p = computeBudgetPrefix(123_456);
+    expect(p).toHaveLength(2);
+    expect(p.every((ix) => ix.programId.equals(ComputeBudgetProgram.programId))).toBe(true);
+  });
+  it("encodeFinalizeResetSideData rejects an out-of-range asset", () => {
+    expect(() => encodeFinalizeResetSideData(-1, 0)).toThrow(/bad asset/);
+    expect(() => encodeFinalizeResetSideData(0x10000, 0)).toThrow(/bad asset/);
+  });
+  it("planLivenessRepairs caps the plan at MAX_REPAIRS", () => {
+    const buckets = Array.from({ length: 12 }, (_, i) => ({ domain: i, status: BUCKET_STATUS_FRESH, expirySlot: 1n }));
+    expect(planLivenessRepairs({ mode: 0, nowSlot: 10n, buckets, sides: [] })).toHaveLength(MAX_REPAIRS);
+  });
+  it("isSelfHealEnabled: default on, off for 0/false/off (case/space-insensitive)", () => {
+    vi.stubEnv("NEXT_PUBLIC_SELF_HEAL", "");
+    expect(isSelfHealEnabled()).toBe(true);
+    for (const v of ["0", "false", "OFF", " off "]) {
+      vi.stubEnv("NEXT_PUBLIC_SELF_HEAL", v);
+      expect(isSelfHealEnabled()).toBe(false);
+    }
+    vi.stubEnv("NEXT_PUBLIC_SELF_HEAL", "1");
+    expect(isSelfHealEnabled()).toBe(true);
+  });
+});
+
+describe("planCatchUp", () => {
+  it("no lag (now <= slotLast): k=0, not beyond cap", () => {
+    const r = planCatchUp(clockMarket({ slotLast: 1000n, dt: 100n }), 1000n, 400_000);
+    expect(r).toEqual({ k: 0, lagSlots: 0n, dtSlots: 100n, beyondCap: false });
+  });
+  it("lag 250 with dt 100 → ceil = 3 cranks", () => {
+    const r = planCatchUp(clockMarket({ slotLast: 1000n, dt: 100n }), 1250n, 400_000);
+    expect(r).toEqual({ k: 3, lagSlots: 250n, dtSlots: 100n, beyondCap: false });
+  });
+  it("header current_slot is a floor over the read slot", () => {
+    const r = planCatchUp(clockMarket({ slotLast: 1000n, dt: 100n, headerSlot: 1100n }), 900n, 400_000);
+    expect(r.lagSlots).toBe(100n);
+    expect(r.k).toBe(1);
+  });
+  it("lag beyond the CU budget: k=0 and beyondCap", () => {
+    // userCu 1.0M → kMax = floor(200k/25k) = 8; lag needs 20 cranks
+    const r = planCatchUp(clockMarket({ slotLast: 1000n, dt: 10n }), 1200n, 1_000_000);
+    expect(r).toEqual({ k: 0, lagSlots: 200n, dtSlots: 10n, beyondCap: true });
+  });
+  it("exactly at the cap is allowed", () => {
+    const kMax = Math.floor((CATCH_UP_TOTAL_CU - 1_000_000) / CATCH_UP_CRANK_CU);
+    const r = planCatchUp(clockMarket({ slotLast: 1000n, dt: 10n }), 1000n + BigInt(kMax) * 10n, 1_000_000);
+    expect(r.k).toBe(kMax);
+    expect(r.beyondCap).toBe(false);
+  });
+  it("userCu above the total budget: kMax clamps to 0 → beyondCap", () => {
+    const r = planCatchUp(clockMarket({ slotLast: 1000n, dt: 10n }), 1005n, CATCH_UP_TOTAL_CU + 500_000);
+    expect(r.beyondCap).toBe(true);
+    expect(r.k).toBe(0);
+  });
+  it("slotLast 0 or dt 0 (unset): nothing to plan, dt reported null for 0", () => {
+    expect(planCatchUp(clockMarket({ slotLast: 0n, dt: 100n }), 5000n, 1).k).toBe(0);
+    const r = planCatchUp(clockMarket({ slotLast: 1000n, dt: 0n }), 5000n, 1);
+    expect(r).toEqual({ k: 0, lagSlots: 0n, dtSlots: null, beyondCap: false });
+  });
+  it("buffer too short for the fields: null readers → no plan", () => {
+    expect(planCatchUp(new Uint8Array(100), 5000n, 1)).toEqual({ k: 0, lagSlots: 0n, dtSlots: null, beyondCap: false });
+  });
+  it("v2.2 flag on + unknown layout: offsets null → no plan, no throw", () => {
+    __setDevnetV22ForTest(true);
+    const r = planCatchUp(new Uint8Array(4096), 5000n, 1);
+    expect(r.k).toBe(0);
+    expect(r.beyondCap).toBe(false);
+  });
+  it("v2.2 flag on + real v2.2 market: resolves VERSION offsets and does not throw", () => {
+    __setDevnetV22ForTest(true);
+    const r = planCatchUp(modeFixtures().market, 10n ** 12n, 400_000);
+    expect(typeof r.k).toBe("number");
+    expect(r.k).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("buildCatchUpCrankIx", () => {
+  it("keys are [cranker, market, portfolio, ...oracleTail]", () => {
+    const cranker = Keypair.generate().publicKey;
+    const portfolio = Keypair.generate().publicKey;
+    const tail = { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: false };
+    const ix = buildCatchUpCrankIx(PROGRAM, cranker, MARKET, portfolio, [tail]);
+    expect(ix.programId.equals(PROGRAM)).toBe(true);
+    expect(ix.keys.map((k) => k.pubkey.toBase58()).slice(0, 4)).toEqual(
+      [cranker, MARKET, portfolio, tail.pubkey].map((k) => k.toBase58()),
+    );
+    expect(ix.keys).toHaveLength(4);
+    expect(buildCatchUpCrankIx(PROGRAM, cranker, MARKET, portfolio).keys).toHaveLength(3);
+  });
+});
+
+describe("planSelfHeal — catch-up and give-up paths", () => {
+  const userIx = new TransactionInstruction({ programId: PROGRAM, keys: [], data: Buffer.from([10, 9]) });
+  const cranker = Keypair.generate().publicKey;
+  const portfolio = Keypair.generate().publicKey;
+  const base = { programId: PROGRAM, market: MARKET, instructions: [userIx], computeUnits: 400_000 };
+  const lagging = clockMarket({ slotLast: 1000n, dt: 100n });
+
+  const sim = (results: unknown[]) => {
+    const sims: TransactionInstruction[][] = [];
+    let i = 0;
+    return {
+      sims,
+      deps: {
+        readMarket: async () => ({ data: lagging, slot: 1250n }),
+        simulate: async (ixs: TransactionInstruction[]) => {
+          sims.push(ixs);
+          return { err: results[Math.min(i++, results.length - 1)] };
+        },
+      } satisfies SelfHealDeps,
+    };
+  };
+  const stale = (idx: number) => ({ InstructionError: [idx, { Custom: ENGINE_STALE_CODE }] });
+
+  it("lagging clock + catchUp portfolio: prepends k cranks, CU raised, outcome repaired", async () => {
+    const { sims, deps } = sim([stale(2), null]);
+    const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio } }, deps);
+    expect(r.outcome).toBe("repaired");
+    expect(r.catchUpCranks).toBe(3);
+    expect(r.repairs).toEqual([]);
+    expect(r.instructions).toHaveLength(4);
+    expect(r.instructions[3]).toBe(userIx);
+    expect(r.computeUnits).toBe(400_000 + 3 * CATCH_UP_CRANK_CU);
+    expect(sims).toHaveLength(2);
+    expect(vi.mocked(decodeAssetVaultLp)).not.toHaveBeenCalled();
+  });
+
+  it("catch-up cranks do not help: repair-did-not-help, unchanged list", async () => {
+    const { sims, deps } = sim([stale(2), stale(5)]);
+    const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio } }, deps);
+    expect(r.outcome).toBe("repair-did-not-help");
+    expect(r.instructions).toBe(base.instructions);
+    expect(r.computeUnits).toBe(400_000);
+    expect(r.repairs).toEqual([]);
+    expect(r.catchUpBeyondCap).toBe(false);
+    expect(sims).toHaveLength(2);
+  });
+
+  it("lag beyond cap: no cranks, no simulation, flagged for the keeper", async () => {
+    const { sims, deps } = sim([stale(2)]);
+    const r = await planSelfHeal({ ...base, computeUnits: 1_000_000, catchUp: { cranker, portfolio } }, {
+      ...deps,
+      readMarket: async () => ({ data: clockMarket({ slotLast: 1000n, dt: 10n }), slot: 5000n }),
+    });
+    expect(r.outcome).toBe("no-repair-needed");
+    expect(r.catchUpBeyondCap).toBe(true);
+    expect(r.instructions).toBe(base.instructions);
+    expect(sims).toHaveLength(0);
+  });
+
+  it("repair-did-not-help carries catchUpBeyondCap=false and a repair+crank mix leaves repairs recorded", async () => {
+    const paid = fixture("paid-market-v18-lapsed").slice();
+    const dv = new DataView(paid.buffer, paid.byteOffset, paid.byteLength);
+    dv.setBigUint64(SLOT_LAST_OFF, CAPTURE_SLOT - 200n, true);
+    dv.setBigUint64(MAX_DT_OFF, 100n, true);
+    const sims: TransactionInstruction[][] = [];
+    const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio, oracleTail: [] } }, {
+      readMarket: async () => ({ data: paid, slot: CAPTURE_SLOT }),
+      simulate: async (ixs) => { sims.push(ixs); return { err: sims.length === 1 ? stale(2) : null }; },
+    });
+    expect(r.outcome).toBe("repaired");
+    expect(r.repairs).toEqual([{ kind: "expire", domain: 1 }]);
+    expect(r.catchUpCranks).toBe(2);
+    expect(r.computeUnits).toBe(400_000 + REPAIR_CU + 2 * CATCH_UP_CRANK_CU);
+    // cranks first, then the repair, then the user ix
+    expect(r.instructions.map((ix) => ix.data[0]).slice(-2)).toEqual([EXPIRE_BACKING_BUCKET_TAG, 10]);
+  });
+
+  it("portfolio null + unbound/undecodable vault LP: no cranks, no repairs → no-repair-needed", async () => {
+    const { sims, deps } = sim([stale(2)]);
+    const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio: null } }, deps);
+    expect(vi.mocked(decodeAssetVaultLp)).toHaveBeenCalledTimes(1);
+    expect(r.outcome).toBe("no-repair-needed");
+    expect(r.catchUpCranks).toBeUndefined();
+    expect(sims).toHaveLength(0);
+  });
+
+  it("portfolio null + bound vault LP: cranks use the bound LP portfolio", async () => {
+    const lp = Keypair.generate().publicKey;
+    vi.mocked(decodeAssetVaultLp).mockReturnValueOnce({ bound: true, vaultLpPortfolio: lp.toBytes() } as ReturnType<typeof decodeAssetVaultLp>);
+    const { deps } = sim([stale(2), null]);
+    const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio: null } }, deps);
+    expect(r.outcome).toBe("repaired");
+    expect(r.catchUpCranks).toBe(3);
+    expect(r.instructions[0].keys[2].pubkey.equals(lp)).toBe(true);
+  });
+
+  it("portfolio null + decoded but unbound LP: no cranks", async () => {
+    vi.mocked(decodeAssetVaultLp).mockReturnValueOnce({ bound: false, vaultLpPortfolio: new Uint8Array(32) } as ReturnType<typeof decodeAssetVaultLp>);
+    const { deps } = sim([stale(2)]);
+    const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio: null } }, deps);
+    expect(r.outcome).toBe("no-repair-needed");
+  });
+
+  it("second simulation throws: never throws out, unchanged with rpc-error", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let n = 0;
+    const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio } }, {
+      readMarket: async () => ({ data: lagging, slot: 1250n }),
+      simulate: async () => { if (n++ === 0) return { err: stale(2) }; throw new Error("boom"); },
+    });
+    expect(r.outcome).toBe("rpc-error");
+    expect(r.instructions).toBe(base.instructions);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("market account missing: no-repair-needed, no simulation", async () => {
+    const simulate = vi.fn(async () => ({ err: null }));
+    const r = await planSelfHeal(base, { readMarket: async () => null, simulate });
+    expect(r.outcome).toBe("no-repair-needed");
+    expect(simulate).not.toHaveBeenCalled();
+  });
+
+  it("repair-did-not-help with a failing matcher-side error is NOT a give-up (repaired list used)", async () => {
+    const { deps } = sim([stale(2), { InstructionError: [3, { Custom: 49 }] }]);
+    const r = await planSelfHeal({ ...base, catchUp: { cranker, portfolio } }, deps);
+    expect(r.outcome).toBe("repaired");
+  });
+});
+
+describe("connectionSelfHealDeps", () => {
+  const payer = Keypair.generate().publicKey;
+  const ix = new TransactionInstruction({ programId: PROGRAM, keys: [], data: Buffer.from([1]) });
+
+  it("readMarket returns data + context slot, or null when the account is missing", async () => {
+    const getAccountInfoAndContext = vi
+      .fn()
+      .mockResolvedValueOnce({ value: { data: Buffer.from([1, 2, 3]) }, context: { slot: 77 } })
+      .mockResolvedValueOnce({ value: null, context: { slot: 78 } });
+    const deps = connectionSelfHealDeps({ getAccountInfoAndContext } as never, MARKET, payer);
+    const got = await deps.readMarket();
+    expect(Array.from(got!.data)).toEqual([1, 2, 3]);
+    expect(got!.slot).toBe(77n);
+    expect(await deps.readMarket()).toBeNull();
+    expect(getAccountInfoAndContext).toHaveBeenCalledWith(MARKET, "confirmed");
+  });
+
+  it("simulate sends an unsigned versioned tx with replaceRecentBlockhash and returns sim err", async () => {
+    const simulateTransaction = vi.fn().mockResolvedValue({ value: { err: { InstructionError: [0, { Custom: 19 }] } } });
+    const deps = connectionSelfHealDeps({ simulateTransaction } as never, MARKET, payer);
+    const r = await deps.simulate([ix]);
+    expect(r.err).toEqual({ InstructionError: [0, { Custom: 19 }] });
+    const [tx, opts] = simulateTransaction.mock.calls[0];
+    expect(opts).toEqual({ replaceRecentBlockhash: true, sigVerify: false, commitment: "confirmed" });
+    expect(tx.message.staticAccountKeys[0].equals(payer)).toBe(true);
   });
 });
