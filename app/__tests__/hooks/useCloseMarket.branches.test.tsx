@@ -27,6 +27,8 @@ const h = vi.hoisted(() => ({
   hdrMode: 0,
   wallet: { publicKey: null as unknown, signTransaction: vi.fn() },
   buildBatch: vi.fn(),
+  encClose: vi.fn(),
+  encResolve: vi.fn(),
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({
@@ -50,9 +52,9 @@ vi.mock("@percolatorct/sdk", () => ({
     return { marketauth: h.admin, collateralMint: MINT };
   },
   V17_HEADER_LEN: 0,
-  encodeCloseSlab: () => new Uint8Array([13]),
+  encodeCloseSlab: (...a: unknown[]) => (h.encClose(...a), new Uint8Array([13])),
   ACCOUNTS_CLOSE_SLAB: [],
-  encodeResolveMarket: () => new Uint8Array([19]),
+  encodeResolveMarket: (...a: unknown[]) => (h.encResolve(...a), new Uint8Array([19])),
   ACCOUNTS_RESOLVE_MARKET: [],
   buildAccountMetas: () => [],
   buildIx: (a: { data: Uint8Array }) => ({ tag: a.data[0] }),
@@ -136,6 +138,8 @@ beforeEach(() => {
   h.wallet = { publicKey: WALLET, signTransaction: vi.fn() };
   h.closeInOne.mockReset().mockResolvedValue({ signature: "sigX" });
   h.sendTx.mockReset().mockResolvedValue("sendSig");
+  h.encClose.mockReset();
+  h.encResolve.mockReset();
   h.buildBatch.mockReset().mockImplementation((a: unknown) => a);
   localStorage.setItem("percolator-pending-slab-keypair", "x");
 });
@@ -200,6 +204,8 @@ describe("closeSlab success paths", () => {
     const arg = h.closeInOne.mock.calls[0]![0] as { main: { instructions: unknown[] }; cleanup: unknown[] };
     expect(arg.main.instructions).toHaveLength(3); // crank, resolve, close
     expect(arg.cleanup).toHaveLength(0);
+    expect(h.encClose).toHaveBeenCalledWith(1n);
+    expect(h.encResolve).toHaveBeenCalledWith({ assetGenerationFrontier: 1n, authorityEpoch: 1n });
     warn.mockRestore();
   });
   it("v17 with cleanup groups skips the simulate gate even when it would refuse", async () => {
@@ -251,8 +257,7 @@ describe("closeSlab error mapping", () => {
   it("anything else falls back to a plain message", async () => {
     const r = await fail("kaboom unknown");
     expect(r.r).toBeNull();
-    expect(typeof r.error).toBe("string");
-    expect(r.error).not.toBe("");
+    expect(r.error).toBeTruthy();
     expect(r.loading).toBe(false);
   });
 });
@@ -277,6 +282,7 @@ describe("settleMarket remaining branches", () => {
     const arg = h.sendTx.mock.calls[0]![0] as { instructions: unknown[]; computeUnits: number };
     expect(arg.instructions).toEqual([{ tag: 78 }, { tag: 19 }]);
     expect(arg.computeUnits).toBe(1_400_000);
+    expect(h.encResolve).toHaveBeenCalledWith({ assetGenerationFrontier: 5n, authorityEpoch: 3n });
   });
   it("simulation refusal => error, no send", async () => {
     h.sim = { err: "bad", logs: [], simulated: [] };
