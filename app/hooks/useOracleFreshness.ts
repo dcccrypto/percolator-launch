@@ -59,6 +59,10 @@ const SLOT_MS = 400;
  * its own `lastUpdateMs` in response to the pulse, so per-consumer values and
  * the hook's return shape are unchanged — only the timer is shared.
  */
+// Future admin stamps pinned to first-observed time. Module-level so every hook
+// instance (and any remount) agrees; a bad stamp can't re-freshen on mount.
+const futureStampSeenAt = new Map<bigint, number>();
+
 let sharedTickListeners: Set<() => void> | null = null;
 let sharedTickTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -146,7 +150,6 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
   const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
   const prevPriceRef = useRef<bigint | null>(null);
   const prevSlotRef = useRef<bigint | null>(null);
-  const futureStampRef = useRef<{ ts: bigint; seenAtMs: number } | null>(null);
 
   // Guard: detectOracleMode requires both PublicKey fields — skip if either is missing
   // (e.g. partial mock configs in test environments).
@@ -184,18 +187,18 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
       if (ts > 0n) {
         // A stamp ahead of the client clock (chain/client skew or a bad
         // timestamp) must never read as fresher than "now". Pin such a stamp to
-        // the moment we first saw it, so slab re-polls with the same stamp
-        // can't keep re-freshening it; it ages normally from there.
+        // the moment it was first seen (shared across instances), so re-polls
+        // and remounts can't re-freshen it; it ages from that moment.
         const stampMs = Number(ts) * 1000;
         const nowMs = Date.now();
         let effectiveMs = stampMs;
-        if (futureStampRef.current !== null && futureStampRef.current.ts === ts) {
-          effectiveMs = futureStampRef.current.seenAtMs;
+        const pinned = futureStampSeenAt.get(ts);
+        if (pinned !== undefined) {
+          effectiveMs = pinned;
         } else if (stampMs > nowMs) {
-          futureStampRef.current = { ts, seenAtMs: nowMs };
+          if (futureStampSeenAt.size >= 64) futureStampSeenAt.clear();
+          futureStampSeenAt.set(ts, nowMs);
           effectiveMs = nowMs;
-        } else {
-          futureStampRef.current = null;
         }
         setLastUpdateMs(effectiveMs);
       } else {

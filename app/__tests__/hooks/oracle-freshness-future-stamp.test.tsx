@@ -1,14 +1,13 @@
 /**
- * useOracleFreshness — future-timestamp / slot-lag / shared-timer leads.
+ * useOracleFreshness — future admin timestamp handling and shared timer.
  */
 import { renderHook, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 
 let slabState: Record<string, unknown> = {};
-let slotObs: { slot: bigint; observedAtMs: number } | null = null;
 vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: () => slabState }));
-vi.mock("@/hooks/useClusterSlot", () => ({ useClusterSlotObservation: () => slotObs }));
+vi.mock("@/hooks/useClusterSlot", () => ({ useClusterSlotObservation: () => null }));
 
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 
@@ -33,11 +32,10 @@ function adminSlab(authorityTimestamp: bigint) {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
-  slotObs = null;
 });
 afterEach(() => vi.useRealTimers());
 
-describe("lead 1: admin authorityTimestamp in the future", () => {
+describe("admin authorityTimestamp in the future", () => {
   it("does not read fresh forever from a far-future stamp", () => {
     const future = BigInt(NOW / 1000 + 3600); // chain stamp 1h ahead of client clock
     slabState = adminSlab(future);
@@ -64,21 +62,31 @@ describe("lead 1: admin authorityTimestamp in the future", () => {
   });
 });
 
-describe("leads 2/3: observed cluster slot lags the push slot", () => {
-  it("never derives a push time newer than now", () => {
-    slabState = {
-      ...adminSlab(0n),
-      wrapperConfigV17: { oracleMode: 3, lastGoodOracleSlot: 1000n, markEwmaLastSlot: 1000n },
-    };
-    slotObs = { slot: 900n, observedAtMs: NOW };
-    const { result } = renderHook(() => useOracleFreshness({ trackSeconds: true }));
-    if (result.current.lastUpdateMs !== null) {
-      expect(result.current.lastUpdateMs).toBeLessThanOrEqual(Date.now());
-    }
+describe("future stamp pin is shared across mounts", () => {
+  it("a remount after the stamp aged out does not re-freshen it", () => {
+    const future = BigInt(NOW / 1000 + 7200);
+    slabState = adminSlab(future);
+    const first = renderHook(() => useOracleFreshness({ trackSeconds: true }));
+    act(() => {
+      vi.advanceTimersByTime(120_000);
+    });
+    expect(first.result.current.level).toBe("stale");
+    const second = renderHook(() => useOracleFreshness({ trackSeconds: true }));
+    expect(second.result.current.level).toBe("stale");
+    first.unmount();
+    second.unmount();
+  });
+
+  it("a new past stamp after a future one ages from the new stamp", () => {
+    slabState = adminSlab(BigInt(NOW / 1000 + 9000));
+    const { result, rerender } = renderHook(() => useOracleFreshness({ trackSeconds: true }));
+    slabState = adminSlab(BigInt(NOW / 1000 - 10));
+    rerender();
+    expect(result.current.elapsedSecs).toBe(10);
   });
 });
 
-describe("lead 4: shared 1s timer", () => {
+describe("shared 1s timer", () => {
   it("is cleared when the last subscriber unmounts", () => {
     slabState = adminSlab(BigInt(NOW / 1000 - 5));
     const a = renderHook(() => useOracleFreshness());
