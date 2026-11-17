@@ -273,7 +273,9 @@ export function deriveMarketParams(
   // Formulas, guards (never 0, <= i128::MAX) and source citations live in
   // lib/matcher-params.ts. Inventory cap = LP seed x lpExposureBps (1x default)
   // in base units at the opening price; one fill <= a quarter of that.
-  const matcher = deriveMatcherLimits(Math.floor(lev), lpCollateralAtoms, initialPriceE6, lpExposureBps);
+  // Leverage is read back from the stored bps (exact launch round-trip), NOT floor(lev):
+  // deriveLaunchMarketParams feeds 10000/3334 = 2.9994, which floored to 2x for 3/6/7/9x.
+  const matcher = deriveMatcherLimits(Math.floor(leverageFromMarginBps(initialMarginBps)), lpCollateralAtoms, initialPriceE6, lpExposureBps);
   const { maxInventoryAbs, maxFillAbs, skewSpreadMultBps } = matcher;
 
   return {
