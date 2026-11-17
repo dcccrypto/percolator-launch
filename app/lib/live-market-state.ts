@@ -140,7 +140,7 @@ function readU128LE(data: Uint8Array, offset: number): bigint {
 }
 
 /** Parse one slab's live state. Returns null if the account isn't a v17 slab. */
-function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState | null {
+export function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState | null {
   if (!isWrapperAccount(data)) return null;
 
   let markPriceUsd: number | null = null;
