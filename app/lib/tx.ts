@@ -144,7 +144,7 @@ export class SimulationRefusal extends Error {
   readonly failingInstructionTag: number | null;
   constructor(err: unknown, logs: readonly string[] = [], instructions: readonly TransactionInstruction[] = []) {
     const failing = logs.filter((l) => l.includes("Error") || l.includes("failed") || l.includes("Program log:")).slice(-3).join("\n");
-    super(`Transaction simulation failed: ${JSON.stringify(err)}` + (failing ? `\n${failing}` : ""));
+    super(`Transaction simulation failed: ${safeStringify(err)}` + (failing ? `\n${failing}` : ""));
     this.name = "SimulationRefusal";
     this.err = err;
     this.logs = [...logs];
@@ -261,6 +261,25 @@ export async function presimulateOrThrow(
 
 const POLL_INTERVAL_MS = 2000;
 /** How long pollConfirmation waits before "may still land" (a test seam, like AMBIGUOUS_OUTCOME_WAIT). */
+/** JSON.stringify that survives BigInt (RPC/sim errors can carry u64 fields). */
+function safeStringify(v: unknown): string {
+  try {
+    return JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x));
+  } catch {
+    return String(v);
+  }
+}
+
+/** A cache age is fresh only if non-negative (a backwards wall-clock step yields a negative age) and under the TTL. */
+function isFreshAge(ageMs: number, ttlMs: number): boolean {
+  return ageMs >= 0 && ageMs < ttlMs;
+}
+
+/** Monotonic milliseconds (immune to wall-clock steps); falls back to Date.now where performance is unavailable. */
+function monotonicNow(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+
 export const CONFIRMATION_POLL = { maxMs: 90_000 };
 /**
  * Hard ceiling on the client priority price, micro-lamports per CU (A-1, security review 2026-10-05).
@@ -427,7 +446,7 @@ async function buildSendErrorMessage(connection: Connection, sendErr: unknown): 
  * call fails.
  */
 export async function getPriorityFee(connection: Connection): Promise<number> {
-  if (cachedPriorityFee && Date.now() - cachedPriorityFee.ts < PRIORITY_FEE_CACHE_MS) {
+  if (cachedPriorityFee && isFreshAge(Date.now() - cachedPriorityFee.ts, PRIORITY_FEE_CACHE_MS)) {
     return cachedPriorityFee.fee;
   }
   // Clamp at the boundary so no caller (legacy price or v1 total) ever sees more than the ceiling.
@@ -537,7 +556,7 @@ export async function getFreshBlockhash(connection: Connection, forceFresh = fal
   // v2.2 QA NB-2: never a blockhash from a non-devnet connection, and never a reused one (always fetched now).
   await assertDevnetConnection(connection);
   if (isDevnetV22Enabled()) forceFresh = true;
-  if (!forceFresh && cachedBlockhash && Date.now() - cachedBlockhash.ts < BLOCKHASH_FRESH_MS) {
+  if (!forceFresh && cachedBlockhash && isFreshAge(Date.now() - cachedBlockhash.ts, BLOCKHASH_FRESH_MS)) {
     return cachedBlockhash.blockhash;
   }
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
@@ -676,17 +695,18 @@ export async function pollConfirmation(
   onProgress?: (elapsedMs: number) => void,
   abortSignal?: AbortSignal,
 ): Promise<void> {
-  const start = Date.now();
+  // Monotonic clock: a wall-clock step backwards must not stretch the poll past maxMs.
+  const start = monotonicNow();
   let pollCount = 0;
 
-  while (Date.now() - start < CONFIRMATION_POLL.maxMs) {
+  while (monotonicNow() - start < CONFIRMATION_POLL.maxMs) {
     // Check if aborted
     if (abortSignal?.aborted) {
       throw new Error("Transaction confirmation cancelled by user. Note: transaction may still land on-chain.");
     }
     
     pollCount++;
-    const elapsed = Date.now() - start;
+    const elapsed = monotonicNow() - start;
     
     // Report progress
     if (onProgress) {
@@ -701,7 +721,7 @@ export async function pollConfirmation(
 
       if (status) {
         if (status.err) {
-          throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+          throw new Error(`Transaction failed: ${safeStringify(status.err)}`);
         }
         if (
           status.confirmationStatus === "confirmed" ||
@@ -722,7 +742,7 @@ export async function pollConfirmation(
     // while confirmation is imminent, then back off — worst case this adds a
     // handful of extra getSignatureStatuses calls (cheap, unbatched) in the
     // first seconds; the common case exits after 2-3 fast polls.
-    const elapsedNow = Date.now() - start;
+    const elapsedNow = monotonicNow() - start;
     const interval =
       elapsedNow < 5_000 ? 350 :
       elapsedNow < 15_000 ? 1_000 :
