@@ -59,6 +59,10 @@ const SLOT_MS = 400;
  * its own `lastUpdateMs` in response to the pulse, so per-consumer values and
  * the hook's return shape are unchanged — only the timer is shared.
  */
+// Future admin stamps pinned to first-observed time. Module-level so every hook
+// instance (and any remount) agrees; a bad stamp can't re-freshen on mount.
+const futureStampSeenAt = new Map<bigint, number>();
+
 let sharedTickListeners: Set<() => void> | null = null;
 let sharedTickTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -181,7 +185,22 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
       // Admin mode: authorityTimestamp is a real unix timestamp
       const ts = config.authorityTimestamp;
       if (ts > 0n) {
-        setLastUpdateMs(Number(ts) * 1000);
+        // A stamp ahead of the client clock (chain/client skew or a bad
+        // timestamp) must never read as fresher than "now". Pin such a stamp to
+        // the moment it was first seen (shared across instances), so re-polls
+        // and remounts can't re-freshen it; it ages from that moment.
+        const stampMs = Number(ts) * 1000;
+        const nowMs = Date.now();
+        let effectiveMs = stampMs;
+        const pinned = futureStampSeenAt.get(ts);
+        if (pinned !== undefined) {
+          effectiveMs = pinned;
+        } else if (stampMs > nowMs) {
+          if (futureStampSeenAt.size >= 64) futureStampSeenAt.clear();
+          futureStampSeenAt.set(ts, nowMs);
+          effectiveMs = nowMs;
+        }
+        setLastUpdateMs(effectiveMs);
       } else {
         // Fallback: admin price is set but timestamp is zero (legacy/static markets).
         // Use authorityPriceE6 (the canonical admin price, matching resolveMarketPriceE6)
