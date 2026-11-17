@@ -119,7 +119,7 @@ describe("#2743: a simulation that could not run is never signed", () => {
 
 describe("#2742: a claim whose confirmation timed out is pending, with its signature", () => {
   it("poll deadline: pendingSignature kept, not a success, not an error", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     const [a] = newSlabs(1);
     statusMode = "never-confirms";
     const onLanded = vi.fn();
@@ -152,7 +152,7 @@ describe("#2742: a claim whose confirmation timed out is pending, with its signa
   });
 
   it("the panel shows the pending claim with an explorer link and keeps it out of the total", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     statusMode = "never-confirms";
     const slabs = newSlabs(1);
     type Props = Parameters<typeof CreatorFeesPanel>[0];

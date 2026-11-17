@@ -260,7 +260,6 @@ export async function presimulateOrThrow(
 }
 
 const POLL_INTERVAL_MS = 2000;
-/** How long pollConfirmation waits before "may still land" (a test seam, like AMBIGUOUS_OUTCOME_WAIT). */
 /** JSON.stringify that survives BigInt (RPC/sim errors can carry u64 fields). */
 function safeStringify(v: unknown): string {
   try {
@@ -280,6 +279,7 @@ function monotonicNow(): number {
   return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
 }
 
+/** How long pollConfirmation waits before "may still land" (a test seam, like AMBIGUOUS_OUTCOME_WAIT). */
 export const CONFIRMATION_POLL = { maxMs: 90_000 };
 /**
  * Hard ceiling on the client priority price, micro-lamports per CU (A-1, security review 2026-10-05).
@@ -576,7 +576,7 @@ export const HANDOFF_BLOCKHASH_MAX_AGE_MS = 5_000;
 export async function refreshBlockhashBeforeHandoff(connection: Connection, tx: { recentBlockhash?: string }, now: number = Date.now()): Promise<boolean> {
   if (!isDevnetV22Enabled()) return false;
   const c = cachedBlockhash;
-  if (c && tx.recentBlockhash === c.blockhash && now - c.ts <= HANDOFF_BLOCKHASH_MAX_AGE_MS) return false;
+  if (c && tx.recentBlockhash === c.blockhash && now - c.ts >= 0 && now - c.ts <= HANDOFF_BLOCKHASH_MAX_AGE_MS) return false;
   tx.recentBlockhash = await getFreshBlockhash(connection, true, "sendTx hand-off refresh");
   return true;
 }

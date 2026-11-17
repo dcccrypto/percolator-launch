@@ -11,7 +11,7 @@ vi.mock("@/lib/config", () => ({
   getNetwork: () => "devnet",
 }));
 
-import { getFreshBlockhash, getPriorityFee, pollConfirmation, SimulationRefusal, CONFIRMATION_POLL } from "@/lib/tx";
+import { refreshBlockhashBeforeHandoff, getFreshBlockhash, getPriorityFee, pollConfirmation, SimulationRefusal, CONFIRMATION_POLL } from "@/lib/tx";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 
 function conn(extra: Record<string, unknown> = {}) {
@@ -41,6 +41,15 @@ describe("clock stepping backwards", () => {
     vi.setSystemTime(new Date("2026-11-17T11:00:00Z")); // -1h
     await getFreshBlockhash(c);
     expect((c as never as { getLatestBlockhash: { mock: { calls: unknown[] } } }).getLatestBlockhash.mock.calls.length).toBe(2);
+  });
+
+  it("hand-off refresh replaces a cached blockhash after the clock steps back (v22)", async () => {
+    __setDevnetV22ForTest(true);
+    const c = conn();
+    const bh = await getFreshBlockhash(c);
+    vi.setSystemTime(new Date("2026-11-17T11:00:00Z"));
+    const tx = { recentBlockhash: bh };
+    expect(await refreshBlockhashBeforeHandoff(c, tx)).toBe(true);
   });
 
   it("does not reuse a cached priority fee after the clock steps back", async () => {
