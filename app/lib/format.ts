@@ -1,6 +1,21 @@
 import { MAX_PRICE_E6 } from "@/lib/oraclePrice";
 
 /**
+ * Lazily-created, cached Intl.NumberFormat instances. `Number#toLocaleString(undefined, opts)`
+ * builds a fresh formatter on every call (~100x slower); `nf.format(n)` is specified to give the
+ * identical string. Created lazily so the default locale is read at first use, as before.
+ */
+function lazyNf(opts: Intl.NumberFormatOptions): (n: number) => string {
+  let nf: Intl.NumberFormat | undefined;
+  return (n) => (nf ??= new Intl.NumberFormat(undefined, opts)).format(n);
+}
+const fmt2to6 = lazyNf({ minimumFractionDigits: 2, maximumFractionDigits: 6 });
+const fmt6 = lazyNf({ minimumFractionDigits: 6, maximumFractionDigits: 6 });
+const fmt2 = lazyNf({ minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt2to4 = lazyNf({ minimumFractionDigits: 2, maximumFractionDigits: 4 });
+const fmtSig4 = lazyNf({ maximumSignificantDigits: 4 });
+
+/**
  * Normalize token decimals received across typed and untyped data boundaries.
  * Invalid values use the existing whole-unit fallback rather than reaching
  * BigInt exponentiation or String.padStart with an unsafe argument.
@@ -99,7 +114,7 @@ export function formatUsd(priceE6: bigint | null | undefined): string {
   // PERC-297: 0 price means oracle data unavailable — show dash instead of "$0.00"
   if (priceE6 === 0n) return "$—";
   const val = Number(priceE6) / 1_000_000;
-  return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
+  return `$${fmt2to6(val)}`;
 }
 
 /**
@@ -133,7 +148,7 @@ export function formatUsdAmount(absUsd: number, sign: "+" | "-" | "" = ""): stri
 export function formatUsdPriceE6(priceE6: bigint | null | undefined, fallback = "—"): string {
   if (priceE6 == null || priceE6 <= 0n || priceE6 > MAX_PRICE_E6) return fallback;
   const val = Number(priceE6) / 1_000_000;
-  return `$${val.toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 })}`;
+  return `$${fmt6(val)}`;
 }
 
 /**
@@ -169,12 +184,12 @@ export function formatMarkPrice(priceUsd: number | null | undefined, fallback = 
   if (priceUsd == null || !Number.isFinite(priceUsd) || priceUsd <= 0) return fallback;
   let body: string;
   if (priceUsd >= 1000) {
-    body = priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    body = fmt2(priceUsd);
   } else if (priceUsd >= 1) {
-    body = priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    body = fmt2to4(priceUsd);
   } else {
     // Sub-dollar: keep significant figures so small-cap prices stay legible.
-    body = priceUsd.toLocaleString(undefined, { maximumSignificantDigits: 4 });
+    body = fmtSig4(priceUsd);
   }
   return `$${body}`;
 }
