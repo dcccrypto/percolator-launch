@@ -216,7 +216,8 @@ export class WalletBusyError extends Error {
 /** A refusal faster than this, with the bare "Cancelled" text, was never shown to the person. */
 export const WALLET_BUSY_MAX_MS = 1_500;
 export function isWalletBusyRejection(err: unknown, elapsedMs: number): boolean {
-  if (!(elapsedMs < WALLET_BUSY_MAX_MS)) return false;
+  // NaN or negative (the wall clock stepped back while the popup was open) is "unknown", never "refused instantly".
+  if (!(elapsedMs >= 0 && elapsedMs < WALLET_BUSY_MAX_MS)) return false;
   return errorLayers(err).some((o) => o.code === 4001 && typeof o.message === "string" && o.message.trim() === "Cancelled");
 }
 
@@ -251,8 +252,10 @@ export const WALLET_EXPIRY_MIN_MS = 45_000;
 export const BLOCKHASH_EXPIRY_MS = 45_000;
 async function expiredWhileOpen<T>(p: GuardSignParams<T>, first: SignLogEntry, openedAt: number, now: () => number, timeoutMs: number): Promise<"open-time" | "blockhash-age" | "rpc-invalid" | null> {
   const t = now();
-  if (t - openedAt >= WALLET_EXPIRY_MIN_MS) return "open-time";
-  if (first.blockhashAgeMs !== null && first.blockhashAgeMs + (t - openedAt) >= BLOCKHASH_EXPIRY_MS) return "blockhash-age";
+  // A wall clock that stepped back makes t - openedAt negative; that must not shrink the blockhash's age at open.
+  const open = Math.max(0, t - openedAt);
+  if (open >= WALLET_EXPIRY_MIN_MS) return "open-time";
+  if (first.blockhashAgeMs !== null && first.blockhashAgeMs + open >= BLOCKHASH_EXPIRY_MS) return "blockhash-age";
   if (!first.blockhash) return null;
   const valid = await within(
     Promise.resolve().then(() => p.connection.isBlockhashValid(first.blockhash, { commitment: "confirmed" })).then((r) => r.value),
