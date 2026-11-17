@@ -7,7 +7,7 @@
  * liquidatable when equity = capital + q*(P - E) is below ceil(|q|*P * mm / 1e4)
  * (min_nonzero_mm_req floor and target-lag penalty are 0 here).
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { computeLiqPrice as sdkComputeLiqPrice } from "@percolatorct/sdk";
 import { computeLiqPrice, computePreTradeLiqPrice } from "@/lib/trading";
 import {
@@ -127,7 +127,14 @@ describe("margin-cushion tiers", () => {
 });
 
 describe("usePortfolio's tier helpers (the poll's count, the sort, the /portfolio cards)", () => {
-  // Lazy import: usePortfolio pulls in the app's module graph.
+  // Lazy import: usePortfolio pulls in the app's module graph. A cold transform of that graph
+  // takes ~10 s under load, so it is paid here with its own timeout instead of being charged to
+  // the first test (which hit the 10 s default). The helpers themselves are trivial.
+  let liveLiquidationSeverity: typeof import("@/hooks/usePortfolio").liveLiquidationSeverity;
+  let getLiquidationSeverityForState: typeof import("@/hooks/usePortfolio").getLiquidationSeverityForState;
+  beforeAll(async () => {
+    ({ liveLiquidationSeverity, getLiquidationSeverityForState } = await import("@/hooks/usePortfolio"));
+  }, 90_000);
   const pos = (mark: bigint, capital = 10n * E6, size = ONE) =>
     ({
       account: { positionSize: size, capital },
@@ -137,15 +144,13 @@ describe("usePortfolio's tier helpers (the poll's count, the sort, the /portfoli
     }) as any;
 
   it("liveLiquidationSeverity: fresh 5x/10x safe; tiers follow the margin cushion at the mark", async () => {
-    const { liveLiquidationSeverity } = await import("@/hooks/usePortfolio");
     expect(liveLiquidationSeverity(pos(ENTRY), null)).toBe("safe"); // 10x at entry
     expect(liveLiquidationSeverity(pos(ENTRY, 20n * E6), null)).toBe("safe"); // 5x at entry
     expect(liveLiquidationSeverity(pos(97n * E6), null)).toBe("warning"); // the poll's own mark
     expect(liveLiquidationSeverity(pos(ENTRY), 95_800_000n)).toBe("danger"); // a live mark wins
   });
 
-  it("getLiquidationSeverityForState uses the cushion when given one", async () => {
-    const { getLiquidationSeverityForState } = await import("@/hooks/usePortfolio");
+  it("getLiquidationSeverityForState uses the cushion when given one", () => {
     // 9.52% from the SDK price would be "danger" on the flat tiers; a fresh 10x is safe.
     expect(getLiquidationSeverityForState({ kind: "liquidatable", distancePct: 5.26 }, 1)).toBe("safe");
     expect(getLiquidationSeverityForState({ kind: "liquidatable", distancePct: 2.3 }, 0.44)).toBe("warning");
