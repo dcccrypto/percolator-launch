@@ -190,15 +190,18 @@ function notify(entry: SlabEntry): void {
  *  when nothing actually changed (required for `useSyncExternalStore`). */
 function applyPatch(entry: SlabEntry, patch: Partial<PriceState>): void {
   const prev = entry.snapshot;
-  const next: PriceState = { ...prev, ...patch };
+  // Compare the patch's own keys against prev BEFORE allocating the merged object: a redundant update (the common
+  // case for repeated seeds/polls) then costs no allocation. Same result as diffing the merged object — keys not
+  // in the patch are copied from prev, so they cannot differ.
   let changed = false;
-  for (const k of Object.keys(next) as (keyof PriceState)[]) {
-    if (next[k] !== prev[k]) {
+  for (const k in patch) {
+    if (patch[k as keyof PriceState] !== prev[k as keyof PriceState]) {
       changed = true;
       break;
     }
   }
   if (!changed) return;
+  const next: PriceState = { ...prev, ...patch };
   entry.snapshot = next;
   notify(entry);
 }
