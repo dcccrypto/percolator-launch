@@ -183,7 +183,7 @@ describe("deriveTicketLimits: P1 same-owner close-only caps", () => {
     expect(t.sameOwner).toBe(true);
     expect(t.issues.map((x) => x.kind)).toContain("same-owner");
   });
-  it("detected even when the risk limits did not load (flag P1 off)", () => {
+  it("detected even when the risk limits is detected with the P1 flag off", () => {
     const L = marketLimits({ flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } });
     const t = deriveTicketLimits(input({ limits: L, takerOwner: OWNER_LP }));
     expect(t.sideLimits).toBeNull();
@@ -373,12 +373,14 @@ describe("growthSideHalt", () => {
   });
   it("a holder is not min-leg paused, but a room under one step reads 'step'", () => {
     const v = view(open(5n), open(5n));
-    expect(growthSideHalt(v, "long", 10n, 100n)).toBeNull();
+    expect(growthSideHalt(v, "long", 100n, 100n)).toBeNull(); // leg already at the minimum: may add
     expect(growthSideHalt(v, "long", 10n, 100n, 6n)).toBe("step");
     expect(growthSideHalt(v, "long", 10n, 100n, 5n)).toBeNull();
     expect(growthSideHalt(v, "long", 0n, null, 6n)).toBe("step");
     expect(growthSideHalt(v, "long", 0n, null, 0n)).toBeNull();
   });
+  // lib/limits/ticket.ts:142-143 says a holder BELOW the minimum leg is paused, but :161 only checks flat takers (held === 0n).
+  it.todo("a holder whose leg stays under minLegQ after an add (held 10, room 5, min 100) reads 'min-leg' (confirm the on-chain 113 rule)");
   it("a missing headroom counts as 0 room; a reduce is never paused", () => {
     const v = view({ growthOn: true, closed: false }, open(0n));
     expect(growthSideHalt(v, "long", 0n, 1n)).toBe("min-leg");
