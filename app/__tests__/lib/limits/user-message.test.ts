@@ -210,7 +210,7 @@ describe("errors with no program code", () => {
     ["Blockhash not found", "network-slow", "network was slow"],
     ["Wallet did not say whether this transaction was sent", "still-confirming", "may still have gone through"],
     ["confirmation timeout", "still-confirming", "Still confirming"],
-    ["429 rate limit exceeded", "network-busy", ""],
+    ["429 rate limit exceeded", "network-busy", "busy"],
     ["failed to fetch", "rpc-unreachable", "Couldn't reach Solana"],
     ["slippage exceeded", "price-moved", "price moved while you"],
     ["No LP portfolio with an active matcher config", "market-not-ready", "isn't taking trades"],
@@ -268,8 +268,10 @@ describe("errors with no program code", () => {
     ["WrongClusterError", "wrong-cluster", "Wrong network"],
     ["FeedDisagreementError", "prices-out-of-sync", ""],
   ];
-  it.each(namedRows)("%s", (name, kind) => {
-    expect(kindOf(named(name, "custom text")).kind).toBe(kind);
+  it.each(namedRows)("%s", (name, kind, title) => {
+    const u = kindOf(named(name, "custom text"));
+    expect(u.kind).toBe(kind);
+    if (title) expect(u.title).toBe(title);
   });
   it("typed errors pass their own message through where the copy is theirs", () => {
     expect(kindOf(named("BusyFeeRoseError", "fee rose to 9 bps")).body).toBe("fee rose to 9 bps");
