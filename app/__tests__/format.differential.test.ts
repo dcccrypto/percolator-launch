@@ -72,4 +72,5 @@ describe("format.ts differential vs frozen pre-optimisation copy", () => {
       expect(cur.formatPnl(bigs[i], decs[i])).toBe(old.formatPnl(bigs[i], decs[i]));
     }
   });
-});
+  // The frozen copy is the slow path (~0.8ms/call); allow ample time on loaded runners.
+}, 120_000);
