@@ -85,9 +85,11 @@ const STEP_ERROR_OVERRIDES: Partial<Record<CreateStepKind, Record<number, string
 
 /** Custom program error code in `msg`, from either the hex log form or the InstructionError JSON form. */
 export function extractCustomCode(msg: string): number | null {
+  // A code raised by SPL Token / System (even when the wrapper re-logs it) is not a wrapper code.
+  if (isForeignProgramFailure(msg)) return null;
   const hex = msg.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
   if (hex) return parseInt(hex[1], 16);
-  const ie = msg.match(/"?InstructionError"?.*?"?Custom"?\D*(\d+)/);
+  const ie = msg.match(/"?InstructionError"?.*?"?Custom"?[:(]\s*(\d+)/);
   if (ie) return parseInt(ie[1], 10);
   return null;
 }
@@ -136,6 +138,12 @@ const LAUNCH_ERROR_OVERRIDES: Record<number, string> = {
 };
 
 const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const FOREIGN_PROGRAM_IDS = new Set<string>([
+  SPL_TOKEN_PROGRAM_ID,
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", // Token-2022
+  "11111111111111111111111111111111", // System
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", // Associated Token
+]);
 
 /**
  * Anchored parse of the FIRST failing program-error log line in `msg`
@@ -184,6 +192,17 @@ function findFailingProgramError(msg: string): { code: number; program: string |
 function isTokenProgramInsufficientFunds(msg: string): boolean {
   const failing = findFailingProgramError(msg);
   return failing !== null && failing.code === 0x1 && failing.program === SPL_TOKEN_PROGRAM_ID;
+}
+
+/**
+ * True when the innermost failing program is SPL Token / System / ATA: its custom codes
+ * (e.g. token 0x4 OwnerMismatch) must not be read through the Percolator wrapper tables,
+ * which assign those numbers different meanings (0x4 InvalidAccountKind, 0x0 InvalidMagic…).
+ * Token 0x1 is handled separately by isTokenProgramInsufficientFunds.
+ */
+function isForeignProgramFailure(msg: string): boolean {
+  const program = findFailingProgramError(msg)?.program;
+  return program != null && FOREIGN_PROGRAM_IDS.has(program);
 }
 
 export function parseMarketCreationError(error: unknown, context?: MarketCreationErrorContext): string {
@@ -268,7 +287,7 @@ function parseMarketCreationErrorBase(error: unknown, context?: MarketCreationEr
 
   // Simulation failed — try to extract program error.
   // Use launch-specific overrides first, then SDK decodeError() for v17 codes 0-46.
-  if (msg.includes("custom program error")) {
+  if (msg.includes("custom program error") && !isForeignProgramFailure(msg)) {
     const match = msg.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
     if (match) {
       const code = parseInt(match[1], 16);
@@ -281,10 +300,10 @@ function parseMarketCreationErrorBase(error: unknown, context?: MarketCreationEr
   }
 
   // InstructionError with index
-  if (msg.includes("InstructionError")) {
-    const match = msg.match(/InstructionError.*?(\d+).*?Custom.*?(\d+)/);
+  if (msg.includes("InstructionError") && !isForeignProgramFailure(msg)) {
+    const match = msg.match(/InstructionError.*?(\d+).*?Custom"?[:(]\s*(\d+)/);
     if (match) {
-      const code = parseInt(match[2]);
+      const code = parseInt(match[2], 10);
       const override = LAUNCH_ERROR_OVERRIDES[code];
       if (override) return `Step failed: ${override}`;
       const sdkErr = decodeError(code);
