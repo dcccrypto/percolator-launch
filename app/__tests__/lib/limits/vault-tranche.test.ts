@@ -574,6 +574,7 @@ describe("step IMR + leverage gate", () => {
     expect(stepImrBps(5_000n, 10_000n, 1_000n, 8_000)).toBe(5_000n); // in range
     expect(stepImrBps(9_000n, 10_000n, 1_000n, 8_000)).toBe(8_000n); // >= max
     expect(stepImrBps(30_000n, 10_000n, 1_000n, 8_000)).toBe(8_000n); // crowd > 100% clamps
+    expect(stepImrBps(30_000n, 10_000n, 1_000n, 20_000)).toBe(10_000n); // crowd clamp binds (max above 100%)
   });
   it("joinsCrowd compares absolute inventory", () => {
     expect(joinsCrowd(0n, -5n)).toBe(true);
@@ -605,6 +606,7 @@ describe("skew funding / drift extra branches", () => {
     expect(skewFundingRateE9(-500n, 1_000n, 1_000_000_000n, 1_000_000_000n)).toBe(500_000_000n);
     expect(skewFundingRateE9(500n, 1_000n, 1_000_000_000n, 1_000_000_000n)).toBe(-500_000_000n);
     expect(skewFundingRateE9(-2_000n, 1_000n, 1_000_000_000n, 600_000_000n)).toBe(600_000_000n);
+    expect(skewFundingRateE9(-2_000n, 1_000n, 1_000_000_000n, 5_000_000_000n)).toBe(1_000_000_000n); // share clamp binds
   });
   it("combine clamps both ways", () => {
     expect(combineFundingRateE9(5n, 3n, 6n)).toBe(6n);
