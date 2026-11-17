@@ -310,6 +310,7 @@ import {
   loadRegisterRequest,
   markRegistered,
   announceMarketRegistered,
+  markRegistrationRefused,
   registrationCandidates,
   pendingRegistrationSlabs,
   resumePendingRegistrations,
@@ -319,6 +320,7 @@ import {
   type KeeperRegisterRequest,
 } from "@/lib/keeper-register-client";
 import { PER_CREATOR_CAP_COPY } from "@/lib/keeper-enrollment-guard";
+import type { MarketRegistrationPayload } from "@/lib/market-registration-auth";
 
 const SIG = REQ.proofTx;
 const memStore = (): KeyStore & { m: Map<string, string> } => {
@@ -533,7 +535,7 @@ describe("local persistence + events", () => {
       localStorage: store,
       dispatchEvent: (e: CustomEvent) => { events.push({ type: e.type, detail: e.detail }); return true; },
     });
-  const PAYLOAD = { dex_pool_address: "POOL", mainnet_ca: "CA", symbol: "ABC" } as never;
+  const PAYLOAD = { dex_pool_address: "POOL", mainnet_ca: "CA", symbol: "ABC" } as unknown as MarketRegistrationPayload;
 
   it("saveProofTx / loadProofTx round-trip, and swallow storage errors", () => {
     const s = memStore();
@@ -571,7 +573,7 @@ describe("local persistence + events", () => {
     expect(() => saveProofPayload("S", PAYLOAD, boom)).not.toThrow();
     expect(() => saveRegisterRequest({ slabAddress: "S", dexPoolAddress: "P" }, boom)).not.toThrow();
     expect(() => markRegistered("S", boom)).not.toThrow();
-    expect(() => markRegistrationRefusedSafe(boom)).not.toThrow();
+    expect(() => markRegistrationRefused("S", boom)).not.toThrow();
   });
 
   it("with no store (no window) the default-store helpers are no-ops", () => {
@@ -598,11 +600,6 @@ describe("local persistence + events", () => {
     expect(loadRegisterRequest("D", s)).toMatchObject({ slabAddress: "D" });
   });
 });
-
-function markRegistrationRefusedSafe(s: KeyStore) {
-  // markRegistrationRefused reads first; a throwing store must not escape
-  return import("@/lib/keeper-register-client").then((m) => m.markRegistrationRefused("S", s)).catch(() => undefined);
-}
 
 describe("registrationCandidates / pendingRegistrationSlabs", () => {
   const PAYLOAD = { dex_pool_address: "POOL", mainnet_ca: "CA", symbol: "ABC" };
