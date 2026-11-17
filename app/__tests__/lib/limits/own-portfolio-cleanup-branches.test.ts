@@ -80,7 +80,9 @@ describe("loadOwnPortfolios", () => {
     expect(args[1]).toEqual({ commitment: "confirmed", filters: [{ memcmp: { offset: 16, bytes: MARKET.toBase58() } }] });
   });
   it("skips accounts whose layout does not decode as a portfolio", async () => {
-    const out = await loadOwnPortfolios(conn([acct(Buffer.concat([Buffer.alloc(11), Buffer.from([0])]).fill(0, 0, 10))]), PROG, MARKET, OWNER);
+    const short = Buffer.alloc(32);
+    short[10] = C.KIND_PORTFOLIO; // right kind, too short for decodeResolvedPortfolio
+    const out = await loadOwnPortfolios(conn([acct(short)]), PROG, MARKET, OWNER);
     expect(out).toEqual([]);
   });
 });
