@@ -239,6 +239,17 @@ describe("sendUserBundle", () => {
     expect(out.signatures).toHaveLength(out.plan.txs.length);
   });
 
+  it("fallback reason keeps the text of a non-Error wallet rejection (not [object Object])", async () => {
+    const signRaw = vi.fn(async () => {
+      throw { code: -32603, message: "Unexpected error" };
+    });
+    const r = recorder(v1Signer({ signRaw }));
+    const out = await sendUserBundle({ connection: conn, wallet, groups: BYTE_BOUND, mode: "auto", deps: r.deps });
+    expect(out.fellBack?.reason).toBe("wallet-cannot-sign-v1");
+    expect(out.fellBack?.error).not.toContain("[object Object]");
+    expect(out.fellBack?.error).toContain("Unexpected error");
+  });
+
   it("negative control: user rejection of the v1 prompt never falls back", async () => {
     const signRaw = vi.fn(async () => {
       throw Object.assign(new Error("User rejected the request."), { code: 4001 });

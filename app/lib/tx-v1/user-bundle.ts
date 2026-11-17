@@ -468,10 +468,10 @@ export async function sendUserBundle<T = unknown>(p: SendUserBundleParams<T>): P
     } catch (e) {
       if (!(e instanceof V1Fallback)) throw e;
       p.onFallback?.(e.reason, e.original);
-      if (!plan.fallback) throw e.original instanceof Error ? e.original : new Error(String(e.original));
+      if (!plan.fallback) throw e.original instanceof Error ? e.original : new Error(errorText(e.original));
       const fbPlan: UserBundlePlan<T> = { format: plan.fallback.format, txs: plan.fallback.txs, reason: plan.reason, fallback: plan.fallback, v1: plan.v1 };
       const signatures = await sendLegacyPlan(fbPlan.txs, { payer, signers, priorityFee, headroom, simulate, d });
-      const msg = e.original instanceof Error ? e.original.message : String(e.original);
+      const msg = errorText(e.original);
       return { format: fbPlan.format, signatures, plan: fbPlan, fellBack: { reason: e.reason, error: msg } };
     }
   }
