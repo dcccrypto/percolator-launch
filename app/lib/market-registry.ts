@@ -150,8 +150,10 @@ const DEFAULT_MEMO_MS = 20_000;
 function memoTtlMs(): number {
   const raw = process.env.MARKET_ROWS_MEMO_MS;
   if (raw === undefined || raw.trim() === "") return DEFAULT_MEMO_MS;
+  // Plain decimal only: Number() would also accept "0x10" (16 ms) and "1e9" (11 days).
+  if (!/^\d+(\.\d+)?$/.test(raw.trim())) return DEFAULT_MEMO_MS;
   const v = Number(raw);
-  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_MEMO_MS;
+  return Number.isFinite(v) ? v : DEFAULT_MEMO_MS;
 }
 
 let memo: { at: number; rows: MarketRegistryRow[] } | null = null;
@@ -195,15 +197,20 @@ export function resetMarketRegistryCache(): void {
 export async function loadMergedMarketRows(opts: { maxAgeMs?: number } = {}): Promise<MarketRegistryRow[] | null> {
   const ttl = memoTtlMs();
   if (ttl === 0) return loadMergedMarketRowsUncached();
-  const maxAge = Math.min(opts.maxAgeMs ?? ttl, ttl);
+  // NaN / negative maxAgeMs would make every age check fail and silently bypass the memo.
+  const req = opts.maxAgeMs;
+  const maxAge = req !== undefined && Number.isFinite(req) && req >= 0 ? Math.min(req, ttl) : ttl;
   const now = Date.now();
-  if (memo && now - memo.at < maxAge) return memo.rows;
-  if (inflight && now - inflight.startedAt < maxAge) return inflight.promise;
+  // A negative age means the wall clock stepped back: that copy is untrustworthy, not fresh.
+  const fresh = (at: number) => now >= at && now - at < maxAge;
+  if (memo && fresh(memo.at)) return memo.rows;
+  if (inflight && fresh(inflight.startedAt)) return inflight.promise;
   const startedAt = now;
   const promise = loadMergedMarketRowsUncached()
     .then((rows) => {
       // Failures are not cached: the next caller retries.
-      if (rows !== null && (!memo || memo.at <= startedAt)) memo = { at: startedAt, rows };
+      // (memo.at in the future = clock stepped back: that copy is stale, replace it.)
+      if (rows !== null && (!memo || memo.at <= startedAt || memo.at > Date.now())) memo = { at: startedAt, rows };
       return rows;
     })
     .finally(() => {
