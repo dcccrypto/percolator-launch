@@ -2,6 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getServerConnection } from "@/lib/server-rpc";
 import { getConfig } from "@/lib/config";
+import { isFresh } from "@/lib/ttl-fresh";
 
 /**
  * GH#2795: slabs of markets that belong to an abandoned wrapper.
@@ -90,7 +91,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * Never throws; [] means "no filter".
  */
 export async function getRetiredSlabs(): Promise<string[]> {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.slabs;
+  if (cache && isFresh(Date.now(), cache.at, CACHE_TTL_MS)) return cache.slabs;
   if (inflight) return inflight;
   inflight = (async () => {
     try {

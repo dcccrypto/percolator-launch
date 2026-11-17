@@ -11,6 +11,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
+import { isFresh } from "@/lib/ttl-fresh";
 
 /** The lookup itself failed (DB error / exception): NOT "unregistered", and never cached. */
 export class RegisteredPoolLookupError extends Error {
@@ -74,7 +75,7 @@ export async function registeredPoolForSlab(slab: string, mint?: string): Promis
   if (!validPubkey(slab)) return null;
   const key = `${slab}|${mint ?? ""}`;
   const hit = bySlab.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.v;
+  if (hit && isFresh(Date.now(), hit.at, TTL_MS)) return hit.v;
   if (!supabaseConfigured()) return null;
   let data: unknown;
   try {
@@ -102,7 +103,7 @@ export async function registeredPoolForSlab(slab: string, mint?: string): Promis
 export async function registeredPoolForMint(mint: string): Promise<RegisteredPool | null> {
   if (!validPubkey(mint)) return null;
   const hit = byMint.get(mint);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.v;
+  if (hit && isFresh(Date.now(), hit.at, TTL_MS)) return hit.v;
   if (!supabaseConfigured()) return null;
   let data: unknown;
   try {
