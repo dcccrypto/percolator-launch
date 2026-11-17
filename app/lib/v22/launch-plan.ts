@@ -187,8 +187,8 @@ export function planLaunchV22(i: LaunchPlanInput): LaunchPlanV22 {
     }
   }
   if (protection) {
-    const b = bandDefaultsV22(i.collateralDecimals);
     try {
+      const b = bandDefaultsV22(i.collateralDecimals);
       assertBandBlockV22(b, i.collateralDecimals);
       out.band = b;
       out.recoveryMinutes = Math.round(forcedRecoveryMinutesV22(b));

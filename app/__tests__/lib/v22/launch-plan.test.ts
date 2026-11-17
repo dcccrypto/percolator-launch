@@ -7,6 +7,10 @@ import {
   LOT_PRICE_CEILING_E6,
   holdingFeePctPerDay,
   isMemecoinPreset,
+  isAuthMarkMode,
+  blockingIssue,
+  lotLaunchPrice,
+  launchInitialPriceE6,
   lotTooltip,
   planLaunchV22,
   toLaunchParams,
@@ -14,6 +18,8 @@ import {
 } from "@/lib/v22/launch-plan";
 import {
   LOT_PRICE_FLOOR_E6_V22,
+  LOT_EXP_MAX_V22,
+  MAX_ORACLE_PRICE_V22,
   LaunchBundleTooLargeError,
   buildCreateLpPortfolioIxV22,
   buildLaunchBundleV22,
@@ -190,5 +196,87 @@ describe("F3: lot markets are refused until every surface is lot-aware", () => {
     } finally {
       __setLotMarketsEnabledForTest(true);
     }
+  });
+});
+
+describe("coverage: helpers and edge inputs", () => {
+  it("isAuthMarkMode / blockingIssue", () => {
+    expect(isAuthMarkMode("keeper")).toBe(true);
+    expect(isAuthMarkMode("admin")).toBe(true);
+    expect(isAuthMarkMode("hyperp")).toBe(false);
+    expect(isAuthMarkMode("pyth")).toBe(false);
+    expect(blockingIssue(planLaunchV22(base({ tokenPriceE6: 25_000_000n })))).toBeNull();
+    expect(blockingIssue(planLaunchV22(base({ tokenPriceE6: 0n })))?.code).toBe("price-unknown");
+  });
+  it("holdingFeePctPerDay: >= 1% uses one decimal", () => {
+    expect(holdingFeePctPerDay({ rentMaxE9PerSlot: 100 })).toBe("2.2%");
+    expect(holdingFeePctPerDay({ rentMaxE9PerSlot: 23 })).toBe("0.50%");
+  });
+  it("lotTooltip: negative and over-max exponents are null", () => {
+    expect(lotTooltip(-1, "T")).toBeNull();
+    expect(lotTooltip(LOT_EXP_MAX_V22 + 1, "T")).toBeNull();
+    expect(lotTooltip(LOT_EXP_MAX_V22, "T")).toContain("1 lot =");
+  });
+  it("lotLaunchPrice: >= $10 keeps lot 0; sub-floor picks smallest lot rounded once; unusable -> null", () => {
+    expect(lotLaunchPrice("25")).toEqual({ lotExp: 0, perLotPriceE6: 25_000_000n });
+    expect(lotLaunchPrice("0.0000015")).toEqual({ lotExp: 7, perLotPriceE6: 15_000_000n });
+    expect(lotLaunchPrice("0.0000096")).toEqual({ lotExp: 7, perLotPriceE6: 96_000_000n });
+    expect(lotLaunchPrice("abc")).toBeNull();
+    expect(lotLaunchPrice("")).toBeNull();
+    expect(lotLaunchPrice(null)).toBeNull();
+    expect(lotLaunchPrice(undefined)).toBeNull();
+    expect(lotLaunchPrice("0")).toBeNull();
+  });
+  it("lotLaunchPrice: a price no lot up to the max can lift to the floor is null", () => {
+    expect(lotLaunchPrice("0." + "0".repeat(20) + "1")).toBeNull();
+  });
+  it("launchInitialPriceE6: per-token unless a lot is sent", () => {
+    const plan = planLaunchV22(base({ tokenPriceE6: 400n }));
+    const params = toLaunchParams(plan);
+    expect(params!.lotExp).toBeGreaterThan(0);
+    expect(launchInitialPriceE6(plan, params, 400n)).toBe(plan.perLotPriceE6);
+    expect(launchInitialPriceE6(null, params, 400n)).toBe(400n);
+    expect(launchInitialPriceE6(undefined, params, 400n)).toBe(400n);
+    expect(launchInitialPriceE6(plan, undefined, 400n)).toBe(400n);
+    const big = planLaunchV22(base({ tokenPriceE6: 25_000_000n }));
+    expect(launchInitialPriceE6(big, toLaunchParams(big), 25_000_000n)).toBe(25_000_000n);
+  });
+  it("unrounded decimal price: lot and per-lot price come from it, rounded once (#3610)", () => {
+    const p = planLaunchV22(base({ tokenPriceE6: 2n, tokenPrice: "0.0000015" }));
+    expect(p.lotExp).toBe(7);
+    expect(p.perLotPriceE6).toBe(15_000_000n);
+    const q = planLaunchV22(base({ tokenPriceE6: 400n, tokenPrice: "0.0000015" }));
+    expect(q.perLotPriceE6).toBe(400n * 10n ** BigInt(q.lotExp));
+    expect(planLaunchV22(base({ tokenPriceE6: 400n, tokenPrice: null })).lotExp).toBe(planLaunchV22(base()).lotExp);
+    expect(planLaunchV22(base({ tokenPriceE6: 400n, tokenPrice: "junk" })).lotExp).toBe(planLaunchV22(base()).lotExp);
+    const r = planLaunchV22(base({ tokenPriceE6: 25_000_000n, tokenPrice: "25" }));
+    expect(r.lotExp).toBe(0);
+    expect(r.perLotPriceE6).toBe(25_000_000n);
+  });
+  it("price above the engine mark cap is refused with exactly one ceiling issue", () => {
+    const p = planLaunchV22(base({ tokenPriceE6: MAX_ORACLE_PRICE_V22 + 1n }));
+    expect(p.issues.filter((x) => x.code === "price-ceiling")).toHaveLength(1);
+    expect(toLaunchParams(p)).toBeUndefined();
+  });
+  it("hyperp with unknown price: no issue, nothing sent; hyperp at exactly the floor is fine", () => {
+    expect(planLaunchV22(base({ oracleMode: "hyperp", tokenPriceE6: 0n })).issues).toEqual([]);
+    expect(planLaunchV22(base({ oracleMode: "hyperp", tokenPriceE6: LOT_PRICE_FLOOR_E6_V22 })).issues).toEqual([]);
+  });
+  it("collateral symbol shows in the minimum-position line; omitted shows $", () => {
+    const withSym = planLaunchV22(base({ collateralSymbol: "USDC" }));
+    expect(withSym.notes.join(" ")).toContain("100 USDC");
+    expect(planLaunchV22(base()).notes.join(" ")).toContain("$100");
+  });
+  it("invalid collateral decimals turn price protection into a band-invalid refusal, no params", () => {
+    const p = planLaunchV22(base({ collateralDecimals: 40 }));
+    expect(p.issues.map((x) => x.code)).toContain("band-invalid");
+    expect(p.band).toBeUndefined();
+    expect(toLaunchParams(p)).toBeUndefined();
+  });
+  it("bond with explicit valid dials is carried through; toLaunchParams omits unset blocks", () => {
+    const dials = { ...DEFAULT_BOND, couponBps: 500 };
+    const p = planLaunchV22(base({ tokenPriceE6: 25_000_000n, bond: true, bondDials: dials, protection: false, holdingFee: false }));
+    expect(p.bondArgs).toEqual(dials);
+    expect(toLaunchParams(p)).toEqual({ lotExp: 0, bond: dials });
   });
 });
