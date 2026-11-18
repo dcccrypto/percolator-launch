@@ -131,7 +131,10 @@ function write(key: string, value: unknown): void {
 export function loadSnapshot(wallet: string, now: number = Date.now()): PositionSnapshot | null {
   const s = read<PositionSnapshot>(snapKey(wallet));
   if (!s || s.v !== 1 || typeof s.savedAt !== "number" || typeof s.positions !== "object" || s.positions === null) return null;
-  if (now - s.savedAt > MAX_SNAPSHOT_AGE_MS) return null;
+  if (Array.isArray(s.positions)) return null;
+  // A non-finite or future savedAt (device clock was ahead when saved) has no usable age: stale.
+  const age = now - s.savedAt;
+  if (!Number.isFinite(age) || age < 0 || age > MAX_SNAPSHOT_AGE_MS) return null;
   return s;
 }
 
@@ -139,9 +142,28 @@ export function saveSnapshot(wallet: string, positions: Record<string, SeenPosit
   write(snapKey(wallet), { v: 1, savedAt: now, positions } satisfies PositionSnapshot);
 }
 
+const isIntString = (v: unknown): boolean => typeof v === "string" && /^-?\d+$/.test(v);
+
+/** Every field the notice UI reads, checked so a corrupt entry is dropped instead of throwing in render (BigInt()). */
+function isNotice(x: unknown): x is ClosedNotice {
+  if (!x || typeof x !== "object") return false;
+  const n = x as Record<string, unknown>;
+  return (
+    typeof n.key === "string" &&
+    typeof n.slab === "string" &&
+    (n.symbol === null || typeof n.symbol === "string") &&
+    (n.side === "long" || n.side === "short") &&
+    isIntString(n.sizeAbs) &&
+    isIntString(n.markE6) &&
+    isIntString(n.liqPriceE6) &&
+    typeof n.lastSeenAt === "number" &&
+    Number.isFinite(n.lastSeenAt)
+  );
+}
+
 export function loadNotices(wallet: string): ClosedNotice[] {
   const n = read<ClosedNotice[]>(noticeKey(wallet));
-  return Array.isArray(n) ? n.filter((x) => x && typeof x.key === "string" && typeof x.slab === "string") : [];
+  return Array.isArray(n) ? n.filter(isNotice) : [];
 }
 
 export function saveNotices(wallet: string, notices: ClosedNotice[]): void {
