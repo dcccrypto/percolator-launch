@@ -241,7 +241,9 @@ function getOrResolveV17TradeAccounts(
 ): Promise<V17TradeAccounts> {
   const key = tradeAccountsKey(programId, slabPk, takerPk);
   const cached = v17TradeAccountsCache.get(key);
-  if (cached && Date.now() - cached.ts < V17_TRADE_ACCOUNTS_TTL_MS) {
+  // A negative age (clock stepped back) is stale, not fresh.
+  const age = cached ? Date.now() - cached.ts : -1;
+  if (cached && age >= 0 && age < V17_TRADE_ACCOUNTS_TTL_MS) {
     return Promise.resolve(cached.value);
   }
   const inflight = v17TradeAccountsInflight.get(key);

@@ -163,7 +163,9 @@ function getFreshPortfolioData(
 ): Promise<Buffer | null> {
   const key = freshReadKey(programId, slabAddress, owner, targetPk);
   const cached = freshReadCache.get(key);
-  if (cached && Date.now() - cached.ts < maxAgeMs) {
+  // A negative age (clock stepped back) is stale, not fresh.
+  const age = cached ? Date.now() - cached.ts : -1;
+  if (cached && age >= 0 && age < maxAgeMs) {
     return Promise.resolve(cached.data);
   }
   const inflight = freshReadInflight.get(key);
