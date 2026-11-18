@@ -28,6 +28,12 @@ import type { RawTxSigner } from "@/lib/tx-v1/wallet-raw-signer";
 import { SimulationRefusal, buildBatchTx } from "@/lib/tx";
 import { TX_LEGACY_MAX_BYTES, TX_V1_MAX_BYTES, V1RpcError, compileV1Message } from "@/lib/v21/sdk";
 
+// These tests are CPU-bound (v1 encode + ed25519 sign + verify, no timers, every dep injected). Under a
+// loaded CI runner or a busy dev machine one test can pass the 10 s global default, which showed up as a
+// spurious failure of "a LATER send that is ambiguous is confirmed too". Give the file headroom; no
+// assertion depends on the time.
+vi.setConfig({ testTimeout: 60_000 });
+
 const walletKp = Keypair.fromSeed(new Uint8Array(32).fill(3));
 const payer = walletKp.publicKey;
 const PROG = new PublicKey(new Uint8Array(32).fill(9));
