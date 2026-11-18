@@ -87,7 +87,9 @@ export function __resetSameOwnerLpCache(): void {
 function cachedSameOwner(key: string): Uint8Array | null {
   const hit = sameOwnerCache.get(key);
   if (!hit) return null;
-  if (Date.now() - hit.at > SAME_OWNER_CACHE_TTL_MS) {
+  const age = Date.now() - hit.at;
+  // age < 0: the wall clock stepped backwards, so the entry's age is unknown; treat as expired.
+  if (age < 0 || age > SAME_OWNER_CACHE_TTL_MS) {
     sameOwnerCache.delete(key);
     return null;
   }

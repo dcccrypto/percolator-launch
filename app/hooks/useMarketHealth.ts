@@ -21,7 +21,9 @@ export function fetchMarketHealth(slabs: readonly string[], force = false): Prom
   const key = [...new Set(slabs)].sort().slice(0, MAX_HEALTH_SLABS).join(",");
   if (!key) return Promise.resolve({});
   const hit = cache.get(key);
-  if (!force && hit && Date.now() - hit.at < CACHE_MS) return hit.promise;
+  // age < 0: the wall clock stepped backwards; treat the entry as expired rather than pinned.
+  const age = hit ? Date.now() - hit.at : -1;
+  if (!force && hit && age >= 0 && age < CACHE_MS) return hit.promise;
   // Promise.resolve().then: a missing/throwing fetch (SSR, tests) rejects instead of throwing.
   const promise = Promise.resolve()
     .then(() => fetch(`/api/markets/health?slabs=${encodeURIComponent(key)}`))
