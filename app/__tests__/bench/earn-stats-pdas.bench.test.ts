@@ -2,7 +2,7 @@
 /**
  * Timed bench (not a gate): fetchCuratedVaultsOnChain with N=100 slabs and a mocked chunked RPC,
  * 50 iterations per run, median of 5 runs, plus the count of PublicKey.findProgramAddressSync calls.
- * Run: npx vitest run __tests__/bench/earn-stats-pdas.bench.test.ts --reporter=verbose
+ * Run: BENCH=1 npx vitest run __tests__/bench/earn-stats-pdas.bench.test.ts --reporter=verbose
  * Output line: BENCH earn-stats-pdas median_ms=… fpas_calls=…
  */
 import { writeFileSync } from "node:fs";
@@ -47,7 +47,8 @@ const SLABS = Array.from({ length: N }, () => Keypair.generate().publicKey.toBas
 const acct = { data: new Uint8Array(8), owner: PublicKey.default, lamports: 1, executable: false, rentEpoch: 0 };
 
 describe("earn-stats PDA derivation bench", () => {
-  it("N=100, 50 iterations, median of 5", async () => {
+  // Opt-in (BENCH=1): keeps ~25 s out of the default suite.
+  it.skipIf(!process.env.BENCH)("N=100, 50 iterations, median of 5", async () => {
     // First RPC call = registries (one account per slab); second = market+2 ledgers per vault.
     mocks.chunked.mockImplementation(async (_c: unknown, keys: unknown[]) => keys.map(() => acct));
     const spy = vi.spyOn(PublicKey, "findProgramAddressSync");

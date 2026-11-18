@@ -111,10 +111,16 @@ describe("pda memo: differential vs the uncached derivations", () => {
     expect(_pdaMemoSizes().keys).toBe(0);
   });
 
-  it("is bounded", () => {
-    const base = Keypair.generate().publicKey;
-    for (let i = 0; i < PDA_MEMO_MAX + 50; i++) cachedPublicKey(Keypair.generate().publicKey.toBase58());
+  it("is bounded and evicts oldest first", () => {
+    const key = (i: number) =>
+      new PublicKey(Uint8Array.from({ length: 32 }, (_, j) => (j < 4 ? (i >> (8 * j)) & 255 : 0))).toBase58();
+    for (let i = 0; i < PDA_MEMO_MAX + 50; i++) cachedPublicKey(key(i));
     expect(_pdaMemoSizes().keys).toBe(PDA_MEMO_MAX);
-    expect(cachedPublicKey(base.toBase58()).equals(base)).toBe(true);
+    // Oldest evicted (re-parsed as a fresh object), newest still the cached instance.
+    const newest = cachedPublicKey(key(PDA_MEMO_MAX + 49));
+    expect(cachedPublicKey(key(PDA_MEMO_MAX + 49))).toBe(newest);
+    const oldest = cachedPublicKey(key(0));
+    expect(oldest.toBase58()).toBe(key(0));
+    expect(_pdaMemoSizes().keys).toBe(PDA_MEMO_MAX);
   });
 });
