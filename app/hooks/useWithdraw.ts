@@ -35,11 +35,19 @@ import {
 } from "@/lib/convert-released-pnl";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { verifyPortfolioTarget } from "@/lib/portfolio-target";
+import { scanOwnerPortfolios, pickOwnerPortfolio, OWNER_PORTFOLIO_MARKET_OFF } from "@/lib/owner-portfolio";
 import type { TransactionInstruction } from "@solana/web3.js";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { parseFailure } from "@/lib/limits/user-message";
 import { engineStaleWithdrawMessage, WITHDRAW_OPEN_POSITIONS_MESSAGE } from "@/lib/withdraw-copy";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
+
+/** Fast/store-path guard: the account must be a non-LP portfolio of THIS market (owner is checked by the caller). */
+export function isThisMarketsTraderPortfolio(data: Buffer, market: PublicKey): boolean {
+  if (isLpPortfolio(data)) return false;
+  return data.length >= OWNER_PORTFOLIO_MARKET_OFF + 32 &&
+    market.equals(new PublicKey(data.subarray(OWNER_PORTFOLIO_MARKET_OFF, OWNER_PORTFOLIO_MARKET_OFF + 32)));
+}
 
 // M7: withdraw's own EngineStale(19) surface. Unlike a trade (which can be
 // auto-retried after the next keeper crank via withTransientRetry — see
@@ -172,7 +180,6 @@ export function useWithdraw(slabAddress: string) {
           const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
 
           // Find the user's portfolio account.
-          const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
           let portfolioPk: PublicKey | null = params.portfolioPk ?? null;
           let portfolioData: Buffer | null = null;
           if (portfolioPk && params.strictPortfolio) {
@@ -195,7 +202,7 @@ export function useWithdraw(slabAddress: string) {
               if (info) {
                 const candidateData = Buffer.from(info.data);
                 const candidatePf = parsePortfolio(candidateData);
-                if (candidatePf.owner.equals(wallet.publicKey)) {
+                if (candidatePf.owner.equals(wallet.publicKey) && isThisMarketsTraderPortfolio(candidateData, slabPk)) {
                   portfolioData = candidateData;
                 } else {
                   portfolioPk = null; // owner mismatch — fall back to the scan
@@ -223,7 +230,7 @@ export function useWithdraw(slabAddress: string) {
                 if (info) {
                   const candidateData = Buffer.from(info.data);
                   const candidatePf = parsePortfolio(candidateData);
-                  if (candidatePf.owner.equals(wallet.publicKey)) {
+                  if (candidatePf.owner.equals(wallet.publicKey) && isThisMarketsTraderPortfolio(candidateData, slabPk)) {
                     portfolioPk = storePk;
                     portfolioData = candidateData;
                   }
@@ -231,50 +238,17 @@ export function useWithdraw(slabAddress: string) {
               } catch { /* fall through to the scan */ }
             }
           }
-          if (!portfolioPk) try {
-            // Mutable owner (SDK PF_OWNER_OFF) is at offset 116, NOT offset 80
-            // (offset 80 is provenanceOwner — IMMUTABLE). MintPositionNft moves the
-            // mutable owner to the escrow PDA on wrap but leaves provenance pointing
-            // at the original wallet, so filtering on 80 would still match a wrapped
-            // (NFT-escrowed) portfolio here.
-            const portfolioAccounts = await connection.getProgramAccounts(programId, {
-              filters: [
-                { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES.toString("base64"), encoding: "base64" } },
-                { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
-                { memcmp: { offset: 116, bytes: wallet.publicKey.toBase58() } },
-              ],
-            });
-            // Drop the market's LP portfolio BEFORE the sort/pick below —
-            // withdraw must never target the LP (owner == wallet only when
-            // this wallet is the market's CREATOR). See isLpPortfolio's doc.
-            const nonLpPortfolioAccounts = portfolioAccounts.filter(
-              ({ account }) => !isLpPortfolio(account.data),
-            );
-            if (nonLpPortfolioAccounts.length > 0) {
-              // M10: getProgramAccounts doesn't guarantee stable ordering
-              // across RPC nodes/calls. If more than one account ever matches
-              // this owner+market filter, picking an arbitrary array element
-              // can select a DIFFERENT portfolio than useDeposit.ts /
-              // useUserAccount.ts pick for the exact same wallet+market —
-              // withdraw could silently act on a different account than the
-              // one the UI displays. Sort deterministically by pubkey so
-              // every caller converges on the same account.
-              const sortedPortfolios = [...nonLpPortfolioAccounts].sort((a, b) =>
-                a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
-              );
-              const d = sortedPortfolios[0].account.data;
-              const candidateData = d instanceof Buffer ? d : Buffer.from(d);
-              // Defense-in-depth: re-verify the mutable owner actually matches after
-              // fetch — memcmp filters are advisory server-side; don't trust blindly.
-              try {
-                const candidatePf = parsePortfolio(candidateData);
-                if (candidatePf.owner.equals(wallet.publicKey)) {
-                  portfolioPk = sortedPortfolios[0].pubkey;
-                  portfolioData = candidateData;
-                }
-              } catch { /* leave portfolioPk/portfolioData unset — falls through below */ }
+          if (!portfolioPk) {
+            // Shared lookup (lib/owner-portfolio.ts): retried; an RPC failure throws PortfolioLookupError
+            // (calm "couldn't load your account" copy) instead of reading as "no account". Only a scan that
+            // completed and found nothing falls through to the "Deposit first" copy below.
+            const scanned = await scanOwnerPortfolios(connection, programId, slabPk, wallet.publicKey);
+            const picked = pickOwnerPortfolio(scanned, wallet.publicKey);
+            if (picked) {
+              portfolioPk = picked.pubkey;
+              portfolioData = picked.data;
             }
-          } catch { /* fall through — portfolio lookup is best-effort */ }
+          }
 
           if (!portfolioPk) {
             throw new UserFacingError("No account found for this wallet on this market. Deposit first to create one.");
