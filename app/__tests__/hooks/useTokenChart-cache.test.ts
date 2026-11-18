@@ -117,4 +117,54 @@ describe("useTokenChart cache correctness", () => {
     await waitFor(() => expect(result.current.status).toBe("success"));
     expect(result.current.candles).toHaveLength(3);
   });
+  describe("clock skew on the paint cache", () => {
+    const MINT_D = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs";
+    const MINT_E = "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So";
+
+    // First call resolves with data; later calls hang so the cache paint (or
+    // its absence) is the only thing the second mount can show.
+    function seedThenHang() {
+      let call = 0;
+      const fetchMock = vi.fn((): Promise<Response> => {
+        call += 1;
+        if (call > 1) return new Promise(() => {});
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ candles: [candle(1), candle(2)], poolAddress: "pool1" }),
+        } as unknown as Response);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+    }
+
+    it("does not paint a cache entry whose age is negative (clock stepped back)", async () => {
+      seedThenHang();
+      const T = 1_800_000_000_000;
+      const now = vi.spyOn(Date, "now").mockReturnValue(T);
+      const first = renderHook(() => useTokenChart(MINT_D, "1h"));
+      await waitFor(() => expect(first.result.current.status).toBe("success"));
+      first.unmount();
+
+      now.mockReturnValue(T - 3_600_000); // wall clock stepped back 1h: age = -1h
+      const second = renderHook(() => useTokenChart(MINT_D, "1h"));
+      await Promise.resolve();
+      expect(second.result.current.status).toBe("loading");
+      expect(second.result.current.candles).toHaveLength(0);
+      now.mockRestore();
+    });
+
+    it("still paints a fresh in-window cache entry", async () => {
+      seedThenHang();
+      const T = 1_800_000_000_000;
+      const now = vi.spyOn(Date, "now").mockReturnValue(T);
+      const first = renderHook(() => useTokenChart(MINT_E, "1h"));
+      await waitFor(() => expect(first.result.current.status).toBe("success"));
+      first.unmount();
+
+      now.mockReturnValue(T + 60_000);
+      const second = renderHook(() => useTokenChart(MINT_E, "1h"));
+      await waitFor(() => expect(second.result.current.status).toBe("success"));
+      expect(second.result.current.candles).toHaveLength(2);
+      now.mockRestore();
+    });
+  });
 });
