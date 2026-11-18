@@ -36,10 +36,10 @@ import {
   WELL_KNOWN,
   buildAccountMetas,
   buildIx,
-  deriveLpBackingLedger,
   deriveLpVaultRegistry,
   encodeRebalanceLpVaultBacking,
 } from "@percolatorct/sdk";
+import { cachedLpBackingLedgerPda } from "@/lib/pda-memo";
 import { marketOffsetsOrNull } from "@/lib/v22/market-offsets";
 import * as C from "./constants";
 import { decodeLpVaultRegistryBound, decodeLpVaultRegistryOiThresholdBps, decodeMarketEngineView, decodeResolvedMarket, u128 } from "./decode";
@@ -687,8 +687,8 @@ export function vaultPotLedgerKeys(
     if (bound !== true && bound !== false) return null;
     const ownDomain = Number(parseLpVaultRegistry(rd).domain);
     return {
-      ownLedger: deriveLpBackingLedger(programId, market, ownDomain)[0],
-      sibLedger: deriveLpBackingLedger(programId, market, ownDomain ^ 1)[0],
+      ownLedger: cachedLpBackingLedgerPda(programId, market, ownDomain),
+      sibLedger: cachedLpBackingLedgerPda(programId, market, ownDomain ^ 1),
       bound,
     };
   } catch {

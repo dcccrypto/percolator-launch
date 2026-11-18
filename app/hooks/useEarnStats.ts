@@ -6,7 +6,7 @@ import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { hasNoPriceSource } from "@/lib/listed-markets";
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
-import { deriveLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
+import { isV17Account } from '@percolatorct/sdk';
 import { getConfig, getRpcEndpoint } from '@/lib/config';
 import { isMockMode } from '@/lib/mock-mode';
 import { isBlockedSlab } from '@/lib/blocklist';
@@ -15,6 +15,7 @@ import { PLAYGROUND_SLAB_META } from '@/lib/playground-slab-meta';
 import { parseV17RiskParams } from '@/lib/v17-engine-config';
 import { leverageFromMarginBps } from '@/lib/market-params';
 import { qToUsd, rowVolumeUsd } from '@/lib/q-usd';
+import { cachedLpVaultRegistryPda, cachedPublicKey } from "@/lib/pda-memo";
 import { pollWhenVisible } from '@/lib/pollWhenVisible';
 import { getMultipleAccountsInfoChunked } from '@/lib/rpc-chunk';
 import { splitPotLedgerKeys, splitPotStateFromAccounts, vaultValue } from '@/lib/limits/earn-split-pot';
@@ -389,9 +390,7 @@ export async function fetchCuratedVaultsOnChain(
   try {
     const programId = new PublicKey(getConfig().programId);
     const connection = getSharedEarnStatsConnection();
-    const registryPdas = slabs.map(
-      (slab) => deriveLpVaultRegistry(programId, new PublicKey(slab))[0],
-    );
+    const registryPdas = slabs.map((slab) => cachedLpVaultRegistryPda(programId, cachedPublicKey(slab)));
     // I: curated(5) ∪ registered(<=100) slabs can exceed the 100-key cap —
     // chunked (see lib/rpc-chunk.ts).
     const infos = await getMultipleAccountsInfoChunked(connection, registryPdas);
@@ -423,7 +422,7 @@ export async function fetchCuratedVaultsOnChain(
     const splitPot = slabs.flatMap((slab, i) => {
       const info = infos[i];
       if (!result[slab].found || result[slab].unvalued || !info) return [];
-      const market = new PublicKey(slab);
+      const market = cachedPublicKey(slab);
       const keys = splitPotLedgerKeys(programId, market, info.data);
       return keys ? [{ slab, market, registryData: info.data, ...keys }] : [];
     });
