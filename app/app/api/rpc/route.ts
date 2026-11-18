@@ -705,7 +705,7 @@ function isAllowedOrigin(req: NextRequest): boolean {
  * give every instance its own independent budget, which doesn't actually bound drain rate
  * under real (multi-instance) production traffic. Falls back to an in-memory sliding
  * window (same helper) when Upstash env vars are unconfigured (dev/CI).
- * Tunable via RPC_RATE_LIMIT_PER_WINDOW.
+ * Tunable via RPC_RATE_LIMIT_PER_WINDOW (positive integer, or "off" to disable).
  */
 const RATE_LIMIT_WINDOW_MS = 10_000;
 const RATE_LIMIT_DEFAULT = 200; // per IP / 10s
@@ -720,7 +720,7 @@ function parseRateLimitMax(raw: string | undefined): number {
   const v = raw.trim();
   if (v.toLowerCase() === "off") return 0; // 0 = disabled (explicit opt-out)
   const n = Number(v);
-  if (v !== "" && Number.isInteger(n) && n > 0) return n;
+  if (/^\d+$/.test(v) && Number.isSafeInteger(n) && n > 0) return n;
   console.warn(
     `[/api/rpc] Invalid RPC_RATE_LIMIT_PER_WINDOW (expected a positive integer or "off"); using default ${RATE_LIMIT_DEFAULT}`
   );

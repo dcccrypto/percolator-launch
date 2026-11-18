@@ -66,6 +66,7 @@ describe("/api/rpc RPC_RATE_LIMIT_PER_WINDOW parsing", () => {
     ["'NaN'", "NaN"],
     ["'Infinity'", "Infinity"],
     ["fractional '0.5'", "0.5"],
+    ["scientific notation", "1e21"],
   ])("%s -> limiter stays ON with default 200", async (_n, value) => {
     const POST = await load(value);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
