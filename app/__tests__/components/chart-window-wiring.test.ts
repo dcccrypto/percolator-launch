@@ -50,7 +50,9 @@ describe("the window actually reaches the request", () => {
       PERC.indexOf("if (endpointUnavailable)"),
     );
     expect(block.length).toBeGreaterThan(0);
-    expect(block).toMatch(/Date\.now\(\)\s*-\s*emptyAt\s*<\s*EMPTY_CACHE_TTL_MS/);
+    expect(block).toMatch(/isFresh\(\s*emptyAt\s*,\s*EMPTY_CACHE_TTL_MS\s*\)/);
+    // isFresh must stay a real 0 <= age < ttl window (an inverted comparison would never short-circuit).
+    expect(PERC).toMatch(/const\s+age\s*=\s*Date\.now\(\)\s*-\s*at\s*;\s*return\s+age\s*>=\s*0\s*&&\s*age\s*<\s*ttlMs\s*;/);
     expect(block).toMatch(/return\s*;/);
     // ...and it must sit ahead of the network call, not after it.
     expect(PERC.indexOf("const emptyAt = emptyCache.get(")).toBeLessThan(
