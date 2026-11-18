@@ -177,7 +177,10 @@ export function useTokenChart(
       // every repeat timeframe switch blanked the chart to "loading" for a
       // fresh round trip even though we fetched this exact pair moments ago.
       const cached = chartCache.get(key);
-      if (cached && Date.now() - cached.at < CACHE_PAINT_MAX_AGE_MS) {
+      // age < 0 means the wall clock stepped backwards since the write; the
+      // entry's true age is unknowable, so treat it as stale, not fresh.
+      const cacheAge = cached ? Date.now() - cached.at : Number.NaN;
+      if (cached && cacheAge >= 0 && cacheAge < CACHE_PAINT_MAX_AGE_MS) {
         candlesRef.current = cached.candles;
         lastGoodKeyRef.current = key;
         setCandles(cached.candles);
