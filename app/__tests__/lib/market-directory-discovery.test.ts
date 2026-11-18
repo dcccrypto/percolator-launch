@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 
 const getMarketsByAddress = vi.fn();
 vi.mock("@/lib/v22/discovery", () => ({
@@ -8,11 +8,18 @@ vi.mock("@/lib/v22/discovery", () => ({
 
 import { discoverMarketsViaProgramDirectory } from "@/lib/market-directory-discovery";
 
-const programId = Keypair.generate().publicKey;
-const otherProgram = Keypair.generate().publicKey;
+let counter = 0;
+function pk(): PublicKey {
+  const b = new Uint8Array(32);
+  new DataView(b.buffer).setUint32(0, ++counter + 1000);
+  b[31] = 7;
+  return new PublicKey(b);
+}
+const programId = pk();
+const otherProgram = pk();
 
 function keys(n: number): string[] {
-  return Array.from({ length: n }, () => Keypair.generate().publicKey.toBase58());
+  return Array.from({ length: n }, () => pk().toBase58());
 }
 
 function jsonResponse(markets: unknown[], init: { ok?: boolean; status?: number } = {}) {
@@ -101,7 +108,7 @@ describe("discoverMarketsViaProgramDirectory", () => {
       expect(infos.every(Boolean)).toBe(true);
       expect(c.marker).toBe("real"); // proxy forwards everything else
       // an unread key falls through to the real connection
-      await c.getMultipleAccountsInfo([Keypair.generate().publicKey], "confirmed");
+      await c.getMultipleAccountsInfo([pk()], "confirmed");
       return [];
     });
     await discoverMarketsViaProgramDirectory(connection, programId, "https://api.test");
