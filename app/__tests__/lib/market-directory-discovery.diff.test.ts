@@ -33,7 +33,11 @@ describe("market-directory-discovery differential", () => {
     const rand = rng(12345);
     const programId = Keypair.generate().publicKey;
     const other = Keypair.generate().publicKey;
-    const pool = Array.from({ length: 300 }, () => Keypair.generate().publicKey.toBase58());
+    const pool = [
+      "11111111111111111111111111111111", // all-zero key (32 leading '1's)
+      new PublicKey(Buffer.concat([Buffer.alloc(3), Buffer.alloc(29, 7)])).toBase58(), // leading zero bytes
+      ...Array.from({ length: 300 }, () => Keypair.generate().publicKey.toBase58()),
+    ];
     const unknown = Array.from({ length: 20 }, () => Keypair.generate().publicKey);
     const pick = <T>(a: T[]) => a[Math.floor(rand() * a.length)];
     let mismatches = 0;

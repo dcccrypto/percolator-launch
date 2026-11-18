@@ -44,6 +44,7 @@ describe("bench: discoverMarketsViaProgramDirectory", () => {
     } finally {
       PublicKey.prototype.toBase58 = orig;
     }
-    expect(true).toBe(true);
+    // one encode (programId) per run; the old code needed ~2000 for 500 rows
+    expect(calls / 10).toBeLessThanOrEqual(5);
   });
 });
