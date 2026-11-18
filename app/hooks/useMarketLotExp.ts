@@ -22,7 +22,7 @@ export function useMarketLotExp(slab: string | null | undefined): number | null 
     ensureLotExp(slab);
     // A failed load is swallowed by the registry; retry (once per cooldown) while unknown, so one bad read never pins the guard.
     if (!unknown) return;
-    const t = setInterval(() => ensureLotExp(slab), LOT_LOAD_RETRY_MS);
+    const t = setInterval(() => ensureLotExp(slab), LOT_LOAD_RETRY_MS / 2);
     return () => clearInterval(t);
   }, [slab, unknown]);
   return value;
@@ -39,7 +39,7 @@ export function useMarketLotExps(slabs: readonly string[]): Map<string, number |
     const list = key.split(",");
     const t = setInterval(() => {
       for (const s of list) ensureLotExp(s);
-    }, LOT_LOAD_RETRY_MS);
+    }, LOT_LOAD_RETRY_MS / 2);
     return () => clearInterval(t);
   }, [key, anyUnknown]);
   useEffect(() => {
