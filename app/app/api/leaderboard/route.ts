@@ -118,20 +118,21 @@ export async function GET(request: Request) {
     // One page of the filtered read. Same filters as the indexer-DB path (queryLeaderboard):
     // network, period window, retired slabs, and is_liquidation IS NOT TRUE (liquidation markers
     // have NULL size/price and a portfolio address as trader). Ordered for stable paging.
-    const readPage = (withNetwork: boolean, from: number) => {
+    const readPage = (withNetwork: boolean, withLiqFilter: boolean, from: number) => {
       let q = supabase.from("trades").select("trader, size, price, created_at");
       if (withNetwork) q = q.eq("network", getServerNetwork());
       if (since) q = q.gte("created_at", since);
       if (retired.length > 0) q = q.not("slab_address", "in", `(${retired.join(",")})`);
-      q = q.not("is_liquidation", "is", true);
+      // The Supabase trades table may predate the column (the indexer DB has it); see retry below.
+      if (withLiqFilter) q = q.not("is_liquidation", "is", true);
       return q.order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, from + PAGE_SIZE - 1);
     };
 
     type TradeRow = { trader: string; size: unknown; price: unknown; created_at: string | null };
-    const readAll = async (withNetwork: boolean) => {
+    const readAll = async (withNetwork: boolean, withLiqFilter: boolean) => {
       const rows: TradeRow[] = [];
       for (let page = 0; page < MAX_PAGES; page++) {
-        const { data: chunk, error: pageError } = await readPage(withNetwork, page * PAGE_SIZE);
+        const { data: chunk, error: pageError } = await readPage(withNetwork, withLiqFilter, page * PAGE_SIZE);
         if (pageError) return { rows, error: pageError };
         rows.push(...((chunk ?? []) as TradeRow[]));
         if ((chunk?.length ?? 0) < PAGE_SIZE) return { rows, error: null };
@@ -140,9 +141,17 @@ export async function GET(request: Request) {
       return { rows, error: null };
     };
 
-    let { rows: data, error } = await readAll(true);
+    let withNetwork = true;
+    let withLiqFilter = true;
+    let { rows: data, error } = await readAll(withNetwork, withLiqFilter);
     if (isMissingColumnError(error, "network")) {
-      ({ rows: data, error } = await readAll(false));
+      withNetwork = false;
+      ({ rows: data, error } = await readAll(withNetwork, withLiqFilter));
+    }
+    if (isMissingColumnError(error, "is_liquidation")) {
+      // No such column => no marker rows can exist (the loop below still skips NULL size/price).
+      withLiqFilter = false;
+      ({ rows: data, error } = await readAll(withNetwork, withLiqFilter));
     }
 
     if (error) throw error;
@@ -155,6 +164,8 @@ export async function GET(request: Request) {
     // documents as the one convention both this route's paths must agree on.
     const traderMap = new Map<string, { tradeCount: number; totalVolumeMicroUsd: bigint; lastTradeAt: string }>();
     for (const row of data ?? []) {
+      // Liquidation markers carry NULL size/price: never a fill, so never counted.
+      if (row.size == null || row.price == null) continue;
       const rowCreatedAt = row.created_at ?? new Date().toISOString();
       const entry = traderMap.get(row.trader) ?? { tradeCount: 0, totalVolumeMicroUsd: 0n, lastTradeAt: rowCreatedAt };
       entry.tradeCount += 1;

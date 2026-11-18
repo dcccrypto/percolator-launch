@@ -13,12 +13,14 @@ const h = vi.hoisted(() => ({
   trades: [] as Array<Record<string, unknown>>,
   maxRows: 1000,
   calls: 0,
+  missingLiq: false,
 }));
 
 function table() {
   const preds: Array<(r: Row) => boolean> = [];
   let range: [number, number] | null = null;
   let cap: number | null = null;
+  let usesLiq = false;
   const q: Record<string, unknown> = {};
   q.select = () => q;
   q.eq = (c: string, v: unknown) => { preds.push((r) => r[c] === v); return q; };
@@ -30,6 +32,7 @@ function table() {
       preds.push((r) => !set.has(String(r[c])));
     } else if (op === "is") {
       // not(is_liquidation, is, true) — treat NULL as "not true" like SQL IS NOT TRUE
+      usesLiq = true;
       preds.push((r) => r[c] !== true);
     } else throw new Error(`unsupported not.${op}`);
     return q;
@@ -38,6 +41,9 @@ function table() {
   q.limit = (n: number) => { cap = n; return q; };
   q.then = (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) => {
     h.calls++;
+    if (usesLiq && h.missingLiq) {
+      return Promise.resolve({ data: null, error: { code: "42703", message: "column trades.is_liquidation does not exist" } }).then(res, rej);
+    }
     let data = h.trades.filter((r) => preds.every((p) => p(r)));
     if (range) data = data.slice(range[0], range[1] + 1);
     if (cap !== null) data = data.slice(0, cap);
@@ -66,6 +72,7 @@ beforeEach(() => {
   h.trades = [];
   h.maxRows = 1000;
   h.calls = 0;
+  h.missingLiq = false;
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://x.supabase.co");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon");
 });
@@ -82,6 +89,16 @@ describe("fallback excludes liquidation markers", () => {
     const body = await (await get("?period=alltime")).json();
     expect(body.leaderboard.map((e: { trader: string }) => e.trader)).toEqual(["alice", "bob"]);
     expect(body.leaderboard[0]).toMatchObject({ tradeCount: 1, totalVolume: 10 });
+  });
+});
+
+describe("fallback tolerates a trades table without is_liquidation", () => {
+  it("retries without the filter on a missing-column error and still skips NULL size/price rows", async () => {
+    h.missingLiq = true;
+    h.trades = [trade(1, "alice", "5000000", 2), trade(2, "PORTFOLIOaddr", null, null, null)];
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect((await res.json()).leaderboard.map((e: { trader: string }) => e.trader)).toEqual(["alice"]);
   });
 });
 
