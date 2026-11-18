@@ -151,10 +151,19 @@ export function deltasFromLogs(
     fillDelta = { sig, deltaQ: f.executedQ, fill: f, signedFeeBps: signed.feeBps, noBusyCap: signed.noBusyCap };
   }
   // Keep the log order: the summed fill sits where its first FILL event was (REDUCEs before it happen before it).
-  for (const r of reduces.filter((r) => r.at < fillAt || fillAt < 0)) out.push(r.d);
-  if (fillDelta) out.push(fillDelta);
-  for (const r of reduces.filter((r) => fillAt >= 0 && r.at > fillAt)) out.push(r.d);
+  orderDeltas(out, reduces, fillAt, fillDelta);
   return out;
+}
+
+/** Push REDUCEs before the fill's log position, then the fill, then REDUCEs after it (one pass over `reduces`). */
+export function orderDeltas(out: ChainDelta[], reduces: readonly { at: number; d: ChainDelta }[], fillAt: number, fillDelta: ChainDelta | null): void {
+  const afterFill: ChainDelta[] = [];
+  for (const r of reduces) {
+    if (r.at < fillAt || fillAt < 0) out.push(r.d);
+    else if (r.at > fillAt) afterFill.push(r.d);
+  }
+  if (fillDelta) out.push(fillDelta);
+  for (const d of afterFill) out.push(d);
 }
 
 /**
@@ -322,13 +331,14 @@ export function txNamesProgram(tx: { transaction?: { message?: unknown }; meta?:
   const keys = m?.staticAccountKeys ?? m?.accountKeys;
   // Unknown shape: cannot prove the wrapper did not run, so treat it as named (read its events).
   if (!keys) return true;
+  let b58: string | undefined; // encoded once per call, only if a string key shows up
   const eq = (k: unknown): boolean => {
     if (k instanceof Object && typeof (k as PublicKey).equals === "function") return (k as PublicKey).equals(program);
-    return typeof k === "string" && k === program.toBase58();
+    return typeof k === "string" && k === (b58 ??= program.toBase58());
   };
   if (keys.some(eq)) return true;
   const la = tx?.meta?.loadedAddresses;
-  return !!la && [...(la.writable ?? []), ...(la.readonly ?? [])].some(eq);
+  return !!la && ((la.writable ?? []).some(eq) || (la.readonly ?? []).some(eq));
 }
 
 async function fetchTxs(connection: Conn, sigs: string[], conc: number): Promise<(TxResp | null)[]> {
