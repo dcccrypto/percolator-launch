@@ -13,6 +13,8 @@
  * Inputs come from the app's own decoders (same fields as the SDK's `readTradeFeeInputsV22`).
  */
 import type { Connection, PublicKey } from "@solana/web3.js";
+import { failingProgramId } from "@/lib/errorMessages";
+import { DEVNET_PROGRAM_IDS, DEVNET_V22_FRESH_1106_PROGRAM_IDS, DEVNET_V22_PROGRAM_IDS, resolveDevnetProgramIds } from "@/lib/program-ids";
 import { decodeAssetRiskLimits, decodeMarketEngineView, decodeMatcherCtx } from "./decode";
 import { decodeGrowthRecord } from "@/lib/v21/growth-market";
 import { utilFeeMaxEffectiveBps } from "@/lib/v22/sdk/records/growth-v19";
@@ -115,11 +117,38 @@ export function withConfirmedBusy(fallback: bigint | undefined, busy: bigint | u
   return max !== undefined && max > 0n && total > max ? max : total;
 }
 
-/** 98 GrowthUtilisationFeeNotCovered from the wrapper (or unattributed), in any of the error shapes. */
+/**
+ * Programs in a trade tx that are NOT the wrapper: matcher, position-NFT, stake (every known set), plus SPL token, Token-2022, ATA, system and
+ * compute-budget. A denylist, not a wrapper allowlist: the error's `programId` is the market's own wrapper (any id, incl. env overrides).
+ */
+function nonWrapperIds(): Set<string> {
+  const sets = [resolveDevnetProgramIds(), DEVNET_PROGRAM_IDS, DEVNET_V22_PROGRAM_IDS, DEVNET_V22_FRESH_1106_PROGRAM_IDS];
+  const wrappers = new Set(sets.map((x) => x.wrapper));
+  const out = new Set<string>(NON_WRAPPER_BUILTINS);
+  for (const x of sets) for (const id of [x.matcher, x.nft, x.stake]) if (!wrappers.has(id)) out.add(id);
+  return out;
+}
+const NON_WRAPPER_BUILTINS = [
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+  "11111111111111111111111111111111",
+  "ComputeBudget111111111111111111111111111111",
+];
+
+/**
+ * 98 GrowthUtilisationFeeNotCovered from the wrapper (or unattributed), in any of the error shapes. When the error names a program that is
+ * known not to be the wrapper (a `programId` field, or a "Program <id> failed: custom program error" log line), a Custom 98 from the
+ * matcher CPI, token, ATA or compute-budget program is not this error: false (so no silent re-sign at a raised fee cap).
+ */
 export function isUtilFeeNotCovered(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  const field = (e as { programId?: unknown } | null)?.programId;
+  const fieldId = typeof field === "string" ? field : field != null && typeof (field as { toBase58?: unknown }).toBase58 === "function" ? (field as { toBase58(): string }).toBase58() : null;
+  const foreign = nonWrapperIds();
+  if ((fieldId && foreign.has(fieldId)) || (failingProgramId(msg) !== null && foreign.has(failingProgramId(msg)!))) return false;
   const code = (e as { code?: unknown } | null)?.code;
   if (code === 98) return true;
-  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
   return /custom program error: 0x62\b|"Custom":98\b|Custom\(98\)/.test(msg);
 }
 

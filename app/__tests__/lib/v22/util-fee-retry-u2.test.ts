@@ -41,6 +41,24 @@ describe("U-2: the fee cap after a 98", () => {
     expect(isUtilFeeNotCovered(new Error("custom program error: 0x31"))).toBe(false);
   });
 
+  it("attribution: only the wrapper's 98 is 'fee not covered'; a foreign program's Custom 98 is not", async () => {
+    const { DEVNET_PROGRAM_IDS: ids } = await import("@/lib/program-ids");
+    const foreign = ids.matcher;
+    const wrapper = ids.wrapper;
+    // foreign: matcher log line, and a code-98 error carrying a foreign programId
+    expect(isUtilFeeNotCovered(new Error(`Program ${foreign} failed: custom program error: 0x62`))).toBe(false);
+    expect(isUtilFeeNotCovered(Object.assign(new Error('{"InstructionError":[3,{"Custom":98}]}'), { code: 98, programId: foreign }))).toBe(false);
+    expect(isUtilFeeNotCovered(Object.assign(new Error("x"), { code: 98, programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }))).toBe(false);
+    // wrapper: still true
+    expect(isUtilFeeNotCovered(new Error(`Program ${wrapper} failed: custom program error: 0x62`))).toBe(true);
+    expect(isUtilFeeNotCovered(Object.assign(new Error("x"), { code: 98, programId: wrapper }))).toBe(true);
+    expect(isUtilFeeNotCovered(e98())).toBe(true);
+    // a foreign 98 does not trigger the silent re-sign
+    const send = vi.fn(async () => { throw new Error(`Program ${foreign} failed: custom program error: 0x62`); });
+    await expect(sendWithUtilFeeRetry(send)).rejects.toThrow(/0x62/);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it("P-3b: 98 then the real refusal (49) shows the 49 once; 98 twice is 'Side too busy', never 'Try again' in a loop", async () => {
     const e49 = Object.assign(new Error('{"InstructionError":[3,{"Custom":49}]}'), { code: 49 });
     await expect(sendWithUtilFeeRetry(async (raised) => { throw raised ? e49 : e98(); })).rejects.toBe(e49);
