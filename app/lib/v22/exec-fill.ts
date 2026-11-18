@@ -15,6 +15,7 @@
  * Trust: the strict frame walk pinned to the wrapper id, successful transactions only, only FILL records of this market (and asset, and
  * the user's own portfolio when known). Unknown inputs give null, never a mark standing in for a price.
  */
+import { readLandedTx } from "@/lib/v22/landed-tx";
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { decodeTxEventsV22 } from "@/lib/v22/sdk/v22-fill-events";
 
@@ -153,19 +154,11 @@ export function readExecFill(
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   tries = 4,
 ): Promise<ExecFill | null> {
-  return (async (): Promise<ExecFill | null> => {
-    for (let i = 0; i < tries; i++) {
-      try {
-        const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-        if (tx?.meta) {
-          const f = execFillFromLogs(tx.meta.logMessages, wrapper, { ...o, succeeded: tx.meta.err === null });
-          return f ? { ...f, slot: tx.slot } : null;
-        }
-      } catch { /* retry */ }
-      if (i < tries - 1) await sleep(700);
-    }
-    return null;
-  })();
+  return readLandedTx(connection, sig, sleep, tries).then((tx): ExecFill | null => {
+    if (!tx?.meta) return null;
+    const f = execFillFromLogs(tx.meta.logMessages, wrapper, { ...o, succeeded: tx.meta.err === null });
+    return f ? { ...f, slot: tx.slot } : null;
+  });
 }
 
 /**
