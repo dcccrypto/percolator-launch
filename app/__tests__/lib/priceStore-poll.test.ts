@@ -98,6 +98,39 @@ describe("applyOnChainPoll", () => {
     unsub();
   });
 
+  it("treats a live tick stamped in the future (backwards clock step) as stale, not fresh", () => {
+    const slab = "poll-slab-clock-back";
+    const unsub = subscribeSlab(slab, () => {});
+    deliverLiveTick(slab, 42);
+    expect(getSnapshot(slab).priceE6).toBe(42_000_000n);
+
+    // wall clock steps back 1h: Date.now() - lastLiveTickAt is now hugely negative
+    const realNow = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(realNow - 3_600_000);
+
+    expect(applyOnChainPoll(slab, 43_000_000n)).toBe(true);
+    expect(getSnapshot(slab).priceE6).toBe(43_000_000n);
+    unsub();
+  });
+
+  it("treats a non-finite clock reading as stale", () => {
+    const slab = "poll-slab-clock-nan";
+    const unsub = subscribeSlab(slab, () => {});
+    deliverLiveTick(slab, 42);
+    vi.spyOn(Date, "now").mockReturnValue(NaN);
+    applyOnChainPoll(slab, 43_000_000n);
+    expect(getSnapshot(slab).priceE6).toBe(43_000_000n);
+    unsub();
+  });
+
+  it("a redundant identical poll keeps the same snapshot reference (applyPatch bail-out intact)", () => {
+    const slab = "poll-slab-bailout";
+    applyOnChainPoll(slab, 5_000_000n);
+    const a = getSnapshot(slab);
+    applyOnChainPoll(slab, 5_000_000n);
+    expect(getSnapshot(slab)).toBe(a);
+  });
+
   it("a chain write owns the price: a DB seed's invert correction never brings the old DB price back", () => {
     const slab = "poll-slab-db-then-chain";
     seedFromDbIfEmpty(slab, 1.5, undefined);

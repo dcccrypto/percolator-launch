@@ -477,7 +477,11 @@ const LIVE_TICK_STALE_MS = 10_000;
 export function applyOnChainPoll(slab: string, onChainE6: bigint): boolean {
   if (onChainE6 <= 0n) return false;
   const entry = getOrCreateEntry(slab);
-  if (entry.source === "live" && Date.now() - entry.lastLiveTickAt < LIVE_TICK_STALE_MS) return false;
+  if (entry.source === "live") {
+    // A backwards wall-clock step makes the age negative; that (or a non-finite age) is NOT proof of a fresh feed.
+    const age = Date.now() - entry.lastLiveTickAt;
+    if (Number.isFinite(age) && age >= 0 && age < LIVE_TICK_STALE_MS) return false;
+  }
   const before = entry.snapshot.priceE6;
   const usd = Number(onChainE6) / 1_000_000;
   // The chain value now owns the entry: a DB seed's invert / lotExp retro-correction must not rewrite over it.
