@@ -27,7 +27,10 @@ async function fetchLoop(
   return null;
 }
 
-/** The landed transaction (with meta) or null after `tries` attempts. Concurrent calls for the same signature share one fetch loop. */
+/**
+ * The landed transaction (with meta) or null after `tries` attempts. Concurrent calls for the same signature share one fetch loop;
+ * a caller that joins late uses the first caller's `sleep` and gets only the tries that loop has left.
+ */
 export function readLandedTx(
   connection: Pick<Connection, "getTransaction">,
   sig: string,

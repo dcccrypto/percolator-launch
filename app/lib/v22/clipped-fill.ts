@@ -56,7 +56,12 @@ export async function readClippedFill(
   tries = 4,
 ): Promise<ClippedFill | null> {
   const tx = await readLandedTx(connection, sig, sleep, tries);
-  return tx?.meta ? clippedFillFromLogs(tx.meta.logMessages, wrapper, { ...o, succeeded: tx.meta.err === null }) : null;
+  if (!tx?.meta) return null;
+  try {
+    return clippedFillFromLogs(tx.meta.logMessages, wrapper, { ...o, succeeded: tx.meta.err === null });
+  } catch {
+    return null; // the caller has no .catch: a parser throw stays a quiet "unknown"
+  }
 }
 
 /**
