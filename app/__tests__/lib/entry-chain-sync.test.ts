@@ -154,7 +154,7 @@ describe("a trade in flight on the market holds the rebuild", () => {
     holdChainSync(SLAB, 60_000);
     expect(await syncChainEntry(conn, target())).toBe("skipped");
     expect(h.entryFromChain).not.toHaveBeenCalled();
-    holdChainSync(SLAB, -1_000_000, 0); // (no effect: holds only extend)
+    holdChainSync(SLAB, -1_000_000, 0); // (clock-step case: nothing is held; the next line resets anyway)
     __resetEntryChainSyncForTests();
     expect(await syncChainEntry(conn, target())).toBe("chain");
   });
