@@ -35,7 +35,9 @@ async function lpCapitals(slabs: string[]): Promise<Map<string, bigint>> {
   const missing = slabs.filter((s) => !known.has(s));
   if (missing.length === 0) return known;
   const programId = getConfig().programId;
-  if (!lpScanCache || lpScanCache.programId !== programId || Date.now() - lpScanCache.at > LP_SCAN_TTL_MS) {
+  // A negative age (wall clock stepped backwards) counts as expired, not fresh.
+  const scanAge = lpScanCache ? Date.now() - lpScanCache.at : 0;
+  if (!lpScanCache || lpScanCache.programId !== programId || scanAge < 0 || scanAge > LP_SCAN_TTL_MS) {
     lpScanCache = { at: Date.now(), programId, map: await scanEnabledMarketLpCapitals(connection, new PublicKey(programId)) };
   }
   for (const s of missing) {
@@ -63,7 +65,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(url, 308);
   }
   const cached = responseCache.get(canonical);
-  if (cached && Date.now() - cached.at < RESPONSE_TTL_MS) {
+  const cachedAge = cached ? Date.now() - cached.at : -1;
+  if (cached && cachedAge >= 0 && cachedAge < RESPONSE_TTL_MS) {
     return NextResponse.json(cached.body, { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } });
   }
   try {
