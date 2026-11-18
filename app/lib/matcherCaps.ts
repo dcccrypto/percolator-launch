@@ -118,9 +118,25 @@ const capsCache = new Map<string, { caps: MatcherCaps | null; ts: number }>();
 const inflight = new Map<string, Promise<MatcherCaps | null>>();
 const ctxAddressCache = new Map<string, { pk: PublicKey; lp: PublicKey; ts: number }>();
 
+/**
+ * PublicKey.toBase58() re-runs a full base58 encode on every call, and the cache-hit path used to
+ * pay for 2-3 of them per call. A WeakMap memo (identity-keyed, GC-bounded, PublicKeys are
+ * immutable) encodes each key object once.
+ */
+const b58Memo = new WeakMap<PublicKey, string>();
+function b58(pk: PublicKey): string {
+  let s = b58Memo.get(pk);
+  if (s === undefined) {
+    s = pk.toBase58();
+    b58Memo.set(pk, s);
+  }
+  return s;
+}
+const cacheKey = (programId: PublicKey, slabPk: PublicKey): string => `${b58(programId)}|${b58(slabPk)}`;
+
 /** Drop cached caps + ctx address for one market — call on trade/close failure. */
 export function invalidateMatcherCaps(programId: PublicKey, slabPk: PublicKey): void {
-  const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
+  const key = cacheKey(programId, slabPk);
   capsCache.delete(key);
   ctxAddressCache.delete(key);
 }
@@ -130,14 +146,14 @@ async function resolveCtxAddress(
   programId: PublicKey,
   slabPk: PublicKey,
 ): Promise<PublicKey | null> {
-  const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
+  const key = cacheKey(programId, slabPk);
   const cached = ctxAddressCache.get(key);
   if (cached && isFresh(Date.now(), cached.ts, CAPS_TTL_MS)) return cached.pk;
 
   // The market's LP portfolio holds the matcher config. The LP is chosen by on-chain
   // identity (lib/market-lp.ts), never "the first enabled matcher": any portfolio owner can
   // enable one, and its caps would then size every user's closes.
-  const known = PLAYGROUND_SLAB_META[slabPk.toBase58()]?.lp_portfolio_address;
+  const known = PLAYGROUND_SLAB_META[b58(slabPk)]?.lp_portfolio_address;
   let knownPk: PublicKey | null = null;
   try {
     knownPk = known ? new PublicKey(known) : null;
@@ -155,7 +171,7 @@ async function resolveCtxAddress(
 async function resolveLpAddress(connection: Connection, programId: PublicKey, slabPk: PublicKey): Promise<PublicKey | null> {
   const ctx = await resolveCtxAddress(connection, programId, slabPk);
   if (!ctx) return null;
-  return ctxAddressCache.get(`${programId.toBase58()}|${slabPk.toBase58()}`)?.lp ?? null;
+  return ctxAddressCache.get(cacheKey(programId, slabPk))?.lp ?? null;
 }
 
 export interface LpInventoryState {
@@ -244,7 +260,7 @@ export function getMatcherCaps(
   programId: PublicKey,
   slabPk: PublicKey,
 ): Promise<MatcherCaps | null> {
-  const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
+  const key = cacheKey(programId, slabPk);
   const cached = capsCache.get(key);
   if (cached && isFresh(Date.now(), cached.ts, CAPS_TTL_MS)) return Promise.resolve(cached.caps);
   const existing = inflight.get(key);
