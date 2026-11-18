@@ -64,20 +64,24 @@ export const dynamic = "force-dynamic";
 let slabMemo: { at: number; set: Set<string> } | null = null;
 let slabInflight: Promise<Set<string> | null> | null = null;
 
+const SLAB_MEMO_MAX_MS = 60_000;
+
 function slabMemoMs(): number {
   const v = Number(process.env.REGISTERED_MARKETS_DB_MEMO_MS ?? 3_000);
-  return Number.isFinite(v) && v >= 0 ? v : 3_000;
+  // Capped: a huge value would pin a stale slab set (and hide a new market) for hours.
+  return Number.isFinite(v) && v >= 0 ? Math.min(v, SLAB_MEMO_MAX_MS) : 3_000;
 }
 
 async function liveSlabAddresses(): Promise<Set<string> | null> {
   const ttl = slabMemoMs();
   if (ttl === 0) return readLiveSlabAddresses();
   const now = Date.now();
-  if (slabMemo && now - slabMemo.at < ttl) return slabMemo.set;
+  // A negative age means the clock stepped back: treat the memo as expired, not fresh.
+  if (slabMemo && now - slabMemo.at >= 0 && now - slabMemo.at < ttl) return slabMemo.set;
   if (slabInflight) return slabInflight;
   const p = readLiveSlabAddresses()
     .then((set) => {
-      if (set !== null) slabMemo = { at: now, set };
+      if (set !== null) slabMemo = { at: Date.now(), set }; // aged from completion, not start
       return set;
     })
     .finally(() => {
