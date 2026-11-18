@@ -154,7 +154,9 @@ export function useDevnetFaucet(): DevnetFaucetState {
     const stored = typeof window !== "undefined" ? localStorage.getItem(key) : null;
     if (stored) {
       const ts = parseInt(stored, 10);
-      if (Date.now() - ts < 24 * 60 * 60 * 1000) {
+      // A stamp from the future (clock was ahead, then corrected) is not a live dismissal.
+      const age = Date.now() - ts;
+      if (age >= 0 && age < 24 * 60 * 60 * 1000) {
         setDismissed(true);
       } else {
         setDismissed(false);
@@ -321,7 +323,9 @@ export function useDevnetFaucet(): DevnetFaucetState {
     // A server send still within its window: say so again instead of airdropping a second time.
     // Past it the send has landed (the balance check clears this) or can't any more (blockhash expiry).
     const serverPending = solServerPendingRef.current;
-    if (serverPending && Date.now() - serverPending.at < SOL_SERVER_PENDING_MS) {
+    // age < 0: the clock stepped back since the note was taken, so the window can't be trusted.
+    const pendingAge = serverPending ? Date.now() - serverPending.at : 0;
+    if (serverPending && pendingAge >= 0 && pendingAge < SOL_SERVER_PENDING_MS) {
       setStep("sol");
       lastOpFailedRef.current = true;
       solErrorRef.current = serverPending.msg;
