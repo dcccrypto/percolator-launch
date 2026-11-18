@@ -9,6 +9,7 @@
  */
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { TICKET_COPY } from "@/lib/limits/copy";
+import { readLandedTx } from "@/lib/v22/landed-tx";
 import { sizeLots, sizeTokens } from "@/lib/v22/growth-room";
 import { decodeTxEventsV22, FILL_FLAG_V22, type FillRecordV22 } from "@/lib/v22/sdk/v22-fill-events";
 
@@ -54,14 +55,13 @@ export async function readClippedFill(
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   tries = 4,
 ): Promise<ClippedFill | null> {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-      if (tx?.meta) return clippedFillFromLogs(tx.meta.logMessages, wrapper, { ...o, succeeded: tx.meta.err === null });
-    } catch { /* retry */ }
-    if (i < tries - 1) await sleep(700);
+  const tx = await readLandedTx(connection, sig, sleep, tries);
+  if (!tx?.meta) return null;
+  try {
+    return clippedFillFromLogs(tx.meta.logMessages, wrapper, { ...o, succeeded: tx.meta.err === null });
+  } catch {
+    return null; // the caller has no .catch: a parser throw stays a quiet "unknown"
   }
-  return null;
 }
 
 /**
