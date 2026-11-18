@@ -115,6 +115,52 @@ describe("storage", () => {
   });
 });
 
+describe("storage hardening (APP-BUG-CLOSEDSNAPFUTURE)", () => {
+  beforeEach(() => localStorage.clear());
+  const sk = `pco-pos-snapshot:v1:${WALLET}`;
+  const nk = `pco-closed-notices:v1:${WALLET}`;
+  const seen = () => seenFromPositions([pos()], WALLET);
+
+  it("a snapshot saved with the clock ahead (savedAt in the future) is stale", () => {
+    saveSnapshot(WALLET, seen(), 10 * MAX_SNAPSHOT_AGE_MS);
+    expect(loadSnapshot(WALLET, 1_000)).toBeNull();
+  });
+  it("a snapshot saved just now still loads", () => {
+    saveSnapshot(WALLET, seen(), 5_000);
+    expect(loadSnapshot(WALLET, 5_000)).not.toBeNull();
+  });
+  it("savedAt that parses to Infinity / is not finite is stale", () => {
+    localStorage.setItem(sk, '{"v":1,"savedAt":1e999,"positions":{}}');
+    expect(loadSnapshot(WALLET, 1_000)).toBeNull();
+    localStorage.setItem(sk, '{"v":1,"savedAt":null,"positions":{}}');
+    expect(loadSnapshot(WALLET, 1_000)).toBeNull();
+  });
+  it("positions as an array is rejected", () => {
+    localStorage.setItem(sk, JSON.stringify({ v: 1, savedAt: 5_000, positions: [seen()[`${SLAB}:3`]] }));
+    expect(loadSnapshot(WALLET, 6_000)).toBeNull();
+  });
+  it("corrupt entries inside a snapshot are dropped, good ones kept", () => {
+    const good = seen()[`${SLAB}:3`];
+    localStorage.setItem(sk, JSON.stringify({ v: 1, savedAt: 5_000, positions: { a: { ...good, sizeAbs: "abc" }, b: good } }));
+    expect(loadSnapshot(WALLET, 6_000)?.positions).toEqual({ b: good });
+  });
+  it("notices missing the fields the UI reads are dropped", () => {
+    const good = { ...seen()[`${SLAB}:3`], lastSeenAt: 5_000, detectedAt: 6_000 };
+    localStorage.setItem(
+      nk,
+      JSON.stringify([
+        good,
+        { key: "a:1", slab: "a" },
+        { ...good, side: "flat" },
+        { ...good, sizeAbs: "1.5" },
+        { ...good, liqPriceE6: "abc" },
+        { ...good, lastSeenAt: "x" },
+      ]),
+    );
+    expect(loadNotices(WALLET)).toEqual([good]);
+  });
+});
+
 describe("noticeCopy", () => {
   it("names the market and side, says it was likely liquidated, and where leftover margin is", () => {
     const seen = seenFromPositions([pos()], WALLET)[`${SLAB}:3`];
