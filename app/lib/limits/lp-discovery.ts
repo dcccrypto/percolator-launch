@@ -48,7 +48,8 @@ export async function resolveLpAccounts(
 ): Promise<LpAccounts | null> {
   const key = `${programId.toBase58()}|${slab.toBase58()}|${knownLp?.toBase58() ?? ""}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.ts < TTL_MS) return hit.v;
+  const age = hit ? Date.now() - hit.ts : -1;
+  if (hit && age >= 0 && age < TTL_MS) return hit.v; // negative age = clock stepped back: miss
 
   const pinned = knownLp ?? (PLAYGROUND_SLAB_META[slab.toBase58()]?.lp_portfolio_address
     ? new PublicKey(PLAYGROUND_SLAB_META[slab.toBase58()].lp_portfolio_address as string)

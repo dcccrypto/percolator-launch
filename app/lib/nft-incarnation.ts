@@ -26,7 +26,8 @@ export function resetNftIncarnationCache(): void {
 async function probeDeploySlot(connection: Pick<Connection, "getAccountInfo">, nftProgramId: PublicKey): Promise<number | null> {
   const key = nftProgramId.toBase58();
   const hit = probeCache.get(key);
-  if (hit && Date.now() - hit.at < PROBE_TTL_MS) return hit.slot;
+  const age = hit ? Date.now() - hit.at : -1;
+  if (hit && age >= 0 && age < PROBE_TTL_MS) return hit.slot; // negative age = clock stepped back: miss
   let slot: number | null = null;
   try {
     const [programData] = PublicKey.findProgramAddressSync([nftProgramId.toBytes()], BPF_LOADER_UPGRADEABLE);
