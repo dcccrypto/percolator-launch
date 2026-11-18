@@ -153,7 +153,7 @@ describe("already-processed re-send edge cases", () => {
   it("a request without an id answers with id null", async () => {
     const r = (await new UpstreamPool({ fetchImpl: net(() => ok({ result: { value: [{ err: null }] } })) }).post(mk(), SEND, "devnet")) as { id: unknown; result: string };
     expect(r.id).toBeNull();
-    expect(typeof r.result).toBe("string");
+    expect(r.result).toBe(bs58.encode(Uint8Array.from({ length: 64 }, (_, i) => i + 1)));
   });
 
   it("if the signature lookup itself fails, the duplicate is not reported as success", async () => {
@@ -179,7 +179,7 @@ describe("failover order, all upstreams failing, and log hygiene", () => {
     expect(err).not.toBeInstanceOf(UpstreamRateLimitedError);
     expect(order).toEqual(["primary:getSlot", "fb1:getGenesisHash", "fb1:getSlot", "fb2:getGenesisHash", "fb2:getSlot"]);
     expect(safeErrorText(err, mk())).toBe("UpstreamUnavailableError: RPC upstream unavailable");
-    for (const [line] of warn.mock.calls) for (const k of KEYS) expect(String(line)).not.toContain(k);
+    expect(warn).not.toHaveBeenCalled(); // no cluster mismatch here, so nothing is logged at all
   });
 
   it("a wrong-cluster fallback is skipped, warned about without any URL, and the next one answers", async () => {
