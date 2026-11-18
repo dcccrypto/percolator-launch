@@ -44,6 +44,8 @@ export const BAND_SWEEP_SLOTS = 26;
  * {@link BAND_SWEEP_SLOTS} slots) steps it toward the target by at most `min(cap x sweepSlots, band)` bps. A gap of J bps
  * therefore takes ceil(J / step) sweeps, i.e. `lag / (min(cap x S, band) / S)` slots. When the band is the tighter limit
  * the walk is slower than the cap alone says, which the plain {@link catchUpEstimate} cannot see.
+ * Unlike {@link catchUpEstimate}, `ms` deliberately does NOT add {@link KEEPER_SWEEP_MS}: the first step lands at the next
+ * sweep, so `sweeps x BAND_SWEEP_SLOTS` slots already contains the sweep wait (adding it would count it twice).
  * null when the numbers do not allow an estimate (no cap / no price).
  */
 export function bandWalkEstimate(p: {
