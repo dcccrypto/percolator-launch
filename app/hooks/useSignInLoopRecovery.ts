@@ -68,7 +68,9 @@ export function useSignInLoopRecovery(opts: { ready: boolean; authenticated: boo
       userLoggedOut.current = false;
       return;
     }
-    if (Date.now() - since <= SESSION_DROP_WINDOW_MS) setDropped(true);
+    // A backwards clock step makes the age negative; that is not evidence of a drop.
+    const age = Date.now() - since;
+    if (Number.isFinite(age) && age >= 0 && age <= SESSION_DROP_WINDOW_MS) setDropped(true);
   }, [authenticated]);
 
   const needsReset = ready && !authenticated && dropped;
