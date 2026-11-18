@@ -138,6 +138,7 @@ export async function GET(
       .eq("trader", walletKey)
       .eq("network", getServerNetwork())
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .range(offset, offset + limit - 1);
 
     if (safeSlab) query = query.eq("slab_address", safeSlab);
@@ -152,6 +153,7 @@ export async function GET(
         .select("id, slab_address, trader, side, size, price, fee, tx_signature, created_at", { count: "exact" })
         .eq("trader", walletKey)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .range(offset, offset + limit - 1);
       if (safeSlab) fallbackQuery = fallbackQuery.eq("slab_address", safeSlab);
       if (safeSide) fallbackQuery = fallbackQuery.eq("side", safeSide);

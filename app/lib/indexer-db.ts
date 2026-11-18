@@ -820,7 +820,7 @@ export async function queryTraderTradesPage(
           AND network = ${getServerNetwork()}
           AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
           AND (${side ?? null}::text IS NULL OR side = ${side ?? null}::text)
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ${limit} OFFSET ${offset}
       `
     : await sql`
@@ -832,7 +832,7 @@ export async function queryTraderTradesPage(
           AND network = ${getServerNetwork()}
           AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
           AND (${side ?? null}::text IS NULL OR side = ${side ?? null}::text)
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ${limit} OFFSET ${offset}
       `;
 
