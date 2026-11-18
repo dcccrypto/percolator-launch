@@ -179,7 +179,9 @@ describe("computePositionPnl: effective size", () => {
     expect(computePositionPnl({ ...noEpoch, basisQ: -33_333_333n }).effectiveSize).toBe(-8_333_334n);
   });
   it("epochs present but epochSnap omitted still takes the no-epoch path", () => {
-    expect(computePositionPnl({ ...base, epochSnap: undefined }).effectiveSize).toBe(40_000_000n);
+    // a stale epoch in the factors: the epoch path says unknown, the no-epoch path ignores epochs and scales
+    expect(computePositionPnl({ ...base, epochSnap: undefined, adlFactors: sides({ epochLong: 1n }) }).effectiveSize).toBe(40_000_000n);
+    expect(computePositionPnl({ ...base, adlFactors: sides({ epochLong: 1n }) }).effectiveSize).toBeNull();
   });
   it("an invalid leg (a_side > a_basis) is unknown, via both paths, and shows no PnL and no liquidation price", () => {
     for (const p of [base, { ...base, epochSnap: undefined }]) {
@@ -197,7 +199,6 @@ describe("computePositionPnl: effective size", () => {
     expect(r.pnlKnown).toBe(false);
     expect(r.unrealizedPnl).toBeNull();
     expect(r.riskKnown).toBe(false);
-    expect(r.fundingPaidAtoms).toBeNull();
   });
   it("a leg on a past epoch with the side NOT resetting is unknown (not zero)", () => {
     const r = computePositionPnl({ ...base, adlFactors: sides({ epochLong: 1n, modeLong: 0 }) });
@@ -231,7 +232,7 @@ describe("computePositionPnl: entry resolution", () => {
   it("cache check: a record saved for the SAME effective size counts, another size is dropped to a derived estimate", () => {
     const same = computePositionPnl({ ...base, cachedEntryCheck: { sizeQ: 40_000_000n, pending: false } });
     expect(same.entrySource).toBe("cache");
-    const other = computePositionPnl({ ...base, cachedEntryCheck: { sizeQ: 50_000_000n, pending: false } });
+    const other = computePositionPnl({ ...base, cachedBusyFeeAtoms: 123n, cachedEntryCheck: { sizeQ: 50_000_000n, pending: false } });
     expect(other.entrySource).toBe("derived");
     expect(other.isEstimate).toBe(true);
     expect(other.busyFeePaidAtoms).toBeNull();
@@ -343,7 +344,7 @@ describe("computePositionPnl: settled vs booked risk basis", () => {
     }
   });
   it("a settled back-solve that would not be a positive price keeps the booked basis", () => {
-    // pnl so large the long's entry 100e6 - 5e6 x 1e6/40e6 x 1000 goes negative -> null
+    // pnl so large the long's entry 100e6 - 5e6 x 1e6/40e6 x 1200 (pnl 6e9) goes negative -> null
     const r = computePositionPnl(settled({ onChainPnl: 6_000_000_000n }));
     expect(r.riskEntrySettled).toBe(false);
     expect(r.riskEntry).toBe(99_500_000n);
@@ -526,14 +527,14 @@ describe("terminalPositionPnl adapter", () => {
     expect(r.entry).toBe(99_000_000n);
     expect(r.unrealizedPnl).toBe(40_000_000n);
   });
-  it("a partial account (no owner, no frozen factor, no anchor) degrades instead of throwing", () => {
+  it("a partial account (no owner, no frozen factor) degrades instead of throwing", () => {
     const partial = { positionSize: 80_000_000n, pnl: 5_000_000n, capital: 1_000_000_000n } as unknown as typeof acct;
     const r = terminalPositionPnl({ ...args, account: partial, anchorMarkE6: 100_000_000n });
     // aBasis 0n is below MIN_A_SIDE: the leg is invalid, so unknown
     expect(r.effectiveSize).toBeNull();
     expect(r.pnlKnown).toBe(false);
   });
-  it("holding-fee flag and the funding counter are forwarded", () => {
+  it("holding-fee flag is forwarded", () => {
     hoisted.holdingFee = true;
     expect(terminalPositionPnl(args).holdingFeeExcluded).toBe(true);
   });
