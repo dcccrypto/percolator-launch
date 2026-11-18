@@ -37,6 +37,7 @@
  * Response: { candles: CandleData[], poolAddress: string | null, cached: boolean }
  */
 
+import { cacheAgeMs } from "@/lib/cache-age";
 import { type NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { registeredPoolForSlab } from "@/lib/registered-pool";
@@ -152,7 +153,7 @@ async function resolveTopPool(mint: string): Promise<string | null> {
   const cached = poolCache.get(mint);
   if (cached) {
     const ttl = cached.pool ? POOL_CACHE_TTL_MS : POOL_MISS_TTL_MS;
-    if (Date.now() - cached.at < ttl) return cached.pool;
+    if (cacheAgeMs(cached.at) < ttl) return cached.pool;
   }
   const pool = await resolveTopPoolUncached(mint);
   // A resolved pool is durable knowledge; a null may just be a 429 — the
@@ -284,7 +285,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ mint
     // 1's cache entry.
     const cacheKey = `${pool}:${timeframe}:${aggregate}:${limit}:${before ?? "-"}`;
     const cached = candleCache.get(cacheKey);
-    const age = cached ? Date.now() - cached.at : Infinity;
+    const age = cached ? cacheAgeMs(cached.at) : Infinity;
     const ttl = before ? HISTORICAL_CANDLE_TTL_MS : CANDLE_CACHE_TTL_MS;
     const cacheHeaders = before ? HISTORICAL_CACHE_HEADERS : CACHE_HEADERS;
 
