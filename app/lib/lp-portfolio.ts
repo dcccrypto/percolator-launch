@@ -63,13 +63,21 @@ export async function getKnownMarketLpCapitals(
   slabs: string[],
 ): Promise<Map<string, bigint>> {
   const result = new Map<string, bigint>();
-  const entries = slabs
-    .map((slab) => ({ slab, addr: getKnownLpPortfolioAddress(slab) }))
-    .filter((e): e is { slab: string; addr: string } => !!e.addr);
+  const entries: { slab: string; pk: PublicKey }[] = [];
+  for (const slab of slabs) {
+    const addr = getKnownLpPortfolioAddress(slab);
+    if (!addr) continue;
+    // One malformed curated address skips only that market, never the whole batch.
+    try {
+      entries.push({ slab, pk: new PublicKey(addr) });
+    } catch {
+      continue;
+    }
+  }
   if (entries.length === 0) return result;
 
   try {
-    const pubkeys = entries.map((e) => new PublicKey(e.addr));
+    const pubkeys = entries.map((e) => e.pk);
     // Curated-only today (small, hardcoded), but chunked defensively so this
     // doesn't silently break if the curated list ever grows past 100.
     const infos = await getMultipleAccountsInfoChunked(connection, pubkeys);
