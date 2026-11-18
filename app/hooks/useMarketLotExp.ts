@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { ensureLotExp, getLotExp, onLotExp } from "@/lib/v22/lot-registry";
 
@@ -10,7 +10,8 @@ import { ensureLotExp, getLotExp, onLotExp } from "@/lib/v22/lot-registry";
  * app-level load for a slab nobody has read yet.
  */
 export function useMarketLotExp(slab: string | null | undefined): number | null {
-  const subscribe = (cb: () => void) => onLotExp((s) => (s === slab ? cb() : undefined));
+  // Stable per slab: a fresh function each render made useSyncExternalStore unsubscribe + resubscribe every render.
+  const subscribe = useCallback((cb: () => void) => onLotExp((s) => (s === slab ? cb() : undefined)), [slab]);
   const value = useSyncExternalStore(
     subscribe,
     () => getLotExp(slab),
@@ -24,7 +25,7 @@ export function useMarketLotExp(slab: string | null | undefined): number | null 
 
 /** Same for a set of slabs (list pages). A slab absent from the map or null is unknown. */
 export function useMarketLotExps(slabs: readonly string[]): Map<string, number | null> {
-  const key = [...slabs].sort().join(",");
+  const key = useMemo(() => [...slabs].sort().join(","), [slabs]);
   const read = (): Map<string, number | null> => new Map((key ? key.split(",") : []).map((s) => [s, getLotExp(s)]));
   const [map, setMap] = useState<Map<string, number | null>>(read);
   useEffect(() => {
