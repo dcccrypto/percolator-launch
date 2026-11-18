@@ -135,7 +135,7 @@ export function loadSnapshot(wallet: string, now: number = Date.now()): Position
   // A non-finite or future savedAt (device clock was ahead when saved) has no usable age: stale.
   const age = now - s.savedAt;
   if (!Number.isFinite(age) || age < 0 || age > MAX_SNAPSHOT_AGE_MS) return null;
-  return s;
+  return { ...s, positions: Object.fromEntries(Object.entries(s.positions).filter(([, p]) => isSeen(p))) };
 }
 
 export function saveSnapshot(wallet: string, positions: Record<string, SeenPosition>, now: number = Date.now()): void {
@@ -144,8 +144,8 @@ export function saveSnapshot(wallet: string, positions: Record<string, SeenPosit
 
 const isIntString = (v: unknown): boolean => typeof v === "string" && /^-?\d+$/.test(v);
 
-/** Every field the notice UI reads, checked so a corrupt entry is dropped instead of throwing in render (BigInt()). */
-function isNotice(x: unknown): x is ClosedNotice {
+/** Every field the UI reads from a remembered position, checked so a corrupt entry cannot throw in render (BigInt()). */
+function isSeen(x: unknown): x is SeenPosition {
   if (!x || typeof x !== "object") return false;
   const n = x as Record<string, unknown>;
   return (
@@ -156,9 +156,13 @@ function isNotice(x: unknown): x is ClosedNotice {
     isIntString(n.sizeAbs) &&
     isIntString(n.markE6) &&
     isIntString(n.liqPriceE6) &&
-    typeof n.lastSeenAt === "number" &&
-    Number.isFinite(n.lastSeenAt)
+    (n.lastOpenAt === undefined || (typeof n.lastOpenAt === "number" && Number.isFinite(n.lastOpenAt)))
   );
+}
+
+function isNotice(x: unknown): x is ClosedNotice {
+  const n = x as Record<string, unknown>;
+  return isSeen(x) && typeof n.lastSeenAt === "number" && Number.isFinite(n.lastSeenAt);
 }
 
 export function loadNotices(wallet: string): ClosedNotice[] {

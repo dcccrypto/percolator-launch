@@ -139,6 +139,11 @@ describe("storage hardening (APP-BUG-CLOSEDSNAPFUTURE)", () => {
     localStorage.setItem(sk, JSON.stringify({ v: 1, savedAt: 5_000, positions: [seen()[`${SLAB}:3`]] }));
     expect(loadSnapshot(WALLET, 6_000)).toBeNull();
   });
+  it("corrupt entries inside a snapshot are dropped, good ones kept", () => {
+    const good = seen()[`${SLAB}:3`];
+    localStorage.setItem(sk, JSON.stringify({ v: 1, savedAt: 5_000, positions: { a: { ...good, sizeAbs: "abc" }, b: good } }));
+    expect(loadSnapshot(WALLET, 6_000)?.positions).toEqual({ b: good });
+  });
   it("notices missing the fields the UI reads are dropped", () => {
     const good = { ...seen()[`${SLAB}:3`], lastSeenAt: 5_000, detectedAt: 6_000 };
     localStorage.setItem(
