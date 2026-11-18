@@ -705,10 +705,29 @@ function isAllowedOrigin(req: NextRequest): boolean {
  * give every instance its own independent budget, which doesn't actually bound drain rate
  * under real (multi-instance) production traffic. Falls back to an in-memory sliding
  * window (same helper) when Upstash env vars are unconfigured (dev/CI).
- * Tunable via RPC_RATE_LIMIT_PER_WINDOW.
+ * Tunable via RPC_RATE_LIMIT_PER_WINDOW (positive integer, or "off" to disable).
  */
 const RATE_LIMIT_WINDOW_MS = 10_000;
-const RATE_LIMIT_MAX = Number(process.env.RPC_RATE_LIMIT_PER_WINDOW ?? "200"); // per IP / 10s
+const RATE_LIMIT_DEFAULT = 200; // per IP / 10s
+
+/**
+ * Fail closed: only the explicit value "off" disables the limiter. Unset uses the
+ * default silently; blank, non-numeric, 0, negative, fractional or non-finite values
+ * are misconfigurations -> default + warning (never silently unlimited).
+ */
+function parseRateLimitMax(raw: string | undefined): number {
+  if (raw === undefined) return RATE_LIMIT_DEFAULT;
+  const v = raw.trim();
+  if (v.toLowerCase() === "off") return 0; // 0 = disabled (explicit opt-out)
+  const n = Number(v);
+  if (/^\d+$/.test(v) && Number.isSafeInteger(n) && n > 0) return n;
+  console.warn(
+    `[/api/rpc] Invalid RPC_RATE_LIMIT_PER_WINDOW (expected a positive integer or "off"); using default ${RATE_LIMIT_DEFAULT}`
+  );
+  return RATE_LIMIT_DEFAULT;
+}
+
+const RATE_LIMIT_MAX = parseRateLimitMax(process.env.RPC_RATE_LIMIT_PER_WINDOW);
 const rpcRateLimiter = createUpstashRateLimiter({
   limit: RATE_LIMIT_MAX,
   windowMs: RATE_LIMIT_WINDOW_MS,
@@ -716,7 +735,7 @@ const rpcRateLimiter = createUpstashRateLimiter({
 });
 
 async function isRateLimited(req: NextRequest, cost: number): Promise<boolean> {
-  if (!Number.isFinite(RATE_LIMIT_MAX) || RATE_LIMIT_MAX <= 0) return false; // disabled
+  if (RATE_LIMIT_MAX <= 0) return false; // explicit "off" only
   const ip = getClientIp(req);
   const result = await rpcRateLimiter.check(ip, cost);
   return !result.allowed;
