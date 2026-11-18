@@ -5,6 +5,7 @@
  * Run: npx vitest run __tests__/bench/earn-stats-pdas.bench.test.ts --reporter=verbose
  * Output line: BENCH earn-stats-pdas median_ms=… fpas_calls=…
  */
+import { writeFileSync } from "node:fs";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { describe, expect, it, vi } from "vitest";
 
@@ -60,7 +61,9 @@ describe("earn-stats PDA derivation bench", () => {
       calls = spy.mock.calls.length;
     }
     times.sort((a, b) => a - b);
-    console.log(`BENCH earn-stats-pdas median_ms=${times[2].toFixed(1)} fpas_calls_per_run=${calls}`);
+    const line = `BENCH earn-stats-pdas median_ms=${times[2].toFixed(1)} fpas_calls_per_run=${calls}`;
+    console.log(line);
+    if (process.env.BENCH_OUT) writeFileSync(process.env.BENCH_OUT, line + "\n");
     expect(times).toHaveLength(RUNS);
   }, 120_000);
 });
