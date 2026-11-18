@@ -44,6 +44,8 @@ export const BAND_SWEEP_SLOTS = 26;
  * {@link BAND_SWEEP_SLOTS} slots) steps it toward the target by at most `min(cap x sweepSlots, band)` bps. A gap of J bps
  * therefore takes ceil(J / step) sweeps, i.e. `lag / (min(cap x S, band) / S)` slots. When the band is the tighter limit
  * the walk is slower than the cap alone says, which the plain {@link catchUpEstimate} cannot see.
+ * Unlike {@link catchUpEstimate}, `ms` deliberately does NOT add {@link KEEPER_SWEEP_MS}: the first step lands at the next
+ * sweep, so `sweeps x BAND_SWEEP_SLOTS` slots already contains the sweep wait (adding it would count it twice).
  * null when the numbers do not allow an estimate (no cap / no price).
  */
 export function bandWalkEstimate(p: {
@@ -128,26 +130,47 @@ export function catchUpAvailableLine(estimateMs: number | null | undefined, what
   return `${lead} ${AVAILABLE[what]} in ${availableInWords(estimateMs)}.`;
 }
 
-/** Measured slot time (ms) from the RPC's recent performance samples; SLOT_MS_DEFAULT on any failure. Cached for 5 minutes. */
-let slotCache: { ms: number; at: number } | null = null;
-export async function measureSlotMs(connection: Pick<Connection, "getRecentPerformanceSamples">, now: number = Date.now()): Promise<number> {
-  if (slotCache && now - slotCache.at < 300_000) return slotCache.ms;
+/**
+ * Measured slot time (ms) from the RPC's recent performance samples; SLOT_MS_DEFAULT on any failure.
+ * Cached per connection (a cluster / endpoint switch builds a new Connection and is probed afresh): 5 minutes after a
+ * measurement, {@link SLOT_PROBE_FAIL_TTL_MS} after a failed or timed-out probe so a dead RPC costs the 1.5 s once, not on every
+ * submit. Concurrent calls share one probe, and the timeout timer is always cleared.
+ */
+const SLOT_PROBE_TTL_MS = 300_000;
+export const SLOT_PROBE_FAIL_TTL_MS = 30_000;
+const SLOT_PROBE_TIMEOUT_MS = 1_500;
+type SlotEntry = { ms: number; at: number; ttl: number };
+let slotCache = new WeakMap<object, SlotEntry>();
+let slotInflight = new WeakMap<object, Promise<number>>();
+
+async function probeSlotMs(connection: Pick<Connection, "getRecentPerformanceSamples">, now: number): Promise<number> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let entry: SlotEntry = { ms: SLOT_MS_DEFAULT, at: now, ttl: SLOT_PROBE_FAIL_TTL_MS };
   try {
     const s = await Promise.race([
       connection.getRecentPerformanceSamples(2),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 1_500)),
+      new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("timeout")), SLOT_PROBE_TIMEOUT_MS); }),
     ]);
     const slots = s.reduce((a, x) => a + x.numSlots, 0);
     const secs = s.reduce((a, x) => a + x.samplePeriodSecs, 0);
-    if (slots > 0 && secs > 0) {
-      const ms = Math.min(SLOT_MS_DEFAULT, Math.max(200, (secs * 1000) / slots));
-      slotCache = { ms, at: now };
-      return ms;
-    }
-  } catch { /* fall through */ }
-  return SLOT_MS_DEFAULT;
+    if (slots > 0 && secs > 0) entry = { ms: Math.min(SLOT_MS_DEFAULT, Math.max(200, (secs * 1000) / slots)), at: now, ttl: SLOT_PROBE_TTL_MS };
+  } catch { /* fall through: default, cached briefly */ } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+  slotCache.set(connection, entry);
+  return entry.ms;
 }
-export function __resetSlotCacheForTest(): void { slotCache = null; }
+
+export function measureSlotMs(connection: Pick<Connection, "getRecentPerformanceSamples">, now: number = Date.now()): Promise<number> {
+  const hit = slotCache.get(connection);
+  if (hit && now - hit.at < hit.ttl) return Promise.resolve(hit.ms);
+  const running = slotInflight.get(connection);
+  if (running) return running;
+  const p = probeSlotMs(connection, now).finally(() => slotInflight.delete(connection));
+  slotInflight.set(connection, p);
+  return p;
+}
+export function __resetSlotCacheForTest(): void { slotCache = new WeakMap(); slotInflight = new WeakMap(); }
 
 /**
  * A post-signature "catching up" refusal (the order passed the pre-send simulation, the wallet signed, then the send hit 21)
