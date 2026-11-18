@@ -76,6 +76,24 @@ describe("recordAdlObservations (durable first-seen store)", () => {
     expect(mocks.put).toHaveBeenCalled();
   });
 
+  it("a clock stepped backwards does not hold the skip: an episode that ends is still cleared", async () => {
+    blobHolds({});
+    await recordAdlObservations([{ slab: "A", reduceOnly: false }], T0 + 10 * 60_000); // learns {} at a later clock
+    blobHolds({ A: T0 }); // another instance started an episode for A
+    // clock steps back 10 min: age is negative, must be treated as stale
+    const out = await recordAdlObservations([{ slab: "A", reduceOnly: false }], T0);
+    expect(out).toEqual({});
+    expect(mocks.put).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(mocks.put.mock.calls[0][1] as string)).toEqual({});
+  });
+
+  it("lastRead is stamped with the caller's nowMs, not Date.now()", async () => {
+    blobHolds({});
+    await recordAdlObservations([{ slab: "A", reduceOnly: false }], T0); // injected clock far from the real one
+    await recordAdlObservations([{ slab: "A", reduceOnly: false }], T0 + 6 * 60_000); // > 5 min later: must re-read
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+  });
+
   it("a hung Blob times out instead of stalling the caller", async () => {
     vi.useFakeTimers();
     mocks.list.mockReturnValue(new Promise(() => undefined));

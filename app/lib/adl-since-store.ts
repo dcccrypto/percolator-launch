@@ -38,7 +38,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-async function readBlob(): Promise<AdlSinceMap | null> {
+async function readBlob(nowMs: number): Promise<AdlSinceMap | null> {
   try {
     const { blobs } = await withTimeout(list({ prefix: ADL_SINCE_BLOB_PATHNAME, limit: 1 }), BLOB_TIMEOUT_MS);
     const hit = blobs.find((b) => b.pathname === ADL_SINCE_BLOB_PATHNAME);
@@ -47,14 +47,14 @@ async function readBlob(): Promise<AdlSinceMap | null> {
     if (!res.ok) return null;
     const body: unknown = await res.json();
     if (!isMap(body)) return null;
-    lastRead = { at: Date.now(), map: body };
+    lastRead = { at: nowMs, map: body };
     return body;
   } catch {
     return null;
   }
 }
 
-async function writeBlob(map: AdlSinceMap): Promise<void> {
+async function writeBlob(map: AdlSinceMap, nowMs: number): Promise<void> {
   await withTimeout(
     put(ADL_SINCE_BLOB_PATHNAME, JSON.stringify(map), {
       access: "public",
@@ -64,7 +64,7 @@ async function writeBlob(map: AdlSinceMap): Promise<void> {
     }),
     BLOB_TIMEOUT_MS,
   );
-  lastRead = { at: Date.now(), map };
+  lastRead = { at: nowMs, map };
 }
 
 /**
@@ -86,18 +86,19 @@ export async function recordAdlObservations(
   if (
     !anyReduceOnly &&
     lastRead !== null &&
+    nowMs - lastRead.at >= 0 && // a negative age (clock stepped back) is stale, never fresh
     nowMs - lastRead.at < SKIP_READ_FRESH_MS &&
     observed.every((o) => lastRead!.map[o.slab] === undefined)
   ) {
     return {};
   }
-  const stored = await readBlob();
+  const stored = await readBlob(nowMs);
   const prev = stored ?? memory;
   const next = reconcileAdlSince(prev, observed, nowMs);
   memory = next;
   if (stored !== null && adlSinceChanged(stored, next)) {
     try {
-      await writeBlob(next);
+      await writeBlob(next, nowMs);
     } catch (err) {
       console.warn("[adl-since] write failed:", err instanceof Error ? err.message : String(err));
     }
