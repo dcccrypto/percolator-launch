@@ -557,6 +557,7 @@ export async function POST(req: NextRequest) {
     // Build, send, confirm on-chain first. If anything fails before confirmation,
     // release the faucet gate so the user is not locked out for 24h with no tokens.
     let sig: string;
+    let mintOutcomeUnknown = false;
     // N4 layer 2: no durable gate => marker account create first in the tx (see lib/sim-usdc-claim-guard.ts).
     let markerCount = 0;
     try {
@@ -600,36 +601,65 @@ export async function POST(req: NextRequest) {
       sig = await connection.sendRawTransaction(
         (signedTx as Transaction).serialize(),
       );
+      // #3757 (same rule as auto-fund since e665b92b): once the mint is SENT, a throw from the
+      // confirm does not prove it failed. Release the claim only when nothing can have been minted;
+      // otherwise keep it and say the USDC is on its way, so a retry cannot mint a second 1,000.
+      mintOutcomeUnknown = true;
       try {
         const confirmation =
           await connection.confirmTransaction(
             { signature: sig, blockhash, lastValidBlockHeight },
             "confirmed",
           );
-
+        mintOutcomeUnknown = false; // a definitive result: success, or an on-chain error
         assertSuccessfulConfirmation(
           confirmation,
           "USDC faucet mint",
         );
       } catch (confirmErr) {
-        // The devnet RPC can be slow to reflect confirmation, so
-        // confirmTransaction may throw "block height exceeded" even though the
-        // mint actually landed — a false negative that would show the user an
-        // error and burn their 24h rate-limit claim despite receiving tokens.
-        // Re-check the signature status directly before declaring failure.
+        if (!mintOutcomeUnknown) throw confirmErr;
+        // The devnet RPC can be slow to reflect confirmation, so confirmTransaction may throw
+        // "block height exceeded" even though the mint landed. Re-check the signature directly.
+        // A throw from the re-check itself leaves the outcome unknown (claim kept).
         const status = await connection.getSignatureStatus(sig, {
           searchTransactionHistory: true,
         });
         const s = status.value;
+        if (s && s.err) {
+          mintOutcomeUnknown = false; // landed and failed: nothing minted
+          throw confirmErr;
+        }
         const landed =
           !!s &&
-          !s.err &&
           (s.confirmationStatus === "confirmed" ||
             s.confirmationStatus === "finalized");
-        if (!landed) throw confirmErr;
+        if (!landed) {
+          // Not found AND the blockhash expired: it can never land. Anything else (still
+          // processed, no status yet, an RPC error) is unknown.
+          const expired =
+            confirmErr instanceof Error &&
+            confirmErr.name === "TransactionExpiredBlockheightExceededError";
+          if (!s && expired) mintOutcomeUnknown = false;
+          throw confirmErr;
+        }
+        mintOutcomeUnknown = false;
         // else: the mint confirmed on re-check — fall through to success.
       }
     } catch (chainErr) {
+      if (mintOutcomeUnknown) {
+        // Sent, outcome unknown: the claim is SPENT. Never release it, never tell the user nothing was sent.
+        releaseGateClaimOnExit = null;
+        _faucetRecord(rateKey);
+        return NextResponse.json(
+          {
+            error: "Your test USDC is on its way but not confirmed yet. Check your balance in a minute before trying again.",
+            pending: true,
+            retryable: false,
+            signature: sig!,
+          },
+          { status: 503 },
+        );
+      }
       if (markerCount > 0 && isClaimMarkerCollision(chainErr, markerCount)) {
         // Marker exists: another claim for this wallet and UTC day already landed; this tx minted nothing.
         return NextResponse.json(
