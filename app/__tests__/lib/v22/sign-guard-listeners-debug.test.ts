@@ -9,7 +9,7 @@ import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, Transaction, T
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { DEVNET_GENESIS_HASH } from "@/lib/v22/devnet-guard";
 import {
-  __resetSignGuardForTest, dismissSignProblem, guardSign, isSignDebugEnabled, lastSignProblem, noteBlockhash, signLog, subscribeSignGuard,
+  __resetSignGuardForTest, dismissSignProblem, guardSign, isSignDebugEnabled, lastSignProblem, noteBlockhash, SignGuardError, signLog, subscribeSignGuard,
 } from "@/lib/v22/sign-guard";
 
 const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
@@ -44,17 +44,18 @@ describe("sign-guard listeners, debug switch, probe failure", () => {
     noteBlockhash(BH, "sendTx attempt 1", c, 1_000);
     const fn = vi.fn();
     const off = subscribeSignGuard(fn);
-    const sign = vi.fn(async () => "signed");
-    await expect(guardSign({ txs: [tradeTx()], via: "adapter signTransaction", connection: c, chain: "solana:devnet", sign, now: () => 2_000 })).rejects.toThrow();
-    expect(sign).not.toHaveBeenCalled();
-    expect(fn).toHaveBeenCalledTimes(1);
-    expect(lastSignProblem()).not.toBeNull();
+    try {
+      const sign = vi.fn(async () => "signed");
+      await expect(guardSign({ txs: [tradeTx()], via: "adapter signTransaction", connection: c, chain: "solana:devnet", sign, now: () => 2_000 })).rejects.toBeInstanceOf(SignGuardError);
+      expect(sign).not.toHaveBeenCalled();
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(lastSignProblem()).not.toBeNull();
 
-    dismissSignProblem();
-    expect(lastSignProblem()).toBeNull();
-    expect(fn).toHaveBeenCalledTimes(2);
+      dismissSignProblem();
+      expect(lastSignProblem()).toBeNull();
+      expect(fn).toHaveBeenCalledTimes(2);
 
-    off();
+    } finally { off(); }
     dismissSignProblem();
     expect(fn).toHaveBeenCalledTimes(2);
   });
