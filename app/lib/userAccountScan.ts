@@ -242,9 +242,11 @@ const MAX_SCAN_BACKOFF_MS = 60_000;
 function throttleDelayMs(state: ThrottleState, minIntervalMs: number | undefined, scanned: boolean, provisional: boolean): number {
   if (!minIntervalMs || minIntervalMs <= 0 || !scanned || provisional) return 0;
   const now = Date.now();
-  if (now < freshScansUntil) return 0;
+  // `freshScansUntil - FRESH_SCAN_WINDOW_MS` is when the window opened; now before it = clock stepped back.
+  if (now < freshScansUntil && now >= freshScansUntil - FRESH_SCAN_WINDOW_MS) return 0;
   const interval = Math.min(minIntervalMs * 2 ** Math.min(state.failures ?? 0, 6), Math.max(MAX_SCAN_BACKOFF_MS, minIntervalMs));
-  return Math.max(0, state.lastScanStartedAt + interval - now);
+  // Clamp to one interval: a backwards wall-clock step must not turn the wait into hours.
+  return Math.min(interval, Math.max(0, state.lastScanStartedAt + interval - now));
 }
 
 interface PortfolioEntry {
