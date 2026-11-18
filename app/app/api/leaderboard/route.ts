@@ -18,6 +18,14 @@ const LEADERBOARD_CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
 } as const;
 
+const VALID_PERIODS = new Set(["24h", "7d", "alltime"]);
+
+// PostgREST caps every response at its `max_rows` (1000 by default), so a single
+// `.limit(100_000)` silently returned an arbitrary 1000 rows. Read in pages of
+// PAGE_SIZE (<= max_rows) up to MAX_PAGES, i.e. a bounded 100k rows in total.
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 100;
+
 export interface LeaderboardEntry {
   rank: number;
   trader: string;
@@ -47,8 +55,20 @@ export interface LeaderboardEntry {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const period = url.searchParams.get("period") ?? "alltime";
-  const rawLimit = parseInt(url.searchParams.get("limit") ?? "50", 10);
-  const limit = Math.min(Math.max(1, Number.isNaN(rawLimit) ? 50 : rawLimit), 200);
+  if (!VALID_PERIODS.has(period)) {
+    return NextResponse.json(
+      { error: "Invalid period: expected 24h, 7d or alltime" },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const limitParam = url.searchParams.get("limit");
+  if (limitParam !== null && !/^\d{1,9}$/.test(limitParam)) {
+    return NextResponse.json(
+      { error: "Invalid limit: expected a non-negative integer" },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const limit = Math.min(Math.max(1, limitParam === null ? 50 : parseInt(limitParam, 10)), 200);
 
   // No data source configured (the contributor setup in PLAYGROUND.md): an empty
   // board is the true answer, not an outage. Same env check as getSupabase().
@@ -90,32 +110,39 @@ export async function GET(request: Request) {
     const { getSupabase, getServerNetwork } = await import("@/lib/supabase");
     const supabase = getSupabase();
 
-    let query = supabase
-      .from("trades")
-      .select("trader, size, price, created_at")
-      .eq("network", getServerNetwork());
+    const since =
+      period === "24h" ? new Date(Date.now() - 86_400_000).toISOString()
+      : period === "7d" ? new Date(Date.now() - 7 * 86_400_000).toISOString()
+      : null;
 
-    if (period === "24h") {
-      const since = new Date(Date.now() - 86_400_000).toISOString();
-      query = query.gte("created_at", since);
-    } else if (period === "7d") {
-      const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
-      query = query.gte("created_at", since);
-    }
-    if (retired.length > 0) query = query.not("slab_address", "in", `(${retired.join(",")})`);
-    query = query.limit(100_000);
+    // One page of the filtered read. Same filters as the indexer-DB path (queryLeaderboard):
+    // network, period window, retired slabs, and is_liquidation IS NOT TRUE (liquidation markers
+    // have NULL size/price and a portfolio address as trader). Ordered for stable paging.
+    const readPage = (withNetwork: boolean, from: number) => {
+      let q = supabase.from("trades").select("trader, size, price, created_at");
+      if (withNetwork) q = q.eq("network", getServerNetwork());
+      if (since) q = q.gte("created_at", since);
+      if (retired.length > 0) q = q.not("slab_address", "in", `(${retired.join(",")})`);
+      q = q.not("is_liquidation", "is", true);
+      return q.order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, from + PAGE_SIZE - 1);
+    };
 
-    let { data, error } = await query;
+    type TradeRow = { trader: string; size: unknown; price: unknown; created_at: string | null };
+    const readAll = async (withNetwork: boolean) => {
+      const rows: TradeRow[] = [];
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const { data: chunk, error: pageError } = await readPage(withNetwork, page * PAGE_SIZE);
+        if (pageError) return { rows, error: pageError };
+        rows.push(...((chunk ?? []) as TradeRow[]));
+        if ((chunk?.length ?? 0) < PAGE_SIZE) return { rows, error: null };
+      }
+      console.warn(`[leaderboard] supabase fallback hit the ${MAX_PAGES * PAGE_SIZE}-row bound; ranking the newest rows only`);
+      return { rows, error: null };
+    };
 
+    let { rows: data, error } = await readAll(true);
     if (isMissingColumnError(error, "network")) {
-      let fallbackQuery = supabase.from("trades").select("trader, size, price, created_at");
-      if (period === "24h") fallbackQuery = fallbackQuery.gte("created_at", new Date(Date.now() - 86_400_000).toISOString());
-      else if (period === "7d") fallbackQuery = fallbackQuery.gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString());
-      if (retired.length > 0) fallbackQuery = fallbackQuery.not("slab_address", "in", `(${retired.join(",")})`);
-      fallbackQuery = fallbackQuery.limit(100_000);
-      const fallback = await fallbackQuery;
-      data = fallback.data;
-      error = fallback.error;
+      ({ rows: data, error } = await readAll(false));
     }
 
     if (error) throw error;

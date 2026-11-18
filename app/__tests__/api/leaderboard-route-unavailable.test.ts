@@ -27,7 +27,7 @@ import { GET } from "@/app/api/leaderboard/route";
 /** Thenable stand-in for the Supabase query builder. */
 function query(result: unknown) {
   const q: Record<string, unknown> = {};
-  for (const m of ["from", "select", "eq", "gte", "limit"]) q[m] = () => q;
+  for (const m of ["from", "select", "eq", "gte", "not", "order", "range", "limit"]) q[m] = () => q;
   q.then = (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) =>
     Promise.resolve(result).then(res, rej);
   return q;
