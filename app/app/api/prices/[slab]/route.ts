@@ -85,10 +85,12 @@ async function geckoTerminalStatsFallback(slab: string, origin: string, cookie?:
     const data = (await res.json()) as {
       data?: { attributes?: { ohlcv_list?: GeckoOhlcvBar[] } };
     };
-    const bars = data.data?.attributes?.ohlcv_list ?? [];
+    const raw = data.data?.attributes?.ohlcv_list ?? [];
+    // Don't trust the order (newest-first per the contract, but not enforced): drop rows without a
+    // finite timestamp and sort newest-first by it.
+    const bars = raw.filter((b) => Array.isArray(b) && Number.isFinite(b[0])).sort((a, b) => b[0] - a[0]);
     if (bars.length === 0) return setCache(null);
 
-    // Newest-first per GeckoTerminal's API contract.
     const last = bars[0][4]; // newest close
     const nowSec = Math.floor(Date.now() / 1000);
     const cutoff = nowSec - 86_400;
@@ -99,7 +101,11 @@ async function geckoTerminalStatsFallback(slab: string, origin: string, cookie?:
     // High/low over the last 24h only, counting the price it opened at (the reference bar's
     // close) and the newest close.
     const refBar = bars.find((b) => b[0] <= cutoff);
-    const seen = [last, ...(refBar ? [refBar[4]] : []), ...bars.filter((b) => b[0] > cutoff).flatMap((b) => [b[2], b[3]])];
+    // Only finite, positive prices count (same rule as the series below): a 0/negative/null low
+    // would otherwise show as low24h = 0. `typeof` keeps JSON null from coercing to 0.
+    const isPrice = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
+    const seen = [last, ...(refBar ? [refBar[4]] : []), ...bars.filter((b) => b[0] > cutoff).flatMap((b) => [b[2], b[3]])].filter(isPrice);
+    if (seen.length === 0) return setCache(null);
     const high = Math.max(...seen);
     const low = Math.min(...seen);
     if (!Number.isFinite(high) || !Number.isFinite(low)) return setCache(null);
