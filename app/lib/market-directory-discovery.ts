@@ -17,6 +17,9 @@ interface DirectoryDiscoveryOptions {
   onChainOptions?: GetMarketsByAddressOptions;
 }
 
+const PAGE_SIZE = 500; // the API's max limit
+const MAX_PAGES = 20; // 10k markets; also stops a server that ignores offset from looping
+
 function dedupePublicKeys(addresses: PublicKey[]): PublicKey[] {
   const seen = new Set<string>();
   const unique: PublicKey[] = [];
@@ -87,32 +90,45 @@ export async function discoverMarketsViaProgramDirectory(
   const { timeoutMs = 8_000, onChainOptions } = options;
   const programIdString = programId.toBase58();
   const base = apiBaseUrl.replace(/\/+$/, "");
-  const url = new URL(`${base}/markets`);
-  url.searchParams.set("program_id", programIdString);
-  url.searchParams.set("limit", "500");
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response: Response;
-  try {
-    response = await fetch(url.toString(), {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
+  // /api/markets clamps limit to 500 and pages with offset; walk pages until a short one.
+  const entries: ApiMarketEntry[] = [];
+  const seenSlabs = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = new URL(`${base}/markets`);
+    url.searchParams.set("program_id", programIdString);
+    url.searchParams.set("limit", String(PAGE_SIZE));
+    if (page > 0) url.searchParams.set("offset", String(page * PAGE_SIZE));
+
+    // The timer stays armed until the body is parsed, so a stalled body aborts too.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let body: ApiMarketsResponse;
+    try {
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Market directory returned ${response.status} ${response.statusText}`);
+      }
+      body = (await response.json()) as ApiMarketsResponse;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const pageMarkets = Array.isArray(body.markets) ? body.markets : [];
+    // A server that ignores offset repeats page 1; stop when a page adds nothing new.
+    const fresh = pageMarkets.filter((m) => typeof m.slab_address !== "string" || !seenSlabs.has(m.slab_address));
+    for (const m of fresh) if (typeof m.slab_address === "string") seenSlabs.add(m.slab_address);
+    entries.push(...fresh);
+    if (pageMarkets.length < PAGE_SIZE || fresh.length === 0) break;
   }
-
-  if (!response.ok) {
-    throw new Error(`Market directory returned ${response.status} ${response.statusText}`);
-  }
-
-  const body = (await response.json()) as ApiMarketsResponse;
-  if (!Array.isArray(body.markets) || body.markets.length === 0) return [];
+  if (entries.length === 0) return [];
 
   const addresses = dedupePublicKeys(
-    body.markets.flatMap((entry) => {
+    entries.flatMap((entry) => {
       if (entry.program_id && entry.program_id !== programIdString) return [];
       if (typeof entry.slab_address !== "string") return [];
       try {
