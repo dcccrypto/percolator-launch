@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { ensureLotExp, getLotExp, onLotExp } from "@/lib/v22/lot-registry";
+import { ensureLotExp, getLotExp, onLotExp, LOT_LOAD_RETRY_MS } from "@/lib/v22/lot-registry";
 
 /**
  * The lot exponent of a market, as a property of the MARKET (review N1): 0 with the flag off, the exponent once known,
@@ -16,9 +16,15 @@ export function useMarketLotExp(slab: string | null | undefined): number | null 
     () => getLotExp(slab),
     () => (isDevnetV22Enabled() ? null : 0),
   );
+  const unknown = value === null;
   useEffect(() => {
-    if (slab && isDevnetV22Enabled()) ensureLotExp(slab);
-  }, [slab]);
+    if (!slab || !isDevnetV22Enabled()) return;
+    ensureLotExp(slab);
+    // A failed load is swallowed by the registry; retry (once per cooldown) while unknown, so one bad read never pins the guard.
+    if (!unknown) return;
+    const t = setInterval(() => ensureLotExp(slab), LOT_LOAD_RETRY_MS);
+    return () => clearInterval(t);
+  }, [slab, unknown]);
   return value;
 }
 
@@ -27,6 +33,15 @@ export function useMarketLotExps(slabs: readonly string[]): Map<string, number |
   const key = [...slabs].sort().join(",");
   const read = (): Map<string, number | null> => new Map((key ? key.split(",") : []).map((s) => [s, getLotExp(s)]));
   const [map, setMap] = useState<Map<string, number | null>>(read);
+  const anyUnknown = [...map.values()].some((v) => v === null);
+  useEffect(() => {
+    if (!anyUnknown || !isDevnetV22Enabled() || !key) return;
+    const list = key.split(",");
+    const t = setInterval(() => {
+      for (const s of list) ensureLotExp(s);
+    }, LOT_LOAD_RETRY_MS);
+    return () => clearInterval(t);
+  }, [key, anyUnknown]);
   useEffect(() => {
     const list = key ? key.split(",") : [];
     setMap(read());
