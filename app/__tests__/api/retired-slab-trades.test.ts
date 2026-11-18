@@ -45,7 +45,8 @@ function table(name: string) {
   q.gte = (c: string, v: string) => { preds.push((r) => String(r[c]) >= v); return q; };
   q.order = () => q;
   q.not = (c: string, op: string, v: unknown) => {
-    if (op === "is") preds.push((r) => r[c] !== null && r[c] !== undefined);
+    if (op === "is" && v === true) preds.push((r) => r[c] !== true); // IS NOT TRUE keeps NULL
+    else if (op === "is") preds.push((r) => r[c] !== null && r[c] !== undefined);
     else if (op === "in") {
       const set = new Set(String(v).replace(/^\(|\)$/g, "").split(","));
       preds.push((r) => !set.has(String(r[c])));
