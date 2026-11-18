@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { cacheAgeMs } from "@/lib/cache-age";
 import { validateSlabParam } from "@/lib/route-validators";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { registeredPoolForSlab } from "@/lib/registered-pool";
@@ -55,7 +56,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slab
   const key = `${v.slab}|${series}|${res}|${Math.floor(toSec / 5)}|${limit}`;
   const cached = memo.get(key);
   let p: Promise<HistoryResult>;
-  if (cached && Date.now() - cached.at < MEMO_MS) {
+  if (cached && cacheAgeMs(cached.at) < MEMO_MS) {
     p = cached.p;
   } else {
     p = loadHistory(v.slab, series, res, toSec, limit, {
