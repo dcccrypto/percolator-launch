@@ -1294,7 +1294,9 @@ export function portfolioCacheKey(walletBase58: string, network: string): string
 export function peekPortfolioSnapshot(key: string): PortfolioSnapshot | null {
   const cached = portfolioSnapshotCache.get(key);
   if (!cached) return null;
-  if (Date.now() - cached.ts >= PORTFOLIO_SEED_MAX_AGE_MS) return null;
+  const age = Date.now() - cached.ts;
+  // A negative age means the wall clock stepped backwards since the write: the entry's real age is unknown, so it is stale.
+  if (age < 0 || age >= PORTFOLIO_SEED_MAX_AGE_MS) return null;
   return cached.snapshot;
 }
 
@@ -1317,7 +1319,8 @@ export function loadPortfolioShared(
 ): Promise<PortfolioSnapshot> {
   if (!force) {
     const cached = portfolioSnapshotCache.get(key);
-    if (cached && Date.now() - cached.ts < PORTFOLIO_CACHE_TTL_MS) {
+    const cachedAge = cached ? Date.now() - cached.ts : -1;
+    if (cached && cachedAge >= 0 && cachedAge < PORTFOLIO_CACHE_TTL_MS) {
       return Promise.resolve(cached.snapshot);
     }
   }
