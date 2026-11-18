@@ -968,9 +968,11 @@ export function useEarnStats() {
   useEffect(() => {
     const doFetch = () => {
       // A cycle still running after 60s (hung, or slower than any 429 backoff) is superseded,
-      // so polling can't stall for good.
+      // so polling can't stall for good. A negative age (wall clock stepped back mid-fetch)
+      // is superseded too, else polling would freeze until the clock passes start + 60s.
       const since = inFlightSinceRef.current;
-      if (since !== 0 && Date.now() - since < 60_000) return;
+      const age = Date.now() - since;
+      if (since !== 0 && age >= 0 && age < 60_000) return;
       void fetchRef.current();
     };
     doFetch();
