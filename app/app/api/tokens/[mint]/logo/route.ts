@@ -5,10 +5,12 @@ import { PublicKey } from "@solana/web3.js";
 import { requireAuth, UNAUTHORIZED } from "@/lib/api-auth";
 import { detectRasterImage } from "@/lib/raster-image-bytes";
 
+import { createUploadCooldown } from "@/lib/upload-cooldown";
+
 export const dynamic = "force-dynamic";
 
-const uploadTimestamps = new Map<string, number>();
 const RATE_LIMIT_MS = 30_000;
+const uploadCooldown = createUploadCooldown(RATE_LIMIT_MS);
 
 // GET — retrieve logo for a token mint
 export async function GET(
@@ -71,8 +73,7 @@ export async function POST(
   }
 
   // Rate limit
-  const lastUpload = uploadTimestamps.get(canonicalMint) ?? 0;
-  if (Date.now() - lastUpload < RATE_LIMIT_MS) {
+  if (uploadCooldown.isLimited(canonicalMint)) {
     return NextResponse.json({ error: "Rate limited. Try again in 30s." }, { status: 429 });
   }
 
@@ -130,7 +131,7 @@ export async function POST(
     // set only per slab, by its creator, via /api/markets/[slab]/logo (signed deployer proof
     // checked against markets.deployer). This route only stores the token's own logo file.
 
-    uploadTimestamps.set(canonicalMint, Date.now());
+    uploadCooldown.record(canonicalMint);
 
     return NextResponse.json({ logo_url: publicUrl }, { status: 200 });
   } catch (error) {

@@ -7,12 +7,13 @@ import * as Sentry from "@sentry/nextjs";
 import { getServiceClient } from "@/lib/supabase";
 import { validateSlabParam } from "@/lib/route-validators";
 import { detectRasterImage } from "@/lib/raster-image-bytes";
+import { createUploadCooldown } from "@/lib/upload-cooldown";
 
 export const dynamic = "force-dynamic";
 
 // Rate limit: simple in-memory tracker (resets on cold start, good enough for Vercel)
-const uploadTimestamps = new Map<string, number>();
 const RATE_LIMIT_MS = 30_000; // 1 upload per 30s per slab
+const uploadCooldown = createUploadCooldown(RATE_LIMIT_MS);
 
 /**
  * POST /api/markets/[slab]/logo — Upload logo file to Supabase Storage.
@@ -257,8 +258,7 @@ export async function POST(
   }
 
   // Rate limit
-  const lastUpload = uploadTimestamps.get(validSlab) ?? 0;
-  if (Date.now() - lastUpload < RATE_LIMIT_MS) {
+  if (uploadCooldown.isLimited(validSlab)) {
     return NextResponse.json({ error: "Rate limited. Try again in 30s." }, { status: 429 });
   }
 
@@ -317,7 +317,7 @@ export async function POST(
       return NextResponse.json({ error: "Failed to save logo URL. Please try again." }, { status: 500 });
     }
 
-    uploadTimestamps.set(validSlab, Date.now());
+    uploadCooldown.record(validSlab);
 
     return NextResponse.json({ logo_url: publicUrl }, { status: 200 });
   } catch (error) {
