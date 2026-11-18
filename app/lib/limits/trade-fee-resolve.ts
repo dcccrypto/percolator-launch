@@ -13,6 +13,8 @@
  * Inputs come from the app's own decoders (same fields as the SDK's `readTradeFeeInputsV22`).
  */
 import type { Connection, PublicKey } from "@solana/web3.js";
+import { failingProgramId } from "@/lib/errorMessages";
+import { DEVNET_PROGRAM_IDS, DEVNET_V22_FRESH_1106_PROGRAM_IDS, DEVNET_V22_PROGRAM_IDS, resolveDevnetProgramIds } from "@/lib/program-ids";
 import { decodeAssetRiskLimits, decodeMarketEngineView, decodeMatcherCtx } from "./decode";
 import { decodeGrowthRecord } from "@/lib/v21/growth-market";
 import { utilFeeMaxEffectiveBps } from "@/lib/v22/sdk/records/growth-v19";
@@ -115,11 +117,23 @@ export function withConfirmedBusy(fallback: bigint | undefined, busy: bigint | u
   return max !== undefined && max > 0n && total > max ? max : total;
 }
 
-/** 98 GrowthUtilisationFeeNotCovered from the wrapper (or unattributed), in any of the error shapes. */
+/** Wrapper program ids this app can talk to (current, paired v2.2 sets). A 98 only means "fee not covered" when one of them raised it. */
+function wrapperIds(): Set<string> {
+  return new Set([resolveDevnetProgramIds().wrapper, DEVNET_PROGRAM_IDS.wrapper, DEVNET_V22_PROGRAM_IDS.wrapper, DEVNET_V22_FRESH_1106_PROGRAM_IDS.wrapper]);
+}
+
+/**
+ * 98 GrowthUtilisationFeeNotCovered from the wrapper (or unattributed), in any of the error shapes. When the error names the program that
+ * failed (a `programId` field, or a "Program <id> failed: custom program error" log line) and it is not the wrapper, a Custom 98 from the
+ * matcher CPI, token, ATA or compute-budget program is not this error: false (so no silent re-sign at a raised fee cap).
+ */
 export function isUtilFeeNotCovered(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  const field = (e as { programId?: unknown } | null)?.programId;
+  const origin = typeof field === "string" ? field : field != null && typeof (field as { toBase58?: unknown }).toBase58 === "function" ? (field as { toBase58(): string }).toBase58() : failingProgramId(msg);
+  if (origin && !wrapperIds().has(origin)) return false;
   const code = (e as { code?: unknown } | null)?.code;
   if (code === 98) return true;
-  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
   return /custom program error: 0x62\b|"Custom":98\b|Custom\(98\)/.test(msg);
 }
 
