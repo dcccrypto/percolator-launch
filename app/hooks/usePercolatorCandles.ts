@@ -76,6 +76,13 @@ const candleCache = new Map<string, { candles: PercolatorCandle[]; at: number }>
 const EMPTY_CACHE_TTL_MS = 15_000;
 const emptyCache = new Map<string, number>();
 
+/** A stamp is fresh only for 0 <= age < ttl. A negative age (clock stepped back) is not fresh:
+ *  `now - at < ttl` alone is true for it, pinning the entry until the clock catches up. */
+function isFresh(at: number, ttlMs: number): boolean {
+  const age = Date.now() - at;
+  return age >= 0 && age < ttlMs;
+}
+
 // `from`/`to` are quantized to this grid (see fetchData) so repeated calls
 // within the window reuse the exact same URL and actually hit the route's
 // `max-age=10` HTTP cache instead of missing on every click because Date.now()
@@ -121,7 +128,7 @@ export function usePercolatorCandles(
     // timeframe switch blanked the chart to "loading" for a fresh ~300ms-1s
     // round trip even though we fetched this exact pair moments ago.
     const cached = candleCache.get(key);
-    if (cached && Date.now() - cached.at < CACHE_PAINT_MAX_AGE_MS) {
+    if (cached && isFresh(cached.at, CACHE_PAINT_MAX_AGE_MS)) {
       setCandles(cached.candles);
       setStatus("success");
       setError(null);
@@ -137,7 +144,7 @@ export function usePercolatorCandles(
     // from now still appears without a reload.
     if (!cached) {
       const emptyAt = emptyCache.get(key);
-      if (emptyAt !== undefined && Date.now() - emptyAt < EMPTY_CACHE_TTL_MS) {
+      if (emptyAt !== undefined && isFresh(emptyAt, EMPTY_CACHE_TTL_MS)) {
         setCandles([]);
         setStatus("empty");
         return;

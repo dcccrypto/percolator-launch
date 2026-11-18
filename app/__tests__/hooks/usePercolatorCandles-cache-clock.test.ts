@@ -72,7 +72,8 @@ describe("usePercolatorCandles cache vs. backwards clock", () => {
     // supply candles. A future-stamped entry must not count as fresh.
     vi.setSystemTime(T0 - HOUR);
     const second = renderHook(() => usePercolatorCandles("SlabClockPaint1", "1h"));
-    await waitFor(() => expect(second.result.current.status).toBe("error"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(second.result.current.status).not.toBe("success");
     expect(second.result.current.candles).toEqual([]);
     second.unmount();
   });
