@@ -88,6 +88,22 @@ describe.skipIf(FLAGS_OFF_ONLY)("caching / sharing", () => {
   });
 });
 
+describe.skipIf(FLAGS_OFF_ONLY)("clock step", () => {
+  it("a backwards clock step does not pin a cached LP owner past the TTL", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    mocks.resolveMarketLp.mockResolvedValue({ owner: CREATOR });
+    const a = renderHook(() => useMarketLimits(SLAB, 0, WALLET));
+    await waitFor(() => expect(a.result.current.sameOwnerLpOwner).not.toBeNull());
+    a.unmount();
+    vi.setSystemTime(Date.now() - 60 * 60_000); // clock stepped back 1 h
+    const b = renderHook(() => useMarketLimits(SLAB, 0, WALLET));
+    // Age is -1 h: the entry is untrustworthy, so it must re-resolve (pending, no cached owner).
+    expect(b.result.current.sameOwnerPending).toBe(true);
+    await waitFor(() => expect(mocks.resolveMarketLp).toHaveBeenCalledTimes(2));
+    b.unmount();
+  });
+});
+
 describe.skipIf(FLAGS_OFF_ONLY)("bounded, non-blocking failure handling", () => {
   it("a failed first attempt ends pending at once and retries in the background", async () => {
     vi.useFakeTimers();
