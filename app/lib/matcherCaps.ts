@@ -41,6 +41,7 @@ import { resolveMarketLp } from "@/lib/market-lp";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { lpEffectiveSignedQ } from "@/lib/limits/lp-inventory-room";
 import { matcherLpSyncLive } from "@/lib/program-upgrade-detect";
+import { isFresh } from "@/lib/ttl-fresh";
 
 /**
  * Start of the vAMM context inside the matcher context account
@@ -131,7 +132,7 @@ async function resolveCtxAddress(
 ): Promise<PublicKey | null> {
   const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
   const cached = ctxAddressCache.get(key);
-  if (cached && Date.now() - cached.ts < CAPS_TTL_MS) return cached.pk;
+  if (cached && isFresh(Date.now(), cached.ts, CAPS_TTL_MS)) return cached.pk;
 
   // The market's LP portfolio holds the matcher config. The LP is chosen by on-chain
   // identity (lib/market-lp.ts), never "the first enabled matcher": any portfolio owner can
@@ -245,7 +246,7 @@ export function getMatcherCaps(
 ): Promise<MatcherCaps | null> {
   const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
   const cached = capsCache.get(key);
-  if (cached && Date.now() - cached.ts < CAPS_TTL_MS) return Promise.resolve(cached.caps);
+  if (cached && isFresh(Date.now(), cached.ts, CAPS_TTL_MS)) return Promise.resolve(cached.caps);
   const existing = inflight.get(key);
   if (existing) return existing;
 
