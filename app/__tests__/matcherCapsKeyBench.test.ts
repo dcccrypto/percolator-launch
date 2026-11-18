@@ -1,8 +1,9 @@
 /**
- * Cache-hit micro-benchmark for matcherCaps key building (run: MATCHERCAPS_BENCH=1).
+ * Cache-hit micro-benchmark for matcherCaps key building (run: MATCHERCAPS_BENCH=/tmp/out.txt, the value is the file the result line is written to).
  * 100k hit calls over 20 slabs; prints ns/call. Skipped unless MATCHERCAPS_BENCH is set.
  */
 import { describe, it, expect, vi } from "vitest";
+import * as fs from "node:fs";
 import { Keypair } from "@solana/web3.js";
 
 const resolveMarketLp = vi.fn();
@@ -39,7 +40,7 @@ run("matcherCaps cache-hit bench", () => {
     for (let i = 0; i < N; i++) await getMatcherInventory(connection, program, slabs[i % 20]);
     const ctxNs = ((performance.now() - t1) * 1e6) / N;
 
-    require("node:fs").writeFileSync(process.env.MATCHERCAPS_BENCH!, `BENCH getMatcherCaps hit: ${capsNs.toFixed(0)} ns/call; ctx-address hit (getMatcherInventory): ${ctxNs.toFixed(0)} ns/call\n`);
+    fs.writeFileSync(process.env.MATCHERCAPS_BENCH!, `BENCH getMatcherCaps hit: ${capsNs.toFixed(0)} ns/call; ctx-address hit (getMatcherInventory): ${ctxNs.toFixed(0)} ns/call\n`);
     expect(resolveMarketLp).not.toHaveBeenCalled();
   });
 });
