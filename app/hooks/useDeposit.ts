@@ -4,8 +4,7 @@ import { errorText } from "@/lib/error-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import {
-  createAssociatedTokenAccountInstruction,
-  getAccount,
+  createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
@@ -170,35 +169,31 @@ export function useDeposit(slabAddress: string) {
           // Portfolio accounts in v17 are standalone program-owned accounts.
           // We must find or create the user's portfolio account.
 
-          // Latency: the ATA-existence check and the portfolio lookup are
-          // independent — run them concurrently instead of serially. The
-          // portfolio lookup itself is usually FREE: the shared scan store
+          // Latency: the portfolio lookup is usually FREE: the shared scan store
           // (useUserAccount and friends) already knows the pubkey, which
           // never changes for a (wallet, market) pair; the program scan is
           // only the cold-start fallback.
-          const [ataExists, resolvedPortfolioPk] = await Promise.all([
-            getAccount(connection, userAta).then(() => true, () => false),
-            (async () => {
-              if (params.portfolioPk) return params.portfolioPk;
-              const snap = getPortfolioRawSnapshot(
-                makePortfolioScanKey(programId, slabAddress, wallet.publicKey!),
-              );
-              if (snap && snap.portfolio.owner.equals(wallet.publicKey!)) return snap.pubkey;
-              return findV17Portfolio(connection, programId, slabPk, wallet.publicKey!);
-            })(),
-          ]);
-
-          // Ensure user ATA exists (prevents token transfer failure)
-          if (!ataExists) {
-            instructions.push(
-              createAssociatedTokenAccountInstruction(
-                wallet.publicKey,
-                userAta,
-                wallet.publicKey,
-                mktConfig.collateralMint,
-              ),
+          const resolvedPortfolioPk = await (async () => {
+            if (params.portfolioPk) return params.portfolioPk;
+            const snap = getPortfolioRawSnapshot(
+              makePortfolioScanKey(programId, slabAddress, wallet.publicKey!),
             );
-          }
+            if (snap && snap.portfolio.owner.equals(wallet.publicKey!)) return snap.pubkey;
+            return findV17Portfolio(connection, programId, slabPk, wallet.publicKey!);
+          })();
+
+          // Ensure user ATA exists (prevents token transfer failure). Idempotent:
+          // a no-op when the ATA exists, so no getAccount() pre-check is needed
+          // (a transient RPC error there used to be misread as "missing" and the
+          // non-idempotent create then failed the whole deposit).
+          instructions.push(
+            createAssociatedTokenAccountIdempotentInstruction(
+              wallet.publicKey,
+              userAta,
+              wallet.publicKey,
+              mktConfig.collateralMint,
+            ),
+          );
 
           // Find or create the user's portfolio account.
           let portfolioPk = resolvedPortfolioPk;
@@ -273,18 +268,14 @@ export function useDeposit(slabAddress: string) {
               if (!userAcct) {
                 resolvedUserIdx = slabAccounts.length;
 
-                try {
-                  await getAccount(connection, userAta);
-                } catch {
-                  instructions.push(
-                    createAssociatedTokenAccountInstruction(
-                      wallet.publicKey,
-                      userAta,
-                      wallet.publicKey,
-                      mktConfig.collateralMint,
-                    ),
-                  );
-                }
+                instructions.push(
+                  createAssociatedTokenAccountIdempotentInstruction(
+                    wallet.publicKey,
+                    userAta,
+                    wallet.publicKey,
+                    mktConfig.collateralMint,
+                  ),
+                );
 
                 const naf = slabParams?.newAccountFee ?? 0n;
                 const mid = slabParams?.minInitialDeposit ?? 0n;
