@@ -32,6 +32,7 @@ vi.mock("@/lib/v22/lot", async (orig) => ({
   lotExpOf: () => lotMock.exp,
 }));
 
+import { markToTokenUsd } from "@/lib/v22/lot-view";
 import { getConfig } from "@/lib/config";
 import { buildClosedMarketTombstone } from "@/lib/closed-market-tombstone";
 import {
@@ -180,7 +181,7 @@ describe("parseLiveState branches", () => {
     lotMock.exp = 3;
     const s = await read();
     expect(s).toBeDefined();
-    expect(s!.markPriceUsd).not.toBeNull();
+    expect(s!.markPriceUsd).toBe(markToTokenUsd(150_000_000n, 3));
     expect(s!.totalOiUsd).not.toBeNull();
   });
 
