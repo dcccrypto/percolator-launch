@@ -32,7 +32,8 @@
  *    on-chain, a raw `DataView` read at absolute 1750, and the SDK's
  *    `parseAssetOracleProfileV17` — all agree on 4,358,743 atoms.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PublicKey } from "@solana/web3.js";
@@ -419,5 +420,45 @@ describe("isCreatorFeeClaimAuthority — gate for the claim button", () => {
     expect(
       isCreatorFeeClaimAuthority({ ...claim, claimAuthority: null }, ASSET_ADMIN),
     ).toBe(false);
+  });
+});
+
+// ── v2.2 real captured devnet accounts (wrapper VERSION 19; slot 0 at 1398, not 1350) ──────────────
+describe("readCreatorFeeClaimable — real v2.2 devnet captures (flag on)", () => {
+  const load = (name: string) => {
+    const j = JSON.parse(readFileSync(join(__dirname, "..", "fixtures", name), "utf8")) as { dataBase64: string };
+    return new Uint8Array(Buffer.from(j.dataBase64, "base64"));
+  };
+  afterEach(() => __setDevnetV22ForTest(null));
+
+  it.each(["v22-market-single-asset-SOL.json", "v22-market-multi-asset-2xhs.json"])(
+    "%s: atoms and authority equal a raw DataView read at slot0 + 400 / + 368 plus the legacy pot at 584",
+    (name) => {
+      __setDevnetV22ForTest(true);
+      const d = load(name);
+      const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+      const slot0 = 1398; // v2.2: 592 + 806 market group
+      const perAsset = dv.getBigUint64(slot0 + 400, true);
+      const legacy = dv.getBigUint64(584, true);
+      const claim = readCreatorFeeClaimable(d)!;
+      expect(perAsset).toBeGreaterThan(0n); // non-vacuous
+      expect(claim.atoms).toBe(perAsset + legacy);
+      expect(claim.claimAuthority!.toBytes()).toEqual(d.slice(slot0 + 368, slot0 + 400));
+    },
+  );
+
+  it("never reads a v2.2 market with v2.1 geometry: flag off refuses (null), not a wrong number", () => {
+    __setDevnetV22ForTest(false);
+    expect(readCreatorFeeClaimable(load("v22-market-single-asset-SOL.json"))).toBeNull();
+  });
+
+  it("a burned asset_admin (zero key) is never claimable by any wallet, but atoms still read", () => {
+    __setDevnetV22ForTest(true);
+    const d = load("v22-market-single-asset-SOL.json").slice();
+    d.fill(0, 1398 + 368, 1398 + 400);
+    const claim = readCreatorFeeClaimable(d)!;
+    expect(claim.atoms).toBeGreaterThan(0n);
+    expect(isCreatorFeeClaimAuthority(claim, new PublicKey("11111111111111111111111111111111"))).toBe(false);
+    expect(isCreatorFeeClaimAuthority(claim, PublicKey.unique())).toBe(false);
   });
 });
