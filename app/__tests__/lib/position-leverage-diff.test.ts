@@ -59,9 +59,13 @@ describe("computePositionLeverage differential vs engine notional", () => {
       const n = engineNotional(row.sizeQ, row.mark);
       const expected = Number((n * 10_000n) / equity) / 10_000;
       const ok = r.kind === "ok" && r.leverage === expected && r.notionalAtoms === n;
-      // margin health (equity/notional, 0.1% floor) implies leverage = 100/health
+      // margin health (equity/notional %, floored to 0.1) must bracket the same ratio
       const h = computeMarginHealthPct(row.capital, row.sizeQ, row.mark, row.pnl);
-      const hOk = h == null || h === 0 || expected === 0 || Math.abs(100 / h - expected) <= expected * 0.01 + 0.01;
+      // health is floored to 0.1%: it must bracket 100/leverage within one step
+      // exact (unfloored-notional) equity/notional, %
+      const absQ = row.sizeQ < 0n ? -row.sizeQ : row.sizeQ;
+      const exact = Number((equity * 100n * POS_SCALE * 1_000_000_000n) / (absQ * row.mark)) / 1_000_000_000;
+      const hOk = h == null || exact == null || (h <= exact + 1e-6 && h >= exact - 0.1 - 1e-6);
       if (!ok || !hOk) mismatches.push(JSON.stringify({ ...row, got: r.kind === "ok" ? r.leverage : r.kind, expected, health: h }, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
     }
     expect(mismatches.length, `${mismatches.length}/${rows.length} mismatches, first: ${mismatches[0]}`).toBe(0);
