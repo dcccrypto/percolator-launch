@@ -16,7 +16,8 @@ vi.mock("@solana/spl-token", () => ({ getAssociatedTokenAddress: async () => pk(
 vi.mock("@percolatorct/sdk", async (orig) => ({ ...(await orig<Record<string, unknown>>()), deriveVaultAuthority: () => [pk(5), 1], deriveInsuranceLpMint: () => [pk(6), 1] }));
 vi.mock("@/lib/tx-v1/user-bundle", () => ({ sendUserBundle: vi.fn() }));
 
-import { useEarnExitV22 } from "@/hooks/useEarnExitV22";
+import { useEarnExitV22, HARVEST_READ_FAILED } from "@/hooks/useEarnExitV22";
+import { UserFacingError } from "@/lib/errorMessages";
 import { V22_COPY } from "@/lib/v22/copy";
 import { EXIT_LINES } from "@/lib/v22/exit-retry";
 
@@ -31,6 +32,13 @@ describe("#3605: Earn exit failure messages", () => {
     await act(async () => void (await result.current.getQuote()));
     expect(result.current.state.phase).toBe("error");
     expect(result.current.state.message).toBe(V22_COPY.earnExit.floorStuck);
+  });
+
+  it("a failed market-tails read for the harvest shows its own calm line", async () => {
+    quoteExit.mockResolvedValue({ status: "failed", error: new UserFacingError(HARVEST_READ_FAILED) });
+    const { result } = renderHook(() => useEarnExitV22(base));
+    await act(async () => void (await result.current.getQuote()));
+    expect(result.current.state.message).toBe(HARVEST_READ_FAILED);
   });
 
   it("#3612: an unread balance shows the calm balance line", async () => {
