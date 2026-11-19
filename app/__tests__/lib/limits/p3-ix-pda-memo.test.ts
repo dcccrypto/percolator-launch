@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, beforeEach } from "vitest";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { __p3PdaCache, deriveLpVaultRegistryPda, deriveNftRegistryPda, deriveVaultLpMatcherDelegate, deriveVaultLpState } from "@/lib/limits/p3-ix";
 import { LP_VAULT_REGISTRY_SEED, MATCHER_DELEGATE_SEED, NFT_REGISTRY_SEED, VAULT_LP_STATE_SEED } from "@/lib/limits/constants";
 
