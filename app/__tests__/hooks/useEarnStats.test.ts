@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 
 // Mock modules before importing the hook
 vi.mock('@/lib/supabase', () => ({
@@ -9,13 +9,21 @@ vi.mock('@/lib/mock-mode', () => ({
   isMockMode: vi.fn(() => true),
 }));
 
+// The hook's import graph (web3.js, SDK, v22 decoders) is heavy: a cold import takes
+// 10s+ under load. Pay that cost once in beforeAll with its own generous timeout so the
+// individual tests stay fast and don't depend on machine load.
+let hookMod: typeof import('@/hooks/useEarnStats');
+beforeAll(async () => {
+  hookMod = await import('@/hooks/useEarnStats');
+}, 120_000);
+
 describe('useEarnStats', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('exports required types', async () => {
-    const mod = await import('@/hooks/useEarnStats');
+  it('exports required types', () => {
+    const mod = hookMod;
     expect(mod.useEarnStats).toBeDefined();
     expect(typeof mod.useEarnStats).toBe('function');
   });
@@ -26,8 +34,7 @@ describe('useEarnStats', () => {
     (isMockMode as ReturnType<typeof vi.fn>).mockReturnValue(true);
 
     // We can't easily test hooks outside React, but we can verify the module structure
-    const mod = await import('@/hooks/useEarnStats');
-    expect(mod).toBeDefined();
+    expect(hookMod).toBeDefined();
   });
 });
 
