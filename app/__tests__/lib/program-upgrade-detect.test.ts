@@ -246,3 +246,33 @@ describe("cache TTL arms, sharing and recovery", () => {
     expect(await matcherLpSyncLive(c, new PublicKey(W), new PublicKey(M))).toBe(true);
   });
 });
+
+describe("remaining edges", () => {
+  it("accepts a PublicKey id; a non-relaunch id is 'pre' without any RPC", async () => {
+    const calls = { n: 0 };
+    const c = conn({ [W]: W_POST }, calls);
+    expect(await programUpgradeState(c, new PublicKey(W))).toBe("post");
+    calls.n = 0;
+    expect(await programUpgradeState(c, MAINNET_PROGRAM_IDS.wrapper)).toBe("pre");
+    expect(calls.n).toBe(0);
+  });
+
+  it("a missing or truncated program account is unknown", async () => {
+    const missing = { getAccountInfo: vi.fn(async () => null) } as never;
+    expect(await programUpgradeState(missing, W)).toBe("unknown");
+    __resetUpgradeDetectCache();
+    const short = {
+      getAccountInfo: vi.fn(async () => ({ data: new Uint8Array(10), owner: PublicKey.default, executable: true, lamports: 1 })),
+    } as never;
+    expect(await programUpgradeState(short, W)).toBe("unknown");
+  });
+
+  it("no WebCrypto -> unknown, never post", async () => {
+    vi.stubGlobal("crypto", undefined);
+    try {
+      expect(await programUpgradeState(conn({ [W]: W_POST }), W)).toBe("unknown");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
