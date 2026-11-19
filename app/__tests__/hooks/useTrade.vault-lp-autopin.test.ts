@@ -10,6 +10,9 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Keypair, PublicKey } from "@solana/web3.js";
+// Static import: the useTrade module graph is huge and cold-transforming it (11-23s) inside the
+// first test body blew the 10s test timeout. vi.mock calls are hoisted above this import.
+import { resolveV17TradeAccounts } from "@/hooks/useTrade";
 
 vi.mock("@/lib/config", async (orig) => {
   const real = (await orig()) as Record<string, unknown>;
@@ -75,7 +78,6 @@ describe("trade resolution against an auto-pinned vault LP", () => {
   }
 
   it("finds the vault LP and derives the delegate the program accepted", async () => {
-    const { resolveV17TradeAccounts } = await import("@/hooks/useTrade");
     const taker = Keypair.generate().publicKey;
     takerKey = taker;
     const data = Buffer.from(f.dataB64, "base64");
@@ -91,7 +93,6 @@ describe("trade resolution against an auto-pinned vault LP", () => {
   });
 
   it("refuses the vault LP when its ctx is not bound to the program-accepted delegate", async () => {
-    const { resolveV17TradeAccounts } = await import("@/hooks/useTrade");
     const taker = Keypair.generate().publicKey;
     takerKey = taker;
     const connection = connectionFor(await boundMarketData(new PublicKey(f.vaultLp)), boundCtxData(Keypair.generate().publicKey));
