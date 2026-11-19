@@ -17,6 +17,7 @@ import { useEarnExitV22, type EarnExitParams } from '@/hooks/useEarnExitV22';
 import { useLatchedShares } from '@/hooks/useLatchedShares';
 import {
   EARN_WITHDRAW_COPY as WC,
+  capMaxNowToPosition,
   cooldownPhrase,
   previewDepositSharesMinted,
   depositRefusalReason,
@@ -342,7 +343,7 @@ export function DepositWithdrawPanel({
     [pendingRedemptionShares, shareTotal, withdrawValue],
   );
   // 88 before it happens (§3.6 item 6): more than the vault can pay out now.
-  const maxNow = pricing?.maxNowAtoms ?? null;
+  const maxNow = capMaxNowToPosition(pricing?.maxNowAtoms ?? null, userWithdrawableAtoms);
   const overMaxNow = tab === 'withdraw' && maxNow !== null && previewCollateral > maxNow;
   // The typed amount is more than the whole position: the request is for everything, and the user is told.
   // Shares mode never clamps (the button stays disabled), so it gets its own "more than you have" note instead.

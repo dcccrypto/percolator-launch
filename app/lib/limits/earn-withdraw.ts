@@ -86,12 +86,18 @@ export function sharesForUsdc(usdcAtoms: bigint, totalShares: bigint, seniorValu
  * the pots + harvestable fees, plus what a recall (98) can pull from the LP: the recall limit
  * capped at the LP's value, and 0 while a senior draw is pending (D-P3-30). null = unknown.
  */
-export function maxNowAtoms(view: EarnTrancheView | null, lpValueAtoms: bigint | null, drawPending: boolean): bigint | null {
+export function maxNowAtoms(view: EarnTrancheView | null, lpValueAtoms: bigint | null, drawPending: boolean, userValueAtoms?: bigint | null): bigint | null {
   if (!view) return null;
   if (!view.illiquid) return null; // the pots cover every senior: no cap to show
   const recall = drawPending ? 0n : recallLimit(view.seniorClaimEff, view.backingCover);
   const fromLp = lpValueAtoms === null ? 0n : recall < lpValueAtoms ? recall : lpValueAtoms > 0n ? lpValueAtoms : 0n;
-  return view.backingCover + fromLp;
+  return capMaxNowToPosition(view.backingCover + fromLp, userValueAtoms);
+}
+
+/** A vault-wide "can pay out now" figure never exceeds what this user holds. */
+export function capMaxNowToPosition(maxNow: bigint | null, userValueAtoms: bigint | null | undefined): bigint | null {
+  if (maxNow === null || userValueAtoms === null || userValueAtoms === undefined) return maxNow;
+  return maxNow < userValueAtoms ? maxNow : userValueAtoms;
 }
 
 export type PendingPhase = "counting" | "ready" | "collecting";
