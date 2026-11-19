@@ -111,7 +111,12 @@ export function programUpgradeState(connection: Connection, programId: PublicKey
   if (forced) return Promise.resolve(PRE_SYNC_FINGERPRINTS[id] ? forced : "pre");
   if (!PRE_SYNC_FINGERPRINTS[id]) return Promise.resolve("pre");
   const hit = cache.get(id);
-  if (hit && Date.now() - hit.ts < (hit.v === "unknown" ? FAIL_TTL_MS : TTL_MS)) return Promise.resolve(hit.v);
+  if (hit) {
+    // A negative age means the wall clock stepped backwards: treat the entry as expired rather
+    // than pinning a stale answer until the clock catches up.
+    const age = Date.now() - hit.ts;
+    if (age >= 0 && age < (hit.v === "unknown" ? FAIL_TTL_MS : TTL_MS)) return Promise.resolve(hit.v);
+  }
   const running = inflight.get(id);
   if (running) return running;
   const p = (async () => {
