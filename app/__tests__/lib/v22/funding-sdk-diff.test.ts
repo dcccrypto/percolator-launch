@@ -9,9 +9,9 @@
  * suite is skipped when it is unset, so CI on the pinned SDK is unaffected.
  *
  * Compared per asset: the applied rate (rate when both sides hold exposure, else 0) and its sign/payer, plus premium and skew.
- * KNOWN SDK DIVERGENCE (the app matches the wrapper, `permissionless_funding_rate_e9_view`): with funding_mark_e6 == 0 and
- * mark_ewma_last_slot > asset slot_last, the wrapper applies NO premium; the SDK falls back to mark_ewma_e6 regardless.
- * Those cases are excluded from the equality sweep and pinned separately below.
+ * That case: funding_mark_e6 == 0 and mark_ewma_last_slot > asset slot_last. The wrapper (`permissionless_funding_rate_e9_view`)
+ * returns 0 for the WHOLE rate (premium and skew); the app now does too; the SDK falls back to mark_ewma_e6 and keeps skew
+ * (an SDK bug, reported). Those cases are excluded from the app-vs-SDK sweep and pinned against the wrapper separately.
  */
 import { describe, expect, it } from "vitest";
 import fx from "../../fixtures/v22-devnet-markets-2026-10-14.json";
@@ -154,18 +154,29 @@ describe.skipIf(!SDK_SRC)("app decodeFundingV22 vs SDK decodeMarketFundingV22", 
     expect(mism).toHaveLength(0);
   });
 
-  it("KNOWN SDK DIVERGENCE pinned: funding_mark_e6 == 0 and mark_ewma_last_slot > slot_last -> app premium 0 (wrapper), SDK uses mark_ewma_e6", () => {
-    const data = base("swordcat");
-    const g = resolveMarketGeometry(data, { parser: "t", strictLength: false });
-    const w = g.slotOff(0), e = g.engineOff(0);
-    const dv = new DataView(data.buffer);
-    const idx = dv.getBigUint64(e + 25, true);
-    dv.setBigUint64(w + 432, 0n, true);
-    dv.setBigUint64(w + 168, idx + 1n, true);
-    dv.setBigUint64(w + 176, dv.getBigUint64(e + 41, true) + 1n, true);
-    const a = decodeFundingV22(data)!;
-    const s = sdk.decode!(data).assets[0]!;
-    expect(a.premiumE9).toBe(0n);
-    expect(s.premiumRateE9PerSlot).not.toBe(0n);
+  it("KNOWN SDK DIVERGENCE pinned: mark==0 and ewma slot ahead -> SDK still derives a premium from mark_ewma_e6 (wrapper: whole rate 0)", () => {
+    const data = ewmaAhead();
+    expect(sdk.decode!(data).assets[0]!.premiumRateE9PerSlot).not.toBe(0n);
+  });
+});
+
+function ewmaAhead(): Uint8Array {
+  const data = base("swordcat");
+  const g = resolveMarketGeometry(data, { parser: "t", strictLength: false });
+  const w = g.slotOff(0), e = g.engineOff(0);
+  const dv = new DataView(data.buffer);
+  dv.setBigUint64(w + 432, 0n, true);
+  dv.setBigUint64(w + 168, dv.getBigUint64(e + 25, true) + 1n, true);
+  dv.setBigUint64(w + 176, dv.getBigUint64(e + 41, true) + 1n, true);
+  return data;
+}
+
+describe("wrapper early return (permissionless_funding_rate_e9_view): mark==0 and mark_ewma_last_slot > slot_last -> whole rate 0", () => {
+  it("app applies no premium AND no vault-LP skew (swordcat has skew 55 otherwise)", () => {
+    const f = decodeFundingV22(ewmaAhead())!;
+    expect(f.premiumE9).toBe(0n);
+    expect(f.skewE9).toBe(0n);
+    expect(f.rateE9PerSlot).toBe(0n);
+    expect(f.direction).toBe("none");
   });
 });
