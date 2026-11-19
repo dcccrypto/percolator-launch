@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import type { VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
+import { encodePermissionlessCrank } from "@percolatorct/sdk";
 
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({ network: "devnet", rpcUrl: "https://api.devnet.solana.com" }),
@@ -21,7 +22,7 @@ vi.mock("@/lib/config", () => ({
 import { sendTx } from "@/lib/tx";
 import * as C from "@/lib/limits/constants";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
-import { isValuationStaleFailure, planVaultLpRepair, type VaultLpRepairResult } from "@/lib/limits/vault-lp-repair";
+import { buildVaultLpCrankIx, isValuationStaleFailure, planVaultLpRepair, type VaultLpRepairResult } from "@/lib/limits/vault-lp-repair";
 import { afterLegsShift, blankPortfolio, v22MarketBytes } from "../../helpers/v22-fixtures";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { marketOffsets } from "@/lib/v22/market-offsets";
@@ -186,5 +187,22 @@ describe("planVaultLpRepair — only when needed", () => {
     const d = deps(BOUND_MARKET, vaultLpPortfolio(false), stale85);
     d.readMarket.mockRejectedValue(new Error("429"));
     expect((await planVaultLpRepair(params(), d)).outcome).toBe("rpc-error");
+  });
+});
+
+describe("buildVaultLpCrankIx — oracle tail vs observation hint (program: leftover tail => InvalidInstruction)", () => {
+  const enc = (oracleAccounts: number) =>
+    Buffer.from(encodePermissionlessCrank({ nowSlot: 0n, observations: [{ assetIndex: 0, oracleAccounts }] }));
+  const cranker = Keypair.generate().publicKey;
+  it("Pyth-pinned market: the hint must claim the one oracle account the tail carries", () => {
+    const pyth = Keypair.generate().publicKey;
+    const ix = buildVaultLpCrankIx(PROGRAM, cranker, MARKET, VAULT_LP, [{ pubkey: pyth, isSigner: false, isWritable: false }]);
+    expect(ix.keys[ix.keys.length - 1].pubkey.equals(pyth)).toBe(true);
+    expect(Buffer.from(ix.data).equals(enc(1))).toBe(true);
+  });
+  it("admin/hyperp market: no tail, hint claims none", () => {
+    const ix = buildVaultLpCrankIx(PROGRAM, cranker, MARKET, VAULT_LP, []);
+    expect(ix.keys).toHaveLength(3);
+    expect(Buffer.from(ix.data).equals(enc(0))).toBe(true);
   });
 });
