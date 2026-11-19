@@ -112,6 +112,8 @@ export const COPY = {
   closeNotLoaded: "We couldn't load your position on this market yet. Nothing was sent. Try again in a moment.",
   adlExitTrapped:
     "The other side of this market has fully closed, and your position can settle once the market catches up. Nothing was sent. Try again in a moment.",
+  /** rebalance-close: the market state could not be read (RPC error) after retries. Nothing was sent. */
+  closeStateUnknown: "We couldn't read this market's state right now. Nothing was sent. Try again in a moment.",
   closePartial: (filled: string, requested: string) => `Partially closed: ${filled} of ${requested}. The rest of your position is still open.`,
   /** useClosePosition success toast: a full close, and a partial close the user asked for (not a clipped fill). */
   closeDone: "Position closed.",
