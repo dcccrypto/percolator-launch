@@ -67,7 +67,7 @@ describe("closeViaRebalanceReduce — market read RPC error", () => {
       if (n++ === 0) throw rpcErr();
       return { data: market(2) };
     });
-    const simulate = vi.fn(async (ixs: unknown[]) => ({ err: ixs.length > 0 ? null : null, failingIx: null, portfolioAfter: null }));
+    const simulate = vi.fn(async () => ({ err: null, failingIx: null, portfolioAfter: null }));
     const r = await closeViaRebalanceReduce(p, { simulate, isFlat: () => true });
     expect(simulate).toHaveBeenCalled(); // resetPendingSides found => chooseAdlExit ran
     expect(r.route).toBe("tag44");

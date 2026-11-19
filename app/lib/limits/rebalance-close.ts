@@ -17,7 +17,7 @@ import { fetchPortfolioIdentity } from "@/lib/v18-wire";
 import { buildRebalanceCloseIxs } from "./rebalance-ixs";
 import { measureFill } from "./fill-check";
 import { decodeMarketEngineView, signedPositionForAsset } from "./decode";
-import { extractErrorCode } from "@/lib/errorMessages";
+import { extractErrorCode, UserFacingError } from "@/lib/errorMessages";
 import type { FillResult } from "./fill-result";
 
 export { buildRebalanceCloseIxs };
@@ -97,7 +97,7 @@ export async function closeViaRebalanceReduce(
   // An RPC error must NOT read as "no ResetPending side": that sends the trappable plain route
   // blind. Retry; if the state stays unknown, send nothing.
   const info = await readAccountRetrying(p.connection, p.market, READ_ATTEMPTS).catch(() => {
-    throw new Error(COPY.closeStateUnknown);
+    throw new UserFacingError(COPY.closeStateUnknown);
   });
   const view = info ? decodeMarketEngineView(new Uint8Array(info.data), p.assetIndex ?? 0) : null;
   const sides = view ? resetPendingSides(view.modeLong, view.modeShort) : [];
