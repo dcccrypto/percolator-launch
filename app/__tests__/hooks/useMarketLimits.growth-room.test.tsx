@@ -6,6 +6,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { __setDevnetV21ForTest } from "@/lib/v21/flag";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { useMarketLimits } from "@/hooks/useMarketLimits";
 
 vi.mock("@/lib/limits/flags", async (orig) => ({ ...((await orig()) as object), limitsFlags: () => ({ p1: false, p2: false, p2FeeCharged: false, p3: false }) }));
 vi.mock("@/lib/limits/lp-discovery", async () => {
@@ -33,14 +34,12 @@ afterEach(() => { __setDevnetV21ForTest(null); __setDevnetV22ForTest(null); });
 describe("useMarketLimits growthRoom wiring", () => {
   it("v2.1 + v2.2 build: 'loading' on the first render, 'error' after a completed read with no LP", async () => {
     __setDevnetV21ForTest(true); __setDevnetV22ForTest(true);
-    const { useMarketLimits } = await import("@/hooks/useMarketLimits");
     const { result } = renderHook(() => useMarketLimits(SLAB));
     expect(result.current.growthRoom).toBe("loading");
     await waitFor(() => expect(result.current.growthRoom).toBe("error"));
   });
   it("not emitted without v2.2 (legacy / v2.1-only builds are unchanged)", async () => {
     __setDevnetV21ForTest(true); __setDevnetV22ForTest(false);
-    const { useMarketLimits } = await import("@/hooks/useMarketLimits");
     const { result } = renderHook(() => useMarketLimits(SLAB));
     await new Promise((r) => setTimeout(r, 50));
     expect(result.current.growthRoom).toBeUndefined();
