@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
+import { useDevnetFaucet } from "@/hooks/useDevnetFaucet";
 
 const WALLET = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 const OTHER = new PublicKey("4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T");
@@ -93,7 +94,6 @@ describe("Fund Your Account: the first render after the scan is armed is not 'no
   it("never shows at any render while a position exists but the scan has not landed", async () => {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "25000000"; // low USDC, wallet funded for SOL
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const seen: boolean[] = [];
     const { result } = renderHook(() => {
       const f = useDevnetFaucet();

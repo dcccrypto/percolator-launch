@@ -12,6 +12,7 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { Connection, Keypair, PublicKey, SystemInstruction, SystemProgram, Transaction } from "@solana/web3.js";
 import { NextRequest } from "next/server";
+import { POST } from "@/app/api/mobile/create-market/route";
 import {
   IX_TAG,
   MAX_BACKING_BUCKET_EXPIRY_SLOT,
@@ -201,7 +202,6 @@ describe("the mobile route's three values agree", () => {
   });
 
   it("account length, InitMarket maxPortfolioAssets and SetMatcherConfig's frontier all describe ONE slot", async () => {
-    const { POST } = await import("@/app/api/mobile/create-market/route");
     const res = await POST(
       new NextRequest("http://localhost/api/mobile/create-market", {
         method: "POST",

@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
+import { useDevnetFaucet } from "@/hooks/useDevnetFaucet";
 
 const WALLET = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 const OTHER = new PublicKey("4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T");
@@ -68,7 +69,6 @@ describe("Fund Your Account: Ready follows the current balance", () => {
   it("USDC: done at 2,000, not done after the wallet drops to 0", async () => {
     rpc.lamports = 2_500_000_000; // 2.5 SOL
     rpc.usdcAtoms = "2000000000"; // 2,000 USDC
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.refreshBalances(); });
     expect(result.current.usdcBalance).toBe(2000);
@@ -85,7 +85,6 @@ describe("Fund Your Account: Ready follows the current balance", () => {
   it("a funded wallet (495 USDC, 2.5 SOL) is not nagged; an empty one still is", async () => {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "495000000";
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.refreshBalances(); });
     expect(result.current.usdcBalance).toBe(495);
@@ -99,7 +98,6 @@ describe("Fund Your Account: Ready follows the current balance", () => {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "0";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ funded: true }), { status: 200 })));
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.airdropUsdc(); }); // its own refresh still reads 0
     expect(result.current.usdcBalance).toBe(0);
@@ -116,7 +114,6 @@ describe("Fund Your Account: Ready follows the current balance", () => {
   it("SOL: same", async () => {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "0";
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.refreshBalances(); });
     expect(result.current.solDone).toBe(true);
@@ -128,7 +125,6 @@ describe("Fund Your Account: Ready follows the current balance", () => {
   it("a wallet with no token account yet reads 0 and clears the step", async () => {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "2000000000";
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.refreshBalances(); });
     expect(result.current.usdcDone).toBe(true);
@@ -141,7 +137,6 @@ describe("Fund Your Account: Ready follows the current balance", () => {
   it("a read for the previous wallet that lands after a wallet switch is dropped", async () => {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "0";
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result, rerender } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.refreshBalances(); });
 
@@ -165,7 +160,6 @@ describe("Fund Your Account: Ready follows the current balance", () => {
   it("a new PublicKey object for the same wallet is not a wallet change", async () => {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "2000000000";
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result, rerender } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.refreshBalances(); });
     expect(result.current.usdcBalance).toBe(2000);

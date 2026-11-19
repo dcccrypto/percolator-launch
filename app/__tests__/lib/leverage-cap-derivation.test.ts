@@ -21,6 +21,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { MAX_LEVERAGE, MIN_LEVERAGE } from "@/components/create/StepControlRoom";
+import * as params from "@/lib/market-params";
 
 // Sentinels chosen so a hard-coded 2/10 cannot coincide with them.
 vi.mock("@/lib/market-params", async (importOriginal) => {
@@ -30,7 +32,6 @@ vi.mock("@/lib/market-params", async (importOriginal) => {
 
 describe("the dial's bounds are derived, not copied", () => {
   it("follows market-params when it moves", async () => {
-    const { MAX_LEVERAGE, MIN_LEVERAGE } = await import("@/components/create/StepControlRoom");
     expect(MAX_LEVERAGE).toBe(7);
     expect(MIN_LEVERAGE).toBe(3);
   });
@@ -39,7 +40,6 @@ describe("the dial's bounds are derived, not copied", () => {
     // Without this, a failure to apply the mock would make the test above fail
     // for the wrong reason — or, if the sentinels ever matched the real values,
     // pass for the wrong reason.
-    const params = await import("@/lib/market-params");
     expect(params.MAX_LEVERAGE_X).toBe(7);
     expect(params.MIN_LEVERAGE_X).toBe(3);
     // And the rest of the module is the real one, so this is a narrow override.
