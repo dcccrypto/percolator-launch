@@ -43,7 +43,7 @@ import { useBondV22 } from "@/hooks/useBondV22";
 const k = () => Keypair.generate().publicKey;
 const ctx: EarnV22Context = {
   market: k(), programId: new PublicKey(resolveDevnetProgramIds().wrapper), collateralMint: k(), decimals: 6, symbol: "USDC", registryDomain: 0, lpPortfolio: k(),
-  view: { vaultValue: 1_000_000n, seniorClaimEff: 0n } as unknown as EarnV22Context["view"], registryShares: null, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n,
+  view: { vaultValue: 1_000_000n, seniorClaimEff: 0n } as unknown as EarnV22Context["view"], registryShares: null, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n, seniorDrawnAtoms: 0n, seniorDrawOutstandingAtoms: 0n,
 };
 
 async function mounted() {

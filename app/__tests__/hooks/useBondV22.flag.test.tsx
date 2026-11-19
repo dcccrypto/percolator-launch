@@ -15,7 +15,7 @@ vi.mock("@/lib/v22/sdk", async (orig) => {
 import { useBondV22 } from "@/hooks/useBondV22";
 
 const k = () => Keypair.generate().publicKey;
-const ctx: EarnV22Context = { market: k(), programId: k(), collateralMint: k(), decimals: 6, symbol: "X", registryDomain: 0, lpPortfolio: null, view: null, registryShares: null, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n };
+const ctx: EarnV22Context = { market: k(), programId: k(), collateralMint: k(), decimals: 6, symbol: "X", registryDomain: 0, lpPortfolio: null, view: null, registryShares: null, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n, seniorDrawnAtoms: 0n, seniorDrawOutstandingAtoms: 0n };
 afterEach(() => __setDevnetV22ForTest(null));
 
 describe("useBondV22", () => {

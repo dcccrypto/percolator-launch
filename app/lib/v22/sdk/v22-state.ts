@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-571-bond-carry-sdk @ c1fb497 (dcccrypto/percolator-sdk#439 into feat/v22-sdk-growth, prog #649 GH#571; sdk 9.0.0-candidate),
  * src/abi/v22-state.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
@@ -45,19 +45,30 @@ function bad(parser: string, msg: string, kind: number): UnknownLayoutError {
 }
 
 // ============================================================================
-// BondTrancheV20 (kind 11, ["bond_tranche", market], 16 + 128)
+// BondTrancheV20 (kind 11, ["bond_tranche", market], 16 + 176, version 2)
 // ============================================================================
 
-/** Decoded `BondTrancheV20` (`v16_program.rs:6840..6870`; offsets pinned by const asserts there). */
+/** `BOND_TRANCHE_VERSION` (GH#571 layout v2; v1 was 128 B and is refused). */
+export const BOND_TRANCHE_VERSION_V22 = 2;
+/** `bond_v20::COUPON_DENOM` = `10_000 * SLOTS_PER_YEAR`; the carried remainder is always below it. */
+export const BOND_COUPON_DENOM_V22 = 10_000n * 78_840_000n;
+
+/**
+ * Decoded `BondTrancheV20` v2 (`v16_program.rs` `state::BondTrancheV20`, 176 B; offsets pinned by the const asserts
+ * there). GH#571 (cumulative coupon): `cBAtoms` is the WHOLE claim `K` (deposits + every settled coupon - redeemed
+ * slices), `couponArrearsAtoms` the receivable `R`, `couponUnfundedAtoms` the per-share cap meter `U`,
+ * `couponAccrualRem` the carried sub-atom numerator and `couponGateSeen` the gate memory of the last settlement.
+ */
 export interface BondTrancheV20 {
   marketGroup: PublicKey;
-  /** `C_b`: deposits + credited coupons - redeemed pro-rata slices. */
+  /** `K`: the bonds' whole claim (deposits + every SETTLED coupon - redeemed pro-rata slices). Shares price at `K / B`. */
   cBAtoms: bigint;
   /** `B`: bond shares outstanding. */
   bSharesTotal: bigint;
   principalInLpAtoms: bigint;
   /** Informational mirror of the impairment; nothing prices off it. */
   bondDrawnOutstandingAtoms: bigint;
+  /** Every slot up to it is settled into `K` / `R` (or forfeited while the gate was closed). */
   lastCouponSlot: bigint;
   couponBpsPerYear: number;
   couponUtilBonusBps: number;
@@ -66,24 +77,39 @@ export interface BondTrancheV20 {
   version: number;
   bump: number;
   lastUtilBps: number;
+  /** Cumulative coupon atoms PAID by fee legs (tag 78; saturating u64; a readout only). */
   couponPaidTotalAtoms: bigint;
+  /** `R`: settled coupon (already inside `K`) no fee leg has funded yet; what the fee legs still owe the junior. */
+  couponArrearsAtoms: bigint;
+  /** `U`: the cap meter, unfunded coupon carried by the current shares (`U <= K`). */
+  couponUnfundedAtoms: bigint;
+  /** Carried sub-atom accrual numerator (`< BOND_COUPON_DENOM_V22`). */
+  couponAccrualRem: bigint;
+  /** Gate memory: low 63 bits = `senior_drawn_atoms` at the last settlement; bit 63 = the gate was CLOSED then. */
+  couponGateSeen: bigint;
 }
 
-/** Field offsets inside the 128-byte body (rustc `offset_of!`; add 16 for the account). */
+/** Field offsets inside the 176-byte body (rustc `offset_of!`; add 16 for the account). */
 export const BOND_TRANCHE_FIELD_OFF_V22 = Object.freeze({
   marketGroup: 0, cBAtoms: 32, bSharesTotal: 48, principalInLpAtoms: 64, bondDrawnOutstandingAtoms: 80,
   lastCouponSlot: 96, couponBpsPerYear: 104, couponUtilBonusBps: 106, bondCooldownSlots: 108,
   bondCapBpsOfC: 112, version: 114, bump: 115, lastUtilBps: 116, padding: 118, couponPaidTotalAtoms: 120,
+  couponArrearsAtoms: 128, couponUnfundedAtoms: 144, couponAccrualRem: 160, couponGateSeen: 168,
 } as const);
 
 /**
- * Decode a bond tranche account.
+ * Decode a bond tranche account (layout v2, GH#571).
  *
- * @param data   Raw account bytes (`16 + 128`).
+ * A v1 account (128-byte body, `version == 1`) and the intermediate 144-byte form are refused, exactly as the program
+ * refuses them (`InvalidAccountLen` for the short body, `InvalidAccountData` for the version): bond markets are
+ * re-seeded, there is no in-place migration.
+ *
+ * @param data   Raw account bytes (`16 + 176`).
  * @param table  Layout table (default {@link LAYOUT_V22}).
  * @returns The tranche.
- * @throws {@link UnknownLayoutError} on a wrong header, short data or an invalid record (dials outside
- *   `bond_config_ok`, `C_b == 0` xor `B == 0`, non-zero padding, `last_util_bps > 10000`).
+ * @throws {@link UnknownLayoutError} on a wrong header, short data (`TOO_SHORT`, e.g. a v1 / 144 B account) or an
+ *   invalid record (`version != 2`, dials outside `bond_config_ok`, `K == 0` xor `B == 0`, non-zero padding,
+ *   `last_util_bps > 10000`, `couponAccrualRem >= COUPON_DENOM`, `U > K`).
  * @example
  * ```ts
  * const t = decodeBondTrancheV20(info.data);
@@ -109,11 +135,24 @@ export function decodeBondTrancheV20(data: Uint8Array, table: LayoutTable = LAYO
     bump: data[b + F.bump],
     lastUtilBps: v.getUint16(b + F.lastUtilBps, true),
     couponPaidTotalAtoms: v.getBigUint64(b + F.couponPaidTotalAtoms, true),
+    couponArrearsAtoms: u128(v, b + F.couponArrearsAtoms),
+    couponUnfundedAtoms: u128(v, b + F.couponUnfundedAtoms),
+    couponAccrualRem: v.getBigUint64(b + F.couponAccrualRem, true),
+    couponGateSeen: v.getBigUint64(b + F.couponGateSeen, true),
   };
   // validate_bond_tranche
   const dialsOk =
     t.couponBpsPerYear <= 2_000 && t.couponUtilBonusBps === 0 && t.bondCooldownSlots >= 9_000 && t.bondCooldownSlots <= 1_512_000 && t.bondCapBpsOfC >= 1 && t.bondCapBpsOfC <= 5_000;
-  if (t.version !== 1 || isZero(data.subarray(b, b + 32)) || !dialsOk || t.lastUtilBps > 10_000 || !isZero(data.subarray(b + F.padding, b + F.padding + 2)) || (t.cBAtoms === 0n) !== (t.bSharesTotal === 0n)) {
+  if (
+    t.version !== BOND_TRANCHE_VERSION_V22 ||
+    isZero(data.subarray(b, b + 32)) ||
+    !dialsOk ||
+    t.lastUtilBps > 10_000 ||
+    !isZero(data.subarray(b + F.padding, b + F.padding + 2)) ||
+    (t.cBAtoms === 0n) !== (t.bSharesTotal === 0n) ||
+    t.couponAccrualRem >= BOND_COUPON_DENOM_V22 ||
+    t.couponUnfundedAtoms > t.cBAtoms
+  ) {
     throw bad(parser, "bond tranche fails the program's validate_bond_tranche", ACCOUNT_KIND.BondTranche);
   }
   return t;

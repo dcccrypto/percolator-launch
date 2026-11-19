@@ -89,7 +89,7 @@ export const V22_COPY = {
     holdingFeeTitle: "Holding fee",
     holdingFeeHint: "A small fee on open positions. It keeps tiny positions from clogging the market.",
     bondTitle: "Capacity bond",
-    bondHint: "Add liquidity at launch that absorbs losses after the first-loss stake and before Earn, and earns a capped share of fees.",
+    bondHint: "Add liquidity at launch that absorbs losses after the first-loss stake and before Earn, and earns a capped coupon. Until trading fees catch up, the coupon is paid out of your first-loss stake.",
     bondAtomic: "Created in the same transaction as the market.",
     priceFloor: (floor: string) => `Launch price must be at least ${floor} per lot. Pick a higher launch price.`,
     priceCeiling: (ceil: string) => `Launch price can be at most ${ceil} per lot.`,
@@ -116,7 +116,7 @@ export const V22_COPY = {
   bond: {
     title: "Capacity bond",
     absorbs: "Losses come after the creator's first-loss stake and before Earn.",
-    coupon: "The coupon is paid from trading fees and is capped. It is not guaranteed.",
+    coupon: "The coupon adds to the bond's value as it builds up and is paid when you withdraw. Trading fees fund it; until they catch up it comes out of the creator's first-loss stake. It pauses while the bond is below par and is capped. It is not guaranteed.",
     exit: "Withdraw is live only while the market's liquidity is flat (no open positions it backs).",
     deposit: "Deposit",
     requestWithdraw: "Request withdrawal",
