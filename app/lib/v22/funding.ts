@@ -82,12 +82,14 @@ export function decodeFundingV22(data: Uint8Array, assetIndex = 0): FundingViewV
 
   let premium = 0n;
   let skew = 0n;
-  if (managed && maxAbs !== 0n) {
-    const mark = u64(dv, w + PROFILE.fundingMarkE6);
-    const ewma = u64(dv, w + PROFILE.markEwmaE6);
-    const ewmaSlot = u64(dv, w + PROFILE.markEwmaLastSlot);
-    // wrapper: funding_mark_e6 if set; else the EWMA mark once the asset has caught up to it; else 0.
-    const active = mark !== 0n ? mark : ewmaSlot <= assetSlot ? ewma : 0n;
+  const mark = u64(dv, w + PROFILE.fundingMarkE6);
+  const ewma = u64(dv, w + PROFILE.markEwmaE6);
+  const ewmaSlot = u64(dv, w + PROFILE.markEwmaLastSlot);
+  // wrapper: funding_mark_e6 if set; else the EWMA mark once the asset has caught up to it; else the wrapper
+  // returns 0 for the WHOLE rate (premium and skew), "preserve the old non-retroactive behavior".
+  const markResolved = mark !== 0n || ewmaSlot <= assetSlot;
+  if (managed && maxAbs !== 0n && markResolved) {
+    const active = mark !== 0n ? mark : ewma;
     if (active !== 0n && effective !== 0n && active !== effective) {
       const diff = active > effective ? active - effective : effective - active;
       const mag = (diff * FUNDING_DEN_E9) / effective;
