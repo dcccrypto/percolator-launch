@@ -213,5 +213,7 @@ export function isCreatorFeeClaimAuthority(
   wallet: PublicKey | null | undefined,
 ): boolean {
   if (!claim?.claimAuthority || !wallet) return false;
+  // A burned asset_admin is the all-zero key: nobody holds it, so it is "no authority", never a match.
+  if (claim.claimAuthority.equals(PublicKey.default)) return false;
   return claim.claimAuthority.equals(wallet);
 }
