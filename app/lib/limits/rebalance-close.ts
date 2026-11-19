@@ -68,6 +68,23 @@ export function connectionAdlExitDeps(connection: Connection, payer: PublicKey, 
   };
 }
 
+const READ_ATTEMPTS = 3;
+const READ_BACKOFF_MS = 150;
+
+/** getAccountInfo retried on a thrown RPC error (429/timeout). A null result (no account) is returned as is; a read that never succeeds rethrows. */
+async function readAccountRetrying(connection: Connection, pk: PublicKey, attempts: number) {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await connection.getAccountInfo(pk, "confirmed");
+    } catch (e) {
+      last = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, READ_BACKOFF_MS * (i + 1)));
+    }
+  }
+  throw last;
+}
+
 export async function closeViaRebalanceReduce(
   p: RebalanceCloseParams,
   depsOverride?: AdlExitDeps,
@@ -77,7 +94,11 @@ export async function closeViaRebalanceReduce(
   const tag44 = plain[plain.length - 1];
   const crank = plain[0];
   // B10: only when a side is ResetPending can the plain exit be trapped (18/22 at the 44).
-  const info = await p.connection.getAccountInfo(p.market, "confirmed").catch(() => null);
+  // An RPC error must NOT read as "no ResetPending side": that sends the trappable plain route
+  // blind. Retry; if the state stays unknown, send nothing.
+  const info = await readAccountRetrying(p.connection, p.market, READ_ATTEMPTS).catch(() => {
+    throw new Error(COPY.closeStateUnknown);
+  });
   const view = info ? decodeMarketEngineView(new Uint8Array(info.data), p.assetIndex ?? 0) : null;
   const sides = view ? resetPendingSides(view.modeLong, view.modeShort) : [];
   let instructions = plain;
@@ -114,7 +135,7 @@ export async function closeViaRebalanceReduce(
     // shows the leg is gone, the position IS closed: report that, not an error.
     const msg = errorText(e);
     if (extractErrorCode(msg) === ENGINE_INVALID_LEG) {
-      const info = await p.connection.getAccountInfo(p.portfolio, "confirmed").catch(() => null);
+      const info = await readAccountRetrying(p.connection, p.portfolio, 2).catch(() => null);
       const now = info ? signedPositionForAsset(new Uint8Array(info.data), p.assetIndex ?? 0, p.marketId) : null;
       if (now === 0n) return { signature: null, fill: { kind: "full", filledQ: -p.beforeQ }, route };
     }
