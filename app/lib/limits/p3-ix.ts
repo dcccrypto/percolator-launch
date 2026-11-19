@@ -55,14 +55,32 @@ function putU128(dv: DataView, off: number, v: bigint): void {
 const meta = (pubkey: PublicKey, isSigner: boolean, isWritable: boolean): AccountMeta => ({ pubkey, isSigner, isWritable });
 
 // ── PDAs ──────────────────────────────────────────────────────────────────────
+// findProgramAddressSync is ~hundreds of µs (bump loop + curve checks); these run on polls/renders over a
+// handful of markets, so memoise on programId + seed bytes. Bounded: oldest entry evicted past PDA_CACHE_MAX.
+const PDA_CACHE_MAX = 512;
+const pdaCache = new Map<string, PublicKey>();
+const latin1 = (b: Uint8Array): string => String.fromCharCode(...b);
+function memoPda(programId: PublicKey, seeds: Uint8Array[]): PublicKey {
+  // Each call site has a distinct fixed tag followed by fixed 32-byte keys, so the '|'-joined key is unambiguous.
+  const key = latin1(programId.toBytes()) + seeds.map(latin1).join("|");
+  const hit = pdaCache.get(key);
+  if (hit) return hit;
+  const pda = PublicKey.findProgramAddressSync(seeds, programId)[0];
+  if (pdaCache.size >= PDA_CACHE_MAX) pdaCache.delete(pdaCache.keys().next().value as string);
+  pdaCache.set(key, pda);
+  return pda;
+}
+/** test hook */
+export const __p3PdaCache = { size: () => pdaCache.size, clear: () => pdaCache.clear(), max: PDA_CACHE_MAX };
+
 export function deriveVaultLpState(programId: PublicKey, market: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync([enc.encode(VAULT_LP_STATE_SEED), market.toBytes()], programId)[0];
+  return memoPda(programId, [enc.encode(VAULT_LP_STATE_SEED), market.toBytes()]);
 }
 export function deriveLpVaultRegistryPda(programId: PublicKey, market: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync([enc.encode(LP_VAULT_REGISTRY_SEED), market.toBytes()], programId)[0];
+  return memoPda(programId, [enc.encode(LP_VAULT_REGISTRY_SEED), market.toBytes()]);
 }
 export function deriveNftRegistryPda(programId: PublicKey, marketGroup: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync([enc.encode(NFT_REGISTRY_SEED), marketGroup.toBytes()], programId)[0];
+  return memoPda(programId, [enc.encode(NFT_REGISTRY_SEED), marketGroup.toBytes()]);
 }
 
 // ── Data encoders (pure) ──────────────────────────────────────────────────────
@@ -207,10 +225,7 @@ export function buildLpVaultCrankFeesIx(p: {
 
 /** Delegate PDA `["matcher", market, lp_portfolio, registry (the LP's owner), matcher_program, ctx]`. */
 export function deriveVaultLpMatcherDelegate(programId: PublicKey, market: PublicKey, lpPortfolio: PublicKey, registry: PublicKey, matcherProgram: PublicKey, matcherCtx: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [enc.encode(MATCHER_DELEGATE_SEED), market.toBytes(), lpPortfolio.toBytes(), registry.toBytes(), matcherProgram.toBytes(), matcherCtx.toBytes()],
-    programId,
-  )[0];
+  return memoPda(programId, [enc.encode(MATCHER_DELEGATE_SEED), market.toBytes(), lpPortfolio.toBytes(), registry.toBytes(), matcherProgram.toBytes(), matcherCtx.toBytes()]);
 }
 
 /**
