@@ -64,7 +64,8 @@ export interface EarnExitState {
 }
 
 const IDLE: EarnExitState = { phase: 'idle', quote: null, requoted: false, message: null, signature: null, bound: null };
-const RUNNER_LINES = new Set<string>([...Object.values(EXIT_LINES), V22_COPY.earnExit.floorStuck]);
+export const HARVEST_READ_FAILED = "We couldn't read this market just now. Nothing was sent. Please try again.";
+const RUNNER_LINES = new Set<string>([HARVEST_READ_FAILED, ...Object.values(EXIT_LINES), V22_COPY.earnExit.floorStuck]);
 
 /** The runner's own floor-stuck failure (lib/v22/earn-exit-run.ts, execute mode, 117 on every quote). */
 const isFloorStuck = (e: unknown): boolean => e instanceof Error && e.message === V22_COPY.earnExit.floorStuck;
@@ -122,7 +123,7 @@ export async function buildHarvestIx(
   try {
     tails = await fetchMarketTailsV22(connection, programId, market);
   } catch {
-    throw new UserFacingError("We couldn't read this market just now. Nothing was sent. Please try again.");
+    throw new UserFacingError(HARVEST_READ_FAILED);
   }
   const v22 = tails.vaultLpExt || tails.bondTranche ? { lpPortfolio, vaultLpExt: tails.vaultLpExt ?? undefined, bond: !!tails.bondTranche } : undefined;
   return buildLpCrankIx(programId, cranker, market, domain, true, v22);
