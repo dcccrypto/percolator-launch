@@ -88,7 +88,8 @@ export function computeEnginePreTradeLiqPrice(
   feeBps: bigint,
   direction: "long" | "short",
 ): bigint {
-  if (oracleE6 === 0n || margin === 0n || posSize === 0n) return 0n;
+  // margin 0n is a real input: the formula still prices it (liquidatable at once); 0n would read as "none".
+  if (oracleE6 === 0n || posSize === 0n) return 0n;
   const absPos = abs(posSize);
   const feeAdjust = (oracleE6 * feeBps) / BPS;
   const entry = direction === "long" ? oracleE6 + feeAdjust : oracleE6 - feeAdjust > 0n ? oracleE6 - feeAdjust : 1n;
