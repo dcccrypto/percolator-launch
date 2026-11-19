@@ -21,7 +21,7 @@
  * risk readout (same rule as lib/margin-health.ts).
  *
  * Collateral is treated as USD-pegged (the app's convention everywhere:
- * notional USD == collateral units), scaled by `collateralDecimals`.
+ * notional units == collateral atoms); `collateralDecimals` is only validated, not used in the math.
  */
 import { Q_SCALE } from "@/lib/q-usd";
 import { isSentinelValue } from "@/lib/health";
