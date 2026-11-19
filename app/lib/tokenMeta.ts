@@ -52,6 +52,41 @@ function placeholderMeta(mint: string, decimals: number): TokenMeta {
   return meta;
 }
 
+const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const METADATA_SEED = Buffer.from("metadata");
+const TOKEN_METADATA_PROGRAM_BYTES = TOKEN_METADATA_PROGRAM_ID.toBuffer();
+
+/** Bound on the PDA memo (FIFO eviction) so a long session can't grow it without limit. */
+export const METADATA_PDA_CACHE_MAX = 2048;
+const metadataPdaCache = new Map<string, { pda: PublicKey; base58: string }>();
+
+/**
+ * Metaplex metadata PDA for a mint (base58). Memoised per mint: findProgramAddressSync costs
+ * a sha256 + curve check per bump attempt, and the same mints recur across loads/polls.
+ * Throws on an invalid mint string, exactly like `new PublicKey(mint)`.
+ */
+export function getMetadataPda(mint: string): { pda: PublicKey; base58: string } {
+  const hit = metadataPdaCache.get(mint);
+  if (hit) return hit;
+  const mintKey = new PublicKey(mint);
+  const [pda] = PublicKey.findProgramAddressSync(
+    [METADATA_SEED, TOKEN_METADATA_PROGRAM_BYTES, mintKey.toBuffer()],
+    TOKEN_METADATA_PROGRAM_ID,
+  );
+  const entry = { pda, base58: pda.toBase58() };
+  if (metadataPdaCache.size >= METADATA_PDA_CACHE_MAX) {
+    const oldest = metadataPdaCache.keys().next().value;
+    if (oldest !== undefined) metadataPdaCache.delete(oldest);
+  }
+  metadataPdaCache.set(mint, entry);
+  return entry;
+}
+
+/** Test hook: empty the PDA memo (cold-path measurements). */
+export function clearMetadataPdaCache(): void {
+  metadataPdaCache.clear();
+}
+
 /** Max mints per Helius DAS getAssetBatch call */
 const DAS_BATCH_SIZE = 100;
 
@@ -354,20 +389,16 @@ export async function fetchTokenMetaBatch(
 
   // For remaining unresolved mints, batch-fetch Metaplex metadata PDAs
   if (unresolved.length > 0) {
-    const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-
-    // Compute all PDAs
+    // Compute all PDAs (memoised per mint)
     const pdaToMint = new Map<string, string>();
     const pdaKeys: PublicKey[] = [];
+    const pdaB58: string[] = [];
     for (const key of unresolved) {
       try {
-        const mint = new PublicKey(key);
-        const [pda] = PublicKey.findProgramAddressSync(
-          [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-          TOKEN_METADATA_PROGRAM_ID,
-        );
-        pdaToMint.set(pda.toBase58(), key);
+        const { pda, base58 } = getMetadataPda(key);
+        pdaToMint.set(base58, key);
         pdaKeys.push(pda);
+        pdaB58.push(base58);
       } catch {
         // Invalid key — skip
       }
@@ -387,7 +418,7 @@ export async function fetchTokenMetaBatch(
 
         for (let i = 0; i < pdaKeys.length; i++) {
           const account = allAccounts[i];
-          const mintKey = pdaToMint.get(pdaKeys[i].toBase58());
+          const mintKey = pdaToMint.get(pdaB58[i]);
           if (!account?.data || !mintKey) continue;
 
           try {
@@ -540,11 +571,7 @@ export async function fetchTokenMeta(
   // 3. Fallback: on-chain Metaplex metadata (manual buffer parsing)
   if (!resolved) {
     try {
-      const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-      const [metadataPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-        TOKEN_METADATA_PROGRAM_ID
-      );
+      const { pda: metadataPDA } = getMetadataPda(key);
       const metadataAccount = await connection.getAccountInfo(metadataPDA);
       if (metadataAccount?.data) {
         const data = metadataAccount.data;
