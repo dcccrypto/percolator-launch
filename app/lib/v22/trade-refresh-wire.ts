@@ -84,6 +84,15 @@ export async function planTradeRefresh(
   return planV22TradeRefresh({ ...i, takerData, lpData }, tradeRefreshDeps(connection, i.programId, i.market, i.cranker), opts);
 }
 
+/** The taker portfolio could not be read (RPC error twice). Retryable: nothing was planned or sent. */
+export class TakerPortfolioReadError extends Error {
+  readonly retryable = true;
+  constructor(readonly cause: unknown) {
+    super("Could not read your portfolio from the RPC (rate limited or unavailable). Nothing was sent; please try again.");
+    this.name = "TakerPortfolioReadError";
+  }
+}
+
 /**
  * An order on a MULTI-ASSET market (asset slots > 1): the body alone, else the refresh flow of
  * `executeV22MultiAssetOrder` (one tx under 1.2M CU, otherwise the cranks as their own tx then the body alone).
@@ -95,7 +104,19 @@ export async function sendMultiAssetOrder(
   send: (ixs: TransactionInstruction[], kind: MultiAssetSendKind) => Promise<string>,
   opts: { onTwoTx?: (txCount: number) => void } = {},
 ): Promise<MultiAssetOrderResult> {
-  const takerInfo = i.takerPortfolio ? await connection.getAccountInfo(i.takerPortfolio, "confirmed").catch(() => null) : null;
+  // null from getAccountInfo = the account does not exist (a first trade); a THROWN error is not "missing": retry once, then fail.
+  let takerInfo: Awaited<ReturnType<Connection["getAccountInfo"]>> = null;
+  if (i.takerPortfolio) {
+    try {
+      takerInfo = await connection.getAccountInfo(i.takerPortfolio, "confirmed");
+    } catch {
+      try {
+        takerInfo = await connection.getAccountInfo(i.takerPortfolio, "confirmed");
+      } catch (e) {
+        throw new TakerPortfolioReadError(e);
+      }
+    }
+  }
   const takerData = takerInfo ? new Uint8Array(takerInfo.data) : null;
   return executeV22MultiAssetOrder({ ...i, takerData }, { ...tradeRefreshDeps(connection, i.programId, i.market, i.cranker), send, ...(opts.onTwoTx ? { onTwoTx: opts.onTwoTx } : {}) });
 }
