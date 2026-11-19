@@ -177,3 +177,102 @@ describe("freshness around the cutover", () => {
     expect(await programUpgradeState(conn({ [W]: W_H1 }), W)).toBe("post");
   });
 });
+
+describe("cache TTL arms, sharing and recovery", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("'unknown' uses the 15 s FAIL_TTL: still cached at 14.9 s, re-read at 15 s", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    expect(await programUpgradeState(conn({ [W]: null }), W)).toBe("unknown");
+    const good = conn({ [W]: W_H1 });
+    vi.setSystemTime(1_000_000 + 14_999);
+    expect(await programUpgradeState(good, W)).toBe("unknown");
+    vi.setSystemTime(1_000_000 + 15_000);
+    expect(await programUpgradeState(good, W)).toBe("post");
+  });
+
+  it("a known answer uses the 45 s TTL (not the 15 s one)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    expect(await programUpgradeState(conn({ [W]: W_PRE }), W)).toBe("pre");
+    const next = conn({ [W]: W_H1 });
+    vi.setSystemTime(1_000_000 + 44_999);
+    expect(await programUpgradeState(next, W)).toBe("pre");
+    vi.setSystemTime(1_000_000 + 45_000);
+    expect(await programUpgradeState(next, W)).toBe("post");
+  });
+
+  it("concurrent callers share ONE probe", async () => {
+    const calls = { n: 0 };
+    const c = conn({ [W]: W_POST }, calls);
+    const [a, b, d] = await Promise.all([programUpgradeState(c, W), programUpgradeState(c, W), programUpgradeState(c, W)]);
+    expect([a, b, d]).toEqual(["post", "post", "post"]);
+    expect(calls.n).toBe(2); // one program read + one programdata read
+  });
+
+  it("a failing probe is followed by a success once the fail TTL passes", async () => {
+    vi.useFakeTimers();
+    const bad = { getAccountInfo: vi.fn(async () => { throw new Error("503"); }) } as never;
+    expect(await programUpgradeState(bad, W)).toBe("unknown");
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await programUpgradeState(conn({ [W]: W_POST }), W)).toBe("post");
+  });
+
+  it("a non-Error rejection is still unknown", async () => {
+    const c = { getAccountInfo: vi.fn(() => Promise.reject("boom")) } as never;
+    expect(await programUpgradeState(c, W)).toBe("unknown");
+  });
+
+  it("clock stepped BACKWARDS: a cached answer is re-read, not pinned until the clock catches up", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000_000);
+    expect(await programUpgradeState(conn({ [W]: W_PRE }), W)).toBe("pre");
+    vi.setSystemTime(10_000_000 - 3_600_000); // NTP step back one hour
+    expect(await programUpgradeState(conn({ [W]: W_H1 }), W)).toBe("post");
+  });
+
+  it("clock stepped backwards also does not pin an 'unknown'", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000_000);
+    expect(await programUpgradeState(conn({ [W]: null }), W)).toBe("unknown");
+    vi.setSystemTime(10_000_000 - 60_000);
+    expect(await programUpgradeState(conn({ [W]: W_H1 }), W)).toBe("post");
+  });
+
+  it("matcherLpSyncLive accepts string ids and a null LP matcher", async () => {
+    const c = conn({ [W]: W_POST, [M]: M_POST });
+    expect(await matcherLpSyncLive(c, W, null)).toBe(false);
+    expect(await matcherLpSyncLive(c, new PublicKey(W), new PublicKey(M))).toBe(true);
+  });
+});
+
+describe("remaining edges", () => {
+  it("accepts a PublicKey id; a non-relaunch id is 'pre' without any RPC", async () => {
+    const calls = { n: 0 };
+    const c = conn({ [W]: W_POST }, calls);
+    expect(await programUpgradeState(c, new PublicKey(W))).toBe("post");
+    calls.n = 0;
+    expect(await programUpgradeState(c, MAINNET_PROGRAM_IDS.wrapper)).toBe("pre");
+    expect(calls.n).toBe(0);
+  });
+
+  it("a missing or truncated program account is unknown", async () => {
+    const missing = { getAccountInfo: vi.fn(async () => null) } as never;
+    expect(await programUpgradeState(missing, W)).toBe("unknown");
+    __resetUpgradeDetectCache();
+    const short = {
+      getAccountInfo: vi.fn(async () => ({ data: new Uint8Array(10), owner: PublicKey.default, executable: true, lamports: 1 })),
+    } as never;
+    expect(await programUpgradeState(short, W)).toBe("unknown");
+  });
+
+  it("no WebCrypto -> unknown, never post", async () => {
+    vi.stubGlobal("crypto", undefined);
+    try {
+      expect(await programUpgradeState(conn({ [W]: W_POST }), W)).toBe("unknown");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
