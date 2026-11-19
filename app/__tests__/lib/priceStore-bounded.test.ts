@@ -32,5 +32,8 @@ describe("#2320 priceStore caps retained snapshots", () => {
     expect(earliestGone).toBe(true);
 
     unsub();
-  });
+    // The first cold dynamic import of the store pulls the v2.2 SDK graph, which takes
+    // ~10s on a loaded runner (the eviction loop itself is sub-millisecond) and tripped
+    // the global 10s testTimeout. Not a store bug, so give the import room.
+  }, 60_000);
 });
