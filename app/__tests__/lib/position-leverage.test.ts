@@ -31,10 +31,10 @@ describe("computePositionLeverage", () => {
     expect(r).toMatchObject({ kind: "ok", leverage: 2 });
   });
 
-  it("respects collateral decimals (9-dec collateral, same economics)", () => {
+  it("9-dec collateral: engine price_e6 is already in collateral atoms, no decimals factor", () => {
     const r = computePositionLeverage({
       sizeQ: 40_000_000n,
-      markPriceE6: 100_000_000n,
+      markPriceE6: 100_000_000_000n, // $100 expressed in 9-dec collateral atoms (e6)
       capital: 1_000_000_000_000n, // $1000 at 9 decimals
       pnl: 0n,
       collateralDecimals: 9,

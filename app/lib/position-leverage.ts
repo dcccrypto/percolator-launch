@@ -21,7 +21,7 @@
  * risk readout (same rule as lib/margin-health.ts).
  *
  * Collateral is treated as USD-pegged (the app's convention everywhere:
- * notional USD == collateral units), scaled by `collateralDecimals`.
+ * notional units == collateral atoms); `collateralDecimals` is only validated, not used in the math.
  */
 import { Q_SCALE } from "@/lib/q-usd";
 import { isSentinelValue } from "@/lib/health";
@@ -36,7 +36,6 @@ export type PositionLeverage =
   | { kind: "unknown" };
 
 const Q = BigInt(Q_SCALE);
-const E6 = 1_000_000n;
 
 export interface PositionLeverageInput {
   /** Signed engine Q size (basis_pos_q). */
@@ -63,8 +62,9 @@ export function computePositionLeverage(input: PositionLeverageInput): PositionL
     return { kind: "unknown" };
   }
   const absQ = sizeQ < 0n ? -sizeQ : sizeQ;
-  // USD notional x1e6 = absQ * markE6 / Q ; -> collateral atoms.
-  const notionalAtoms = (absQ * markPriceE6 * 10n ** BigInt(collateralDecimals)) / (Q * E6);
+  // Engine notional (percolator v16.rs trade_notional_floor): size_q * price_e6 / POS_SCALE, already
+  // in collateral atoms. No decimals factor (same as margin-health.ts / SDK trading.ts).
+  const notionalAtoms = (absQ * markPriceE6) / Q;
   const equityAtoms = capital + pnl;
   if (equityAtoms <= 0n) return { kind: "no-equity", equityAtoms };
   // 4dp fixed point in bigint, then to float (no Number overflow on big atoms).
