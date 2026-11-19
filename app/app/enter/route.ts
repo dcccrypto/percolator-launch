@@ -4,6 +4,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
+import { gateEnabled } from "@/lib/playground-access";
 import {
   SESSION_COOKIE,
   SESSION_COOKIE_OPTIONS,
@@ -30,10 +31,9 @@ function getRedis(): Redis | null {
 }
 
 /**
- * Cross-instance single use via Redis SET NX when configured; otherwise (or on
- * a Redis error) the per-instance memory guard. Falling back rather than
- * refusing is deliberate: replay is already bounded by the 90s token life, and
- * a Redis blip must not lock the cohort out.
+ * Redis SET NX provides global single-use for handoff tokens.
+ * Fail closed while the waitlist gate is enforced if Redis is unavailable.
+ * Preserve memory fallback when the gate is disabled.
  */
 const replayGuard: ReplayGuard = async (mac, ttl) => {
   const r = getRedis();
@@ -45,6 +45,8 @@ const replayGuard: ReplayGuard = async (mac, ttl) => {
       /* fall through */
     }
   }
+  // An enforced gate requires shared replay state.
+  if (gateEnabled()) return false;
   return memoryGuard(mac, ttl);
 };
 
