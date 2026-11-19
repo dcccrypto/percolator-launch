@@ -11,6 +11,7 @@ import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { sendUserBundle } from '@/lib/tx-v1/user-bundle';
 import { keepAppMessage, parseFailure, plainMessage } from '@/lib/limits/user-message';
+import { UserFacingError } from '@/lib/errorMessages';
 import { readEarnP3Context } from '@/lib/limits/earn-p3-read';
 import { deriveVaultAuthority, deriveInsuranceLpMint } from '@percolatorct/sdk';
 import { portfolioScanFilters } from '@/lib/v22/layout';
@@ -115,13 +116,15 @@ export async function buildHarvestIx(
   domain: number,
   lpPortfolio: PublicKey,
 ): Promise<TransactionInstruction | null> {
-  let tails: Awaited<ReturnType<typeof fetchMarketTailsV22>> | null = null;
+  // A failed read must not fall back to the plain harvest: a market with a vault-LP ext / bond tranche refuses it. Only an
+  // answered read with no tails builds the plain form. (readDestBalanceV22 and useJuniorTranche fail closed the same way.)
+  let tails: Awaited<ReturnType<typeof fetchMarketTailsV22>>;
   try {
     tails = await fetchMarketTailsV22(connection, programId, market);
   } catch {
-    tails = null;
+    throw new UserFacingError("We couldn't read this market just now. Nothing was sent. Please try again.");
   }
-  const v22 = tails && (tails.vaultLpExt || tails.bondTranche) ? { lpPortfolio, vaultLpExt: tails.vaultLpExt ?? undefined, bond: !!tails.bondTranche } : undefined;
+  const v22 = tails.vaultLpExt || tails.bondTranche ? { lpPortfolio, vaultLpExt: tails.vaultLpExt ?? undefined, bond: !!tails.bondTranche } : undefined;
   return buildLpCrankIx(programId, cranker, market, domain, true, v22);
 }
 
