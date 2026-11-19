@@ -8,11 +8,15 @@
  *   releasedPnlFace                 convert_released_pnl_to_capital_core_not_atomic  v16.rs:25246-25247
  *   realizableSupportForClaimNum    source_credit_state_realizable_support_for_claim_num v16.rs:4112-4124
  *   availableBackingNum             available_backing_num_for_source_credit_state   v16.rs:3430-3446
- *   accountSourceRealizableSupport  account_source_support_inner (via account_source_realizable_support :12977) v16.rs:12984-13094
+ *   accountSourceRealizableSupport  account_source_support_inner (via account_source_realizable_support :12977) v16.rs:12988-13105
  *   bound_num_from_amount           v16.rs:2904-2908
  *   convertGate / has*              v16.rs:12346-12384, 20244-20277, 25248-25262
  *   simulateConvertMath             handler_convert_released_pnl percolator-prog v16_program.rs:26490-26531
  * (the TS header cites older lines, e.g. v16.rs:11094-11215 / 19863 / wrapper :19949: all drifted.)
+ *
+ * Not modelled by TS or the port (market-state dependent): validate_source_domain_ledger_current (:13075),
+ * backing_bucket_for_domain errors, domain_asset_side range check (:20265), single-leg generator only.
+ * FOUND: the pre-gate lien release (v16.rs:25418-25429) — fixed in quoteConvertible, see convert-released-pnl.stale-lien.test.ts.
  *
  * Out of scope for the TS mirror (documented, asserted below): Rust returns Err(ArithmeticOverflow /
  * CounterUnderflow) when a u128 intermediate overflows; the TS uses unbounded bigint. All such inputs
@@ -155,7 +159,7 @@ function rsConvert(pf: Pf, cap: bigint, st: (d: number) => SourceDomainMarketSta
       if (liens || exposure) throw new RustErr("LockActive");
     }
     const converted = claims ? rsSupport(pf.sourceDomains, released, st) : 0n; // Live, no claims → 0
-    if (converted === 0n) throw new RustErr("LockActive"); // v16.rs:25268
+    if (converted === 0n) throw new RustErr("LockActive"); // v16.rs:25265-25267
     if (converted > cap) throw new RustErr("LockActive"); // v16_program.rs:26528
     return { ok: true, converted };
   } catch (e) {
@@ -420,7 +424,7 @@ describe("differential: convert-released-pnl vs Rust v16.rs port", () => {
     expect(mism).toBe(0);
   });
 
-  it("planWithdraw vs v16.rs:20435-20436 (amount > capital → LockActive): table + 12k seeded", () => {
+  it("planWithdraw vs v16.rs:25944 (amount > capital → LockActive): table + 12k seeded", () => {
     // Rust: withdraw ok iff amount <= capital. After convert the capital is capital+converted.
     const rust = (capital: bigint, convertible: bigint, amount: bigint) => {
       if (amount <= capital) return { needsConvert: false, fits: true };

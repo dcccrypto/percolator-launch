@@ -366,9 +366,13 @@ export async function quoteConvertible(p: QuoteParams, deps: QuoteDeps): Promise
   if (pf.legs.some((l) => l.active)) return { status: "none" }; // withdraw is flat-only (v16.rs:20416-20418)
   const gate = convertGate(pf);
   if (gate.kind === "nothing") return { status: "none" };
-  if (gate.kind !== "convertible") {
-    return { status: "settling", released: gate.released, code: WRAPPER_ERR.EngineLockActive, reason: gate.kind === "unbacked" ? "unbacked" : "locked" };
+  if (gate.kind === "unbacked") {
+    return { status: "settling", released: gate.released, code: WRAPPER_ERR.EngineLockActive, reason: "unbacked" };
   }
+  // "locked" on a FLAT account can only be liens (no active leg → no exposure). The engine releases
+  // an unneeded lien BEFORE its lien gate (v16.rs:25418-25429, #137), so the handler may still
+  // convert: let the simulation decide instead of refusing here.
+  const lockedByLien = gate.kind === "locked";
   const convert = buildConvertReleasedPnlIx({
     programId: p.programId,
     owner: p.owner,
@@ -393,14 +397,14 @@ export async function quoteConvertible(p: QuoteParams, deps: QuoteDeps): Promise
       const convertible = post.capital - pf.capital;
       if (post.capital > pf.capital) return { status: "ready", postCapital: post.capital, convertible, prefix };
       // The handler ran and moved nothing: the market has no backing for this profit.
-      return { status: "settling", released: gate.released, code: null, reason: "backing" };
+      return { status: "settling", released: gate.released, code: null, reason: lockedByLien ? "locked" : "backing" };
     }
     const c = parseCustomInstructionError(r.err);
     lastCode = c && prefix[c.index]?.programId.equals(p.programId) ? c.code : null;
     if (lastCode !== WRAPPER_ERR.EngineStale) break; // only a stale certificate is worth the crank
   }
   const reason: SettlingReason =
-    lastCode === WRAPPER_ERR.EngineStale || lastCode === WRAPPER_ERR.EngineProvenanceMismatch ? "stale" : lastCode === WRAPPER_ERR.EngineLockActive ? "backing" : "unknown";
+    lastCode === WRAPPER_ERR.EngineStale || lastCode === WRAPPER_ERR.EngineProvenanceMismatch ? "stale" : lastCode === WRAPPER_ERR.EngineLockActive ? (lockedByLien ? "locked" : "backing") : "unknown";
   return { status: "settling", released: gate.released, code: lastCode, reason };
 }
 
