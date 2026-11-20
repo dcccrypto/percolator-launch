@@ -157,13 +157,15 @@ describe("surface: chart data provider (history, trades, marks)", () => {
   const mk = (lotExp: number) => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (url.startsWith("/api/markets/")) return new Response(JSON.stringify({ market: { symbol: "TOK", mark_price: 0.06, ...(lotExp ? { lot_exp: lotExp } : {}) } }), { status: 200 });
-      return new Response(JSON.stringify({ s: "ok", t: [1000], o: [60], h: [66], l: [54], c: [63], v: [2] }), { status: 200 });
+      // /api/candles answers per-token prices on a lot market (lib/candle-lot-scale.ts); volume stays the raw lot sum.
+      const p = (x: number) => x / 10 ** lotExp;
+      return new Response(JSON.stringify({ s: "ok", t: [1000], o: [p(60)], h: [p(66)], l: [p(54)], c: [p(63)], v: ["2"] }), { status: 200 });
     });
     const trades = { subscribe: vi.fn() };
     const marks = { subscribe: vi.fn(), latest: vi.fn(() => 60) };
     return { provider: createCandlesApiProvider({ fetchImpl: fetchImpl as never, trades: trades as never, marks: marks as never }), trades, marks };
   };
-  it("lotExp 3: candles per token, volume in tokens, reference price from the API (already per token)", async () => {
+  it("lotExp 3: candles per token (as the API sends them, not divided again), volume in tokens, reference price from the API (already per token)", async () => {
     const { provider } = mk(3);
     const meta = await provider.resolveSymbol(SLAB);
     expect(meta.referencePrice).toBeCloseTo(0.06, 12);

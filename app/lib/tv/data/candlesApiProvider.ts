@@ -111,7 +111,8 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
   /**
    * v2.2 lot markets: the indexer stores per-LOT marks and trades in LOTS (wrapper doc v22-wave-a-wire.md:46: "candles in
    * per-token price" is the app's job), and the app's mark store is per lot too. The chart shows per TOKEN, so every
-   * price from those sources is divided by 10^lot_exp and every size multiplied by it (lib/v22/lot.ts). 0 = no lots.
+   * live price (trades, marks) is divided by 10^lot_exp and every size multiplied by it (lib/v22/lot.ts). History
+   * prices come per token from /api/candles already (only its volume is converted). 0 = no lots.
    */
   const lotBySlab = new Map<string, number>();
   const lotOf = (slab: string): number => lotBySlab.get(slab) ?? 0;
@@ -149,7 +150,9 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
     if (!r.ok) throw new Error(`candles HTTP ${r.status}`);
     const k = lotOf(slab);
     const bars = parseUdf(await r.json());
-    return k === 0 ? bars : bars.map((b) => ({ ...b, open: px(b.open, k), high: px(b.high, k), low: px(b.low, k), close: px(b.close, k), volume: qty(b.volume, k) }));
+    // /api/candles already answers PER-TOKEN prices on a lot market (lib/candle-lot-scale.ts), so only the
+    // volume (raw size sum, in lots) is converted here; dividing the prices again drew bars 10^k too low.
+    return k === 0 ? bars : bars.map((b) => ({ ...b, volume: qty(b.volume, k) }));
   }
 
   return {
