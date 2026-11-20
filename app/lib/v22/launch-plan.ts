@@ -12,7 +12,9 @@
  */
 import { decimalPriceToScaled, toInitialPriceE6 } from "../initial-price";
 import { lotMarketsEnabled } from "./lot";
+import type { InitMarketV17Args } from "@percolatorct/sdk";
 import {
+  checkBandSafetyLawV22,
   BAND_MIN_LEG_NOTIONAL_TOKENS_V22,
   LOT_EXP_MAX_V22,
   LOT_PRICE_FLOOR_E6_V22,
@@ -58,7 +60,8 @@ export type LaunchIssueCode =
   | "band-invalid"
   | "rent-invalid"
   | "bond-invalid"
-  | "bond-too-large";
+  | "bond-too-large"
+  | "protection-unsafe";
 
 export interface LaunchIssue {
   code: LaunchIssueCode;
@@ -89,6 +92,12 @@ export interface LaunchPlanInput {
   bond?: boolean;
   /** Override the bond dials (advanced; not shown in the UI). */
   bondDials?: InitBondTrancheArgs;
+  /**
+   * The InitMarket args this launch will send (margins, funding, price move). Given, the plan also runs the Band Safety
+   * Law pre-check ({@link bandSafetyLawIssue}) on its holding fee / price protection and refuses what InitMarket would.
+   * The plan's own per-lot price and `collateralDecimals` are what the check reads, not `initArgs.initialPrice`.
+   */
+  initArgs?: InitMarketV17Args;
 }
 
 export interface LaunchPlanV22 {
@@ -205,6 +214,12 @@ export function planLaunchV22(i: LaunchPlanInput): LaunchPlanV22 {
     }
   }
 
+  // ── Band Safety Law (R6): what InitMarket would refuse (105 / 106) for these margins ──
+  if (i.initArgs && (out.rent || out.band) && !issues.some((x) => x.code === "rent-invalid" || x.code === "band-invalid" || x.code === "band-price-floor")) {
+    const bsl = bandSafetyLawIssue({ ...i.initArgs, initialPrice: perLot }, { lotExp: k, ...(out.rent ? { rent: out.rent } : {}), ...(out.band ? { band: out.band } : {}) }, i.collateralDecimals);
+    if (bsl) issues.push(bsl);
+  }
+
   // ── Bond tranche ───────────────────────────────────────────────────────
   if (bond) {
     const a = i.bondDials ?? { ...DEFAULT_BOND };
@@ -216,6 +231,37 @@ export function planLaunchV22(i: LaunchPlanInput): LaunchPlanV22 {
     }
   }
   return out;
+}
+
+/**
+ * The Band Safety Law pre-check for a launch (R6, 2 Nov): the vendored SDK `checkBandSafetyLawV22` (parity-tested against
+ * the program) on the exact InitMarket args and the v2.2 rent / band blocks. Null when the program would accept them (or
+ * nothing v2.2 rides the launch). It does not cover the growth block (94) or the lot floor (119): those have their own
+ * checks in the plan.
+ *
+ * @param args                The InitMarket args the launch sends (including `initialPrice` and `maintenanceFeePerSlot`).
+ * @param v22                 The v2.2 launch params (rent / band); undefined = nothing to check.
+ * @param collateralDecimals  The collateral mint's decimals; undefined leaves the minimum leg floor unchecked here.
+ * @returns A calm "protection-unsafe" issue, or null.
+ */
+export function bandSafetyLawIssue(args: InitMarketV17Args, v22: V22LaunchParams | undefined, collateralDecimals?: number): LaunchIssue | null {
+  if (!v22?.rent) return null;
+  const r = checkBandSafetyLawV22({
+    maxPortfolioAssets: args.maxPortfolioAssets,
+    maintenanceMarginBps: BigInt(args.maintenanceMarginBps), initialMarginBps: BigInt(args.initialMarginBps),
+    liquidationFeeBps: BigInt(args.liquidationFeeBps), liquidationFeeCap: BigInt(args.liquidationFeeCap),
+    minLiquidationAbs: BigInt(args.minLiquidationAbs), minNonzeroMmReq: BigInt(args.minNonzeroMmReq),
+    minNonzeroImReq: BigInt(args.minNonzeroImReq), maxPriceMoveBpsPerSlot: BigInt(args.maxPriceMoveBpsPerSlot),
+    maxAccrualDtSlots: BigInt(args.maxAccrualDtSlots), maxAbsFundingE9PerSlot: BigInt(args.maxAbsFundingE9PerSlot),
+    minFundingLifetimeSlots: BigInt(args.minFundingLifetimeSlots),
+    maintenanceFeePerSlot: BigInt(args.maintenanceFeePerSlot),
+    initialPriceE6: BigInt(args.initialPrice),
+    collateralDecimals: collateralDecimals ?? null,
+    rent: v22.rent,
+    ...(v22.band ? { band: v22.band } : {}),
+  });
+  if (r.ok) return null;
+  return { code: "protection-unsafe", message: r.rule === "band-shape-or-law" || r.rule === "rent-envelope" ? V22_COPY.wizard.protectionUnsafe : "The price protection setting isn't valid." };
 }
 
 const sameE6 = (price: string, e6: bigint): boolean => {
