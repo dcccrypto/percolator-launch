@@ -173,12 +173,12 @@ describe("surface: chart data provider (history, trades, marks)", () => {
     expect(page.bars[0].close).toBeCloseTo(0.063, 12);
     expect(page.bars[0].volume).toBe(2000);
   });
-  it("lotExp 3: live trades and marks are converted too", async () => {
+  it("lotExp 3: live trades are already per-token (only size is converted); marks from the price store stay per-lot", async () => {
     const { provider, trades, marks } = mk(3);
     await provider.resolveSymbol(SLAB);
     const bars: Array<{ close: number; volume: number }> = [];
     provider.subscribeBars(SLAB, "1", { onBar: (b: { close: number; volume: number }) => bars.push(b), onReset: () => {} } as never, null, "percolator");
-    trades.subscribe.mock.calls[0][1]({ price: 63, size: 2, tsSec: 2000 });
+    trades.subscribe.mock.calls[0][1]({ price: 0.063, size: 2, tsSec: 2000 });
     expect(bars[0].close).toBeCloseTo(0.063, 12);
     expect(bars[0].volume).toBe(2000);
     provider.subscribeBars(SLAB, "1", { onBar: (b: { close: number }) => bars.push(b as never), onReset: () => {} } as never, null, "oracle");

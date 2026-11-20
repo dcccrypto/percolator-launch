@@ -109,10 +109,11 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
   /** Set on a definitive 404: this deployment has no indexer — skip the call for the session. */
   let candlesUnavailable = v22HasNoIndexer(); // v2.2 preview: no indexer (lib/v22/indexer.ts)
   /**
-   * v2.2 lot markets: the indexer stores per-LOT marks and trades in LOTS (wrapper doc v22-wave-a-wire.md:46: "candles in
-   * per-token price" is the app's job), and the app's mark store is per lot too. The chart shows per TOKEN, so every
-   * live price (trades, marks) is divided by 10^lot_exp and every size multiplied by it (lib/v22/lot.ts). History
-   * prices come per token from /api/candles already (only its volume is converted). 0 = no lots.
+   * v2.2 lot markets: the chart shows per TOKEN. History prices from /api/candles are already per token
+   * (lib/candle-lot-scale.ts); only volume (raw engine size, lots) is multiplied by 10^lot_exp. Live trades on the
+   * price-WS `trades:<slab>` channel are the same units as /api/candles (raw trades.price; newer rows are per token),
+   * so only their size is converted. Mark ticks come from the price store, which keeps per-LOT prices, and are divided
+   * by 10^lot_exp (lib/v22/lot.ts). 0 = no lots.
    */
   const lotBySlab = new Map<string, number>();
   const lotOf = (slab: string): number => lotBySlab.get(slab) ?? 0;
@@ -235,7 +236,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
           return;
         }
         const k = lotOf(slab);
-        const bar = applyTrade(last, k === 0 ? t : { ...t, price: px(t.price, k), size: qty(t.size, k) }, resolution);
+        const bar = applyTrade(last, k === 0 ? t : { ...t, size: qty(t.size, k) }, resolution);
         if (bar) {
           last = bar;
           handlers.onBar(bar);
