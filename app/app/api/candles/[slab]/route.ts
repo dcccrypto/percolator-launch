@@ -10,6 +10,7 @@ import {
   emptyUdf,
   RES_TO_SECONDS,
 } from "@/lib/indexer-db";
+import { readCandleLotScale } from "@/lib/candle-lot-scale";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,8 @@ const CLOSED_MARGIN_SEC = 120;
 /**
  * GET /api/candles/[slab]?resolution=1|5|15|60|240|1D&from=<sec>&to=<sec>
  *
- * TradingView UDF response: { s, t, o, h, l, c, v }.
+ * TradingView UDF response: { s, t, o, h, l, c, v }. `v` is exact decimal text (raw engine size units).
+ * On a lot market, rows stored per LOT are put on the per-token scale (lib/candle-lot-scale.ts).
  *
  * Aggregates the indexer's trades into OHLCV IN POSTGRES (INDEXER_DATABASE_URL), so only bars
  * cross the wire (review E3: it used to pull up to 50,000 raw trades per call). `from`/`to` are
@@ -81,13 +83,14 @@ export async function GET(
   try {
     const nowSec = Math.floor(Date.now() / 1000);
     const win = candleWindow(fromSec, toSec, bucketSeconds);
-    const agg = await queryCandlesAggregated(validSlab, bucketSeconds, win.firstBucket, win.endExclusive);
+    const lot = await readCandleLotScale(validSlab);
+    const agg = await queryCandlesAggregated(validSlab, bucketSeconds, win.firstBucket, win.endExclusive, { lot });
     let udf = agg.udf;
     if (q.get("fill") === "1") {
       // A result at the bar ceiling has lost its OLDEST buckets: seeding from before `from` would draw
       // the old price flat across that lost stretch, a level that was not in force. Start at the first
       // bar we do hold instead. (Same rule as the old raw-row ceiling.)
-      const seedClose = agg.truncated ? null : await queryLastTradePriceBefore(validSlab, win.firstBucket);
+      const seedClose = agg.truncated ? null : await queryLastTradePriceBefore(validSlab, win.firstBucket, lot);
       udf = fillCandleGaps(udf, bucketSeconds, {
         fromSec: win.firstBucket,
         toSec: Math.min(toSec, nowSec),

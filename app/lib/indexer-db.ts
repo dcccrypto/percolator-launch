@@ -177,6 +177,24 @@ export async function queryTradesForCandles(
 // (one row per traded bucket). bucketCandles() stays as the reference implementation: the
 // aggregation is tested against it on the same rows (__tests__/lib/candles-sql-aggregate.test.ts).
 
+/**
+ * Per-row price on ONE scale (per token) for a lot market whose rows mix per-lot and per-token
+ * prices. `kParam` / `anchorParam` are SQL placeholders for lot_exp and the per-token anchor.
+ */
+const LOT_NORMALIZED_PRICE_SQL = (kParam: string, anchorParam: string) =>
+  `CASE WHEN ${kParam}::int > 0 AND ${anchorParam}::numeric > 0
+              AND price > ${anchorParam}::numeric * power(10::numeric, ${kParam}::int / 2.0)
+            THEN price / power(10::numeric, ${kParam}::int)
+            ELSE price END`;
+
+/** Lot scale of a market for the candle queries: lot_exp and a per-token anchor price (null = unknown). */
+export interface CandleLotScale { lotExp: number; anchor: number | null }
+const lotParams = (s?: CandleLotScale): [number, string | null] => {
+  const k = s && Number.isInteger(s.lotExp) && s.lotExp > 0 && s.lotExp <= 15 ? s.lotExp : 0;
+  const a = s?.anchor != null && Number.isFinite(s.anchor) && s.anchor > 0 ? String(s.anchor) : null;
+  return [k, a];
+};
+
 /** Most bars one aggregated query returns; the NEWEST are kept (like the old row ceiling). */
 export const CANDLE_MAX_BARS = 10_000;
 
@@ -193,28 +211,45 @@ export function candleWindow(fromSec: number, toSec: number, bucketSeconds: numb
 
 /**
  * Params: $1 slab, $2 network, $3 bucket seconds, $4 first bucket (unix s, inclusive),
- * $5 window end (unix s, exclusive), $6 max bars.
+ * $5 window end (unix s, exclusive), $6 max bars, $7 lot_exp (0 = no lots), $8 per-token anchor
+ * price (NULL = unknown).
  *
- * Mirrors bucketCandles exactly: a row counts only with a positive, finite price and a finite (or
- * NULL) size; bucket = floor(epoch seconds) floored to the bucket; open/close = first/last price by
- * (created_at, id); v = sum(|size|). Prices and volume go out as numeric text so the JS side parses
- * them with the same Number() the raw path used.
+ * Mirrors bucketCandles: a row counts only with a positive, finite price and a finite (or NULL)
+ * size; bucket = floor(epoch seconds) floored to the bucket; v = sum(|size|). A price-0 row still
+ * counts for nothing, volume included (unchanged policy).
+ *
+ * Open/close follow chain order as far as `trades` records it: (created_at, leg_index, id). One
+ * webhook INSERT stamps every fill with the same created_at, so without leg_index the legs of one
+ * tx were ordered by a random uuid (J-20261120 candles-vs-trades, cause 2). Trades has no slot or
+ * tx-index column yet; when it gets one it belongs between created_at and leg_index.
+ *
+ * Unit scale (cause 4): on a lot market (lot_exp k > 0) rows written before the indexer knew k hold
+ * the per-LOT price (10^k x the per-token price), newer rows the per-token price. A row priced above
+ * the anchor x 10^(k/2) (the geometric midpoint between the two scales) is per lot and is divided by
+ * 10^k, so every bar is per token. k = 0 or no anchor: prices are untouched. Sizes are engine Q for
+ * every row (no mixing), so volume is the same raw sum.
+ *
+ * Prices and volume go out as numeric text: prices are parsed with Number(), volume stays exact text.
  */
 export const CANDLE_AGG_SQL = `
 SELECT t, o, h, l, c, v FROM (
   SELECT (floor(extract(epoch FROM created_at))::bigint / $3::bigint) * $3::bigint AS t,
-         ((array_agg(price ORDER BY created_at, id))[1])::text AS o,
-         max(price)::text AS h,
-         min(price)::text AS l,
-         ((array_agg(price ORDER BY created_at DESC, id DESC))[1])::text AS c,
+         ((array_agg(p ORDER BY created_at, leg_index, id))[1])::text AS o,
+         max(p)::text AS h,
+         min(p)::text AS l,
+         ((array_agg(p ORDER BY created_at DESC, leg_index DESC, id DESC))[1])::text AS c,
          coalesce(sum(abs(size)), 0)::text AS v
-    FROM trades
-   WHERE slab_address = $1
-     AND network = $2
-     AND created_at >= to_timestamp($4::bigint)
-     AND created_at <  to_timestamp($5::bigint)
-     AND price IS NOT NULL AND price > 0 AND price < 'Infinity'::numeric
-     AND (size IS NULL OR abs(size) < 'Infinity'::numeric)
+    FROM (
+      SELECT created_at, leg_index, id, size,
+             ${LOT_NORMALIZED_PRICE_SQL("$7", "$8")} AS p
+        FROM trades
+       WHERE slab_address = $1
+         AND network = $2
+         AND created_at >= to_timestamp($4::bigint)
+         AND created_at <  to_timestamp($5::bigint)
+         AND price IS NOT NULL AND price > 0 AND price < 'Infinity'::numeric
+         AND (size IS NULL OR abs(size) < 'Infinity'::numeric)
+    ) r
    GROUP BY 1
    ORDER BY 1 DESC
    LIMIT $6
@@ -222,7 +257,7 @@ SELECT t, o, h, l, c, v FROM (
 
 interface AggCandleRow { t: string | number; o: string; h: string; l: string; c: string; v: string }
 
-/** Aggregated rows -> UDF. Pure (exported for the equivalence test). */
+/** Aggregated rows -> UDF. Pure (exported for the equivalence test). Volume stays exact numeric text. */
 export function aggRowsToUdf(rows: readonly AggCandleRow[]): UdfResponse {
   if (rows.length === 0) return emptyUdf("no_data");
   const out: UdfResponse = { s: "ok", t: [], o: [], h: [], l: [], c: [], v: [] };
@@ -232,7 +267,8 @@ export function aggRowsToUdf(rows: readonly AggCandleRow[]): UdfResponse {
     out.h.push(Number(r.h));
     out.l.push(Number(r.l));
     out.c.push(Number(r.c));
-    out.v.push(Number(r.v));
+    // Not Number(): v is a sum of i128 engine sizes and can pass 2^53 (cause 5).
+    out.v.push(String(r.v));
   }
   return out;
 }
@@ -251,7 +287,7 @@ export async function queryCandlesAggregated(
   bucketSeconds: number,
   firstBucket: number,
   endExclusive: number,
-  opts: { maxBars?: number; sql?: CandleSql; network?: string } = {},
+  opts: { maxBars?: number; sql?: CandleSql; network?: string; lot?: CandleLotScale } = {},
 ): Promise<{ udf: UdfResponse; truncated: boolean }> {
   const sql: CandleSql = opts.sql ?? (getSql() as unknown as CandleSql);
   const maxBars = opts.maxBars ?? CANDLE_MAX_BARS;
@@ -263,6 +299,7 @@ export async function queryCandlesAggregated(
       firstBucket,
       endExclusive,
       maxBars,
+      ...lotParams(opts.lot),
     ])) as ArrayLike<AggCandleRow>,
   );
   return { udf: aggRowsToUdf(rows), truncated: rows.length >= maxBars };
@@ -272,19 +309,25 @@ export async function queryCandlesAggregated(
  * The price of the last trade strictly before `beforeSec`, or null when there is none. Seeds
  * `fillCandleGaps` so a history page that starts between trades opens on the price that was in
  * force, not on a gap. Uses the same (slab_address, network, created_at DESC) index as above.
+ * Same tie order (leg_index) and the same lot normalisation as CANDLE_AGG_SQL, so the seed is on the
+ * scale of the bars it continues.
  */
-export async function queryLastTradePriceBefore(slabAddress: string, beforeSec: number): Promise<number | null> {
+export async function queryLastTradePriceBefore(slabAddress: string, beforeSec: number, lot?: CandleLotScale): Promise<number | null> {
   const sql = getSql();
   const beforeIso = new Date(beforeSec * 1000).toISOString();
+  const [k, anchor] = lotParams(lot);
   const rows = await sql<{ price: string | null }[]>`
-    SELECT price::text AS price
+    SELECT (CASE WHEN ${k}::int > 0 AND ${anchor}::numeric > 0
+                  AND price > ${anchor}::numeric * power(10::numeric, ${k}::int / 2.0)
+                 THEN price / power(10::numeric, ${k}::int)
+                 ELSE price END)::text AS price
     FROM trades
     WHERE slab_address = ${slabAddress}
       AND network = ${getServerNetwork()}
       AND created_at < ${beforeIso}::timestamptz
       AND price IS NOT NULL
       AND price > 0
-    ORDER BY created_at DESC
+    ORDER BY created_at DESC, leg_index DESC
     LIMIT 1
   `;
   const p = Number(rows[0]?.price);
@@ -300,7 +343,8 @@ export interface UdfResponse {
   h: number[];
   l: number[];
   c: number[];
-  v: number[];
+  /** Volume as exact decimal text (a sum of i128 engine sizes can pass 2^53; Number() would round it). */
+  v: string[];
   errmsg?: string;
 }
 
@@ -357,7 +401,7 @@ export function bucketCandles(
     out.h.push(b.h);
     out.l.push(b.l);
     out.c.push(b.c);
-    out.v.push(b.v);
+    out.v.push(String(b.v));
   }
   return out;
 }
@@ -407,7 +451,7 @@ export function fillCandleGaps(
       out.t.push(t); out.o.push(udf.o[i]); out.h.push(udf.h[i]); out.l.push(udf.l[i]); out.c.push(udf.c[i]); out.v.push(udf.v[i]);
       prev = udf.c[i];
     } else if (prev !== null) {
-      out.t.push(t); out.o.push(prev); out.h.push(prev); out.l.push(prev); out.c.push(prev); out.v.push(0);
+      out.t.push(t); out.o.push(prev); out.h.push(prev); out.l.push(prev); out.c.push(prev); out.v.push("0");
     }
   }
   return out.t.length > 0 ? out : udf;

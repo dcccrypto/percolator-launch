@@ -169,7 +169,7 @@ export function usePercolatorCandles(
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.json() as {
         s: "ok" | "no_data" | "error";
-        t?: number[]; o?: number[]; h?: number[]; l?: number[]; c?: number[]; v?: number[];
+        t?: number[]; o?: number[]; h?: number[]; l?: number[]; c?: number[]; v?: Array<number | string>;
         errmsg?: string;
       };
       if (fetchKeyRef.current !== key) return; // stale guard
@@ -187,7 +187,7 @@ export function usePercolatorCandles(
         high: body.h![i],
         low: body.l![i],
         close: body.c![i],
-        volume: body.v![i],
+        volume: Number(body.v![i]), // exact decimal text on the wire
       }));
       if (bars.length > 0) {
         setCandles(bars);

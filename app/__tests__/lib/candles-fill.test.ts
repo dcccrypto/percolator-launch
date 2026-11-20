@@ -13,7 +13,7 @@ const M = 60;
 const udf = (bars: Array<[t: number, o: number, h: number, l: number, c: number, v: number]>): UdfResponse => ({
   s: "ok",
   t: bars.map((b) => b[0]), o: bars.map((b) => b[1]), h: bars.map((b) => b[2]),
-  l: bars.map((b) => b[3]), c: bars.map((b) => b[4]), v: bars.map((b) => b[5]),
+  l: bars.map((b) => b[3]), c: bars.map((b) => b[4]), v: bars.map((b) => String(b[5])),
 });
 
 describe("fillCandleGaps", () => {
@@ -23,7 +23,7 @@ describe("fillCandleGaps", () => {
     expect(out.c).toEqual([10.5, 10.5, 10.5, 12]);
     expect(out.o.slice(1, 3)).toEqual([10.5, 10.5]);
     expect(out.h.slice(1, 3)).toEqual([10.5, 10.5]);
-    expect(out.v).toEqual([2, 0, 0, 1]);
+    expect(out.v).toEqual(["2", "0", "0", "1"]);
     expect([out.o[0], out.h[0], out.l[0]]).toEqual([10, 11, 9]); // the real bar untouched
   });
 
@@ -55,7 +55,7 @@ describe("fillCandleGaps", () => {
     const flat = fillCandleGaps(emptyUdf("no_data"), M, { fromSec: 0, toSec: 2 * M, seedClose: 4 });
     expect(flat.s).toBe("ok");
     expect(flat.c).toEqual([4, 4, 4]);
-    expect(flat.v).toEqual([0, 0, 0]);
+    expect(flat.v).toEqual(["0", "0", "0"]);
   });
 
   it("ignores an unusable seed", () => {
@@ -84,7 +84,7 @@ describe("wiring", () => {
   it("/api/candles fills only when asked (fill=1), seeded and capped at now", () => {
     const route = read("../../app/api/candles/[slab]/route.ts");
     // Seeded at the bucket-aligned window start (review E3 rounds from/to to the bucket).
-    expect(route).toMatch(/if \(q\.get\("fill"\) === "1"\) \{[\s\S]*?queryLastTradePriceBefore\(validSlab, win\.firstBucket\)[\s\S]*?fillCandleGaps\(/);
+    expect(route).toMatch(/if \(q\.get\("fill"\) === "1"\) \{[\s\S]*?queryLastTradePriceBefore\(validSlab, win\.firstBucket, lot\)[\s\S]*?fillCandleGaps\(/);
     expect(route).toMatch(/const nowSec = Math\.floor\(Date\.now\(\) \/ 1000\);/);
     expect(route).toMatch(/toSec: Math\.min\(toSec, nowSec\)/);
   });

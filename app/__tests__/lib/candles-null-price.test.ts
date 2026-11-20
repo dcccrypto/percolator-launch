@@ -81,7 +81,7 @@ describe("bucketCandles rejects rows without a price", () => {
     expect(out.h[0]).toBe(120);
     expect(out.l[0]).toBe(90);
     expect(out.c[0]).toBe(90);
-    expect(out.v[0]).toBe(6);
+    expect(out.v[0]).toBe("6");
     // second bucket
     expect(out.c[1]).toBe(110);
   });
