@@ -4,7 +4,7 @@ import * as Sentry from "@sentry/nextjs";
 import {
   hasIndexerDb,
   queryCandlesAggregated,
-  queryLastTradePriceBefore,
+  queryLastTradeSeed,
   candleWindow,
   fillCandleGaps,
   emptyUdf,
@@ -86,20 +86,24 @@ export async function GET(
     const lot = await readCandleLotScale(validSlab);
     const agg = await queryCandlesAggregated(validSlab, bucketSeconds, win.firstBucket, win.endExclusive, { lot });
     let udf = agg.udf;
+    let anchorDependent = agg.anchorDependent;
     if (q.get("fill") === "1") {
       // A result at the bar ceiling has lost its OLDEST buckets: seeding from before `from` would draw
       // the old price flat across that lost stretch, a level that was not in force. Start at the first
       // bar we do hold instead. (Same rule as the old raw-row ceiling.)
-      const seedClose = agg.truncated ? null : await queryLastTradePriceBefore(validSlab, win.firstBucket, lot);
+      const seed = agg.truncated ? null : await queryLastTradeSeed(validSlab, win.firstBucket, lot);
+      if (seed?.anchorDependent) anchorDependent = true;
       udf = fillCandleGaps(udf, bucketSeconds, {
         fromSec: win.firstBucket,
         toSec: Math.min(toSec, nowSec),
-        seedClose,
+        seedClose: seed?.price ?? null,
       });
     }
     if (udf.s === "error") return NextResponse.json(udf, { headers: NO_STORE });
-    // An unread lot scale (RPC blip) must not be cached as history: the next request normalises.
-    const closed = win.endExclusive + CLOSED_MARGIN_SEC <= nowSec && !lot.unknown;
+    // Cached as history only when the bars cannot change: not when the lot scale was unread (RPC blip: the next
+    // request normalises), and not when a legacy row's scale (no trades.price_lot_exp) was decided against today's
+    // mark, which moves (a later request could classify it differently).
+    const closed = win.endExclusive + CLOSED_MARGIN_SEC <= nowSec && !lot.unknown && !anchorDependent;
     return NextResponse.json(udf, { headers: closed ? HISTORICAL_CACHE : LIVE_CACHE });
   } catch (err) {
     console.error("[candles] indexer DB query failed:", err);

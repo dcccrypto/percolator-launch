@@ -84,7 +84,7 @@ describe("wiring", () => {
   it("/api/candles fills only when asked (fill=1), seeded and capped at now", () => {
     const route = read("../../app/api/candles/[slab]/route.ts");
     // Seeded at the bucket-aligned window start (review E3 rounds from/to to the bucket).
-    expect(route).toMatch(/if \(q\.get\("fill"\) === "1"\) \{[\s\S]*?queryLastTradePriceBefore\(validSlab, win\.firstBucket, lot\)[\s\S]*?fillCandleGaps\(/);
+    expect(route).toMatch(/if \(q\.get\("fill"\) === "1"\) \{[\s\S]*?queryLastTradeSeed\(validSlab, win\.firstBucket, lot\)[\s\S]*?fillCandleGaps\(/);
     expect(route).toMatch(/const nowSec = Math\.floor\(Date\.now\(\) \/ 1000\);/);
     expect(route).toMatch(/toSec: Math\.min\(toSec, nowSec\)/);
   });
@@ -101,6 +101,6 @@ describe("wiring", () => {
 
   it("does not seed the fill when the aggregate hit its bar ceiling (oldest buckets were dropped)", () => {
     const route = fs.readFileSync(path.resolve(__dirname, "../../app/api/candles/[slab]/route.ts"), "utf8");
-    expect(route).toMatch(/agg\.truncated \? null : await queryLastTradePriceBefore/);
+    expect(route).toMatch(/agg\.truncated \? null : await queryLastTradeSeed/);
   });
 });

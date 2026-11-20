@@ -58,7 +58,8 @@ CREATE TABLE trades (
   leg_index      SMALLINT    NOT NULL DEFAULT 0,
   is_liquidation BOOLEAN     NOT NULL DEFAULT false,
   network        TEXT        NOT NULL DEFAULT 'devnet',
-  created_at     TIMESTAMPTZ DEFAULT NOW()
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  price_lot_exp  SMALLINT    -- indexer migration 20261120210000: price is per 10^price_lot_exp tokens; NULL = unknown
 );
 CREATE UNIQUE INDEX uq_trades_sig_asset_leg ON trades(tx_signature, asset_index, leg_index) WHERE tx_signature IS NOT NULL;
 CREATE INDEX idx_trades_slab           ON trades(slab_address, created_at DESC);

@@ -33,6 +33,8 @@ export interface TradeRow {
   created_at: Date | string;
   /** created_at as integer microseconds since the epoch (decimal string). Derived from created_at when absent. */
   cursor_us?: string | null;
+  /** trades.price_lot_exp: `price` is per 10^price_lot_exp tokens (0 = per token); NULL = unknown (legacy row). Absent = not selected. */
+  price_lot_exp?: number | string | null;
 }
 
 export interface TradeMessage {
@@ -44,6 +46,11 @@ export interface TradeMessage {
   side: "long" | "short" | null;
   /** Trade time, ms. */
   ts: number;
+  /**
+   * The unit of `price`: 0 = per token (the row recorded its unit and the price was put on tokens), null = unknown
+   * (a legacy row with no trades.price_lot_exp; on a lot market it may be per LOT). Absent when the column was not read.
+   */
+  priceLotExp?: 0 | null;
 }
 
 export const LOOKBACK_MS = 15_000;
@@ -69,12 +76,12 @@ export type TradeQuery = (cursors: TradeCursor[], perSlabLimit: number) => Promi
  * `timestamptz 'epoch' + µs * interval '1 microsecond'` is exact integer arithmetic
  * (to_timestamp() goes through a double and can round the last microsecond).
  */
-export const TRADE_FEED_SQL = `
+export const tradeFeedSql = (withColumn = true) => `
 SELECT t.id::text AS id, t.slab_address, t.price::text AS price, t.size::text AS size, t.side, t.created_at,
-       (extract(epoch FROM t.created_at) * 1000000)::bigint::text AS cursor_us
+       (extract(epoch FROM t.created_at) * 1000000)::bigint::text AS cursor_us${withColumn ? ", t.price_lot_exp" : ""}
   FROM unnest($1::text[], $2::bigint[], $3::uuid[]) AS c(slab, after_us, after_id)
   CROSS JOIN LATERAL (
-    SELECT id, slab_address, price, size, side, created_at
+    SELECT id, slab_address, price, size, side, created_at${withColumn ? ", price_lot_exp" : ""}
       FROM trades
      WHERE network = $4
        AND slab_address = c.slab
@@ -83,6 +90,8 @@ SELECT t.id::text AS id, t.slab_address, t.price::text AS price, t.size::text AS
      ORDER BY created_at DESC, id DESC
      LIMIT $5
   ) t`;
+/** The feed query on a database with trades.price_lot_exp (indexer migration 20261120210000). */
+export const TRADE_FEED_SQL = tradeFeedSql(true);
 
 /** Minimal postgres client surface the feed query needs. */
 export interface UnsafeSql {
@@ -91,17 +100,30 @@ export interface UnsafeSql {
 
 /** The production TradeQuery over a postgres client. */
 export function pgTradeQuery(sql: UnsafeSql, network: string): TradeQuery {
+  // A database without trades.price_lot_exp (42703) is read without it; re-probed every 5 min.
+  let missingAt: number | null = null;
   return async (cursors, perSlabLimit) => {
     if (cursors.length === 0) return [];
-    const rows = await sql.unsafe(TRADE_FEED_SQL, [
-      cursors.map((c) => c.slab),
-      cursors.map((c) => c.afterUs),
-      cursors.map((c) => c.afterId),
-      network,
-      perSlabLimit,
-    ]);
-    return [...rows] as unknown as TradeRow[];
+    const params = [cursors.map((c) => c.slab), cursors.map((c) => c.afterUs), cursors.map((c) => c.afterId), network, perSlabLimit];
+    const withColumn = missingAt === null || Date.now() - missingAt >= 5 * 60_000;
+    try {
+      return [...(await sql.unsafe(tradeFeedSql(withColumn), params))] as unknown as TradeRow[];
+    } catch (err) {
+      const e = err as { code?: string; message?: string } | null;
+      if (!withColumn || e?.code !== "42703" || !/price_lot_exp/.test(e.message ?? "")) throw err;
+      missingAt = Date.now();
+      return [...(await sql.unsafe(tradeFeedSql(false), params))] as unknown as TradeRow[];
+    }
   };
+}
+
+/** A row's price on the per-token scale when its unit is recorded; the raw price (unit unknown) otherwise. */
+function feedPrice(r: TradeRow): { price: number; priceLotExp?: 0 | null } {
+  const raw = r.price === null ? NaN : Number(r.price);
+  if (r.price_lot_exp === undefined) return { price: raw };
+  const k = r.price_lot_exp === null ? null : Number(r.price_lot_exp);
+  if (k === null || !Number.isInteger(k) || k < 0 || k > 15) return { price: raw, priceLotExp: null };
+  return { price: k === 0 ? raw : raw / 10 ** k, priceLotExp: 0 };
 }
 
 function rowUs(r: TradeRow): bigint | null {
@@ -174,11 +196,11 @@ export function createTradeFeed(opts: {
         if (!isAfter(us, r.id, cur)) continue; // already emitted (or older than the cursor)
         cursor.set(slab, { us, id: r.id });
         // A missing price is a liquidation marker, not a trade (see indexer-db bucketCandles).
-        const price = r.price === null ? NaN : Number(r.price);
+        const { price, priceLotExp } = feedPrice(r);
         const size = Math.abs(Number(r.size));
         if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(size)) continue;
         const side = r.side === "long" || r.side === "short" ? r.side : r.side === "buy" ? "long" : r.side === "sell" ? "short" : null;
-        opts.emit({ type: "trade", slab, id: r.id, price, size, side, ts: new Date(r.created_at).getTime() });
+        opts.emit({ type: "trade", slab, id: r.id, price, size, side, ts: new Date(r.created_at).getTime(), ...(priceLotExp !== undefined ? { priceLotExp } : {}) });
         emitted++;
       }
       return emitted;

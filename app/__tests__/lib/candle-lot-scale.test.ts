@@ -1,8 +1,6 @@
 // @vitest-environment node
 /** lib/candle-lot-scale: lot_exp + per-token anchor for /api/candles; every failure means "no lots" (candles unchanged). */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import fs from "fs";
-import path from "path";
 
 const read = vi.fn();
 const lotExp = vi.fn();
@@ -60,10 +58,7 @@ describe("candle lot scale", () => {
     expect(await readCandleLotScale(SLAB, 1)).toEqual({ lotExp: 0, anchor: null });
     expect(read).not.toHaveBeenCalled();
   });
-  it("the route does not edge-cache a window as history when the lot scale is unknown", () => {
-    const route = fs.readFileSync(path.resolve(__dirname, "../../app/api/candles/[slab]/route.ts"), "utf8");
-    expect(route).toMatch(/const closed = win\.endExclusive \+ CLOSED_MARGIN_SEC <= nowSec && !lot\.unknown;/);
-  });
+  // The route's Cache-Control for an unknown lot scale is checked on the real handler: __tests__/api/candles-route-cache.test.ts.
   it("cached for a minute per slab", async () => {
     await readCandleLotScale(SLAB, 1_000);
     await readCandleLotScale(SLAB, 60_999);

@@ -91,6 +91,29 @@ describe("candlesApiProvider subscribeBars on a lot market (live trades already 
     expect(bars[0].volume).toBe(2);
   });
 
+  it("lot_exp 1, a 5x move: a trade whose unit is recorded (priceLotExp 0) is exact, not taken for per-lot", async () => {
+    const trades = { subscribe: vi.fn() };
+    const { provider } = mk(1, { trades });
+    await provider.resolveSymbol(SLAB);
+    const bars: Array<{ close: number }> = [];
+    const last = { timeSec: 1980, open: 0.06, high: 0.06, low: 0.06, close: 0.06, volume: 0 };
+    provider.subscribeBars(SLAB, "1", { onBar: (b: { close: number }) => bars.push(b), onReset: () => {} } as never, last, "percolator");
+    trades.subscribe.mock.calls[0][1]({ price: 0.3, size: 1, tsSec: 2000, priceLotExp: 0 });
+    expect(bars[0].close).toBeCloseTo(0.3, 12);
+  });
+
+  it("lot_exp 1: a trade of unknown unit (legacy row) priced per lot (> forming close x 10^(1/2)) is put on tokens", async () => {
+    const trades = { subscribe: vi.fn() };
+    const { provider } = mk(1, { trades });
+    await provider.resolveSymbol(SLAB);
+    const bars: Array<{ close: number }> = [];
+    const last = { timeSec: 1980, open: 0.06, high: 0.06, low: 0.06, close: 0.06, volume: 0 };
+    provider.subscribeBars(SLAB, "1", { onBar: (b: { close: number }) => bars.push(b), onReset: () => {} } as never, last, "percolator");
+    trades.subscribe.mock.calls[0][1]({ price: 0.61, size: 1, tsSec: 2000 }); // per LOT of 10 tokens
+    trades.subscribe.mock.calls[0][1]({ price: 0.062, size: 1, tsSec: 2001 }); // per token
+    expect(bars.map((b) => b.close)).toEqual([expect.closeTo(0.061, 12), expect.closeTo(0.062, 12)]);
+  });
+
   it("lot_exp 3: mark ticks from the price store stay per-lot and are still divided", async () => {
     const marks = { subscribe: vi.fn(), latest: vi.fn(() => 63) };
     const { provider } = mk(3, { marks });

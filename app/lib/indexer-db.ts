@@ -178,14 +178,58 @@ export async function queryTradesForCandles(
 // aggregation is tested against it on the same rows (__tests__/lib/candles-sql-aggregate.test.ts).
 
 /**
- * Per-row price on ONE scale (per token) for a lot market whose rows mix per-lot and per-token
- * prices. `kParam` / `anchorParam` are SQL placeholders for lot_exp and the per-token anchor.
+ * Per-row price on ONE scale (per token). `kParam` / `anchorParam` are SQL placeholders for lot_exp and the
+ * per-token anchor.
+ *
+ * `trades.price_lot_exp` (indexer migration 20261120210000) says which unit a row's price is in: per
+ * 10^price_lot_exp tokens, 0 = per token. When it is set it is the truth, and the row is divided by exactly that.
+ * Only a legacy row (NULL: written before the indexer recorded it) is classified by the midpoint rule: on a lot
+ * market, a price above anchor x 10^(k/2) is per LOT. `withColumn` false = a database without the column (all rows
+ * legacy, the rule as before).
  */
-const LOT_NORMALIZED_PRICE_SQL = (kParam: string, anchorParam: string) =>
-  `CASE WHEN ${kParam}::int > 0 AND ${anchorParam}::numeric > 0
+const LOT_NORMALIZED_PRICE_SQL = (kParam: string, anchorParam: string, withColumn = true) => {
+  const legacy = `CASE WHEN ${kParam}::int > 0 AND ${anchorParam}::numeric > 0
               AND price > ${anchorParam}::numeric * power(10::numeric, ${kParam}::int / 2.0)
             THEN price / power(10::numeric, ${kParam}::int)
             ELSE price END`;
+  return withColumn
+    ? `CASE WHEN price_lot_exp IS NOT NULL THEN price / power(10::numeric, price_lot_exp::int) ELSE ${legacy} END`
+    : legacy;
+};
+
+/**
+ * 1 when this row's scale came from the anchor (today's mark): a legacy row (no price_lot_exp) on a lot market with an
+ * anchor. A window holding one can change when the mark moves, so it is not edge-cached as history.
+ */
+const ANCHOR_DEPENDENT_SQL = (kParam: string, anchorParam: string, withColumn = true) =>
+  `(${kParam}::int > 0 AND ${anchorParam}::numeric > 0${withColumn ? " AND price_lot_exp IS NULL" : ""})`;
+
+/** True for "column price_lot_exp does not exist" (42703): the indexer migration is not applied on this database. */
+function isMissingPriceLotExp(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  return !!e && e.code === "42703" && /price_lot_exp/.test(e.message ?? "");
+}
+/** Set on a 42703 for price_lot_exp; re-probed after 5 min so an applied migration is picked up without a restart. */
+let priceLotExpMissingAt: number | null = null;
+const PRICE_LOT_EXP_REPROBE_MS = 5 * 60_000;
+function priceLotExpColumnAssumed(now = Date.now()): boolean {
+  return priceLotExpMissingAt === null || now - priceLotExpMissingAt >= PRICE_LOT_EXP_REPROBE_MS;
+}
+/** Test hook. */
+export function __resetPriceLotExpProbe(): void {
+  priceLotExpMissingAt = null;
+}
+/** Run `build(true)`; on a missing price_lot_exp column, remember it and run `build(false)` instead. */
+async function withPriceLotExp<T>(run: (withColumn: boolean) => Promise<T>): Promise<T> {
+  if (!priceLotExpColumnAssumed()) return run(false);
+  try {
+    return await run(true);
+  } catch (err) {
+    if (!isMissingPriceLotExp(err)) throw err;
+    priceLotExpMissingAt = Date.now();
+    return run(false);
+  }
+}
 
 /** Lot scale of a market for the candle queries: lot_exp and a per-token anchor price (null = unknown). */
 export interface CandleLotScale { lotExp: number; anchor: number | null }
@@ -223,27 +267,29 @@ export function candleWindow(fromSec: number, toSec: number, bucketSeconds: numb
  * tx were ordered by a random uuid (J-20261120 candles-vs-trades, cause 2). Trades has no slot or
  * tx-index column yet; when it gets one it belongs between created_at and leg_index.
  *
- * Unit scale (cause 4): on a lot market (lot_exp k > 0) rows written before the indexer knew k hold
- * the per-LOT price (10^k x the per-token price), newer rows the per-token price. A row priced above
- * the anchor x 10^(k/2) (the geometric midpoint between the two scales) is per lot and is divided by
- * 10^k, so every bar is per token. k = 0 or no anchor: prices are untouched. The anchor is TODAY's mark,
- * so a per-token row from when the price was over 10^(k/2) x today's (3.16x at k = 1) would be misread;
- * a per-row scale column on trades is the exact fix. Sizes are engine Q for
- * every row (no mixing), so volume is the same raw sum.
+ * Unit scale (cause 4): every bar is per token. A row with `price_lot_exp` set is divided by
+ * 10^price_lot_exp, exactly (the indexer records the unit it wrote). A legacy row (NULL: on a lot market,
+ * rows written before the indexer knew lot_exp k hold the per-LOT price, 10^k x per token) falls back to
+ * the midpoint rule: above anchor x 10^(k/2) it is per lot and is divided by 10^k. k = 0 or no anchor:
+ * legacy prices are untouched. Only legacy rows can be misread after a move of more than 10^(k/2) from
+ * today's mark, and a bucket holding one reports `a` (anchor-dependent) so it is not cached as history.
+ * Sizes are engine Q for every row (no mixing), so volume is the same raw sum.
  *
  * Prices and volume go out as numeric text: prices are parsed with Number(), volume stays exact text.
  */
-export const CANDLE_AGG_SQL = `
-SELECT t, o, h, l, c, v FROM (
+export const candleAggSql = (withColumn = true) => `
+SELECT t, o, h, l, c, v, a FROM (
   SELECT (floor(extract(epoch FROM created_at))::bigint / $3::bigint) * $3::bigint AS t,
          ((array_agg(p ORDER BY created_at, leg_index, id))[1])::text AS o,
          max(p)::text AS h,
          min(p)::text AS l,
          ((array_agg(p ORDER BY created_at DESC, leg_index DESC, id DESC))[1])::text AS c,
-         coalesce(sum(abs(size)), 0)::text AS v
+         coalesce(sum(abs(size)), 0)::text AS v,
+         bool_or(g) AS a
     FROM (
       SELECT created_at, leg_index, id, size,
-             ${LOT_NORMALIZED_PRICE_SQL("$7", "$8")} AS p
+             ${LOT_NORMALIZED_PRICE_SQL("$7", "$8", withColumn)} AS p,
+             ${ANCHOR_DEPENDENT_SQL("$7", "$8", withColumn)} AS g
         FROM trades
        WHERE slab_address = $1
          AND network = $2
@@ -256,8 +302,10 @@ SELECT t, o, h, l, c, v FROM (
    ORDER BY 1 DESC
    LIMIT $6
 ) b ORDER BY t`;
+/** The query against a database that has trades.price_lot_exp (every current indexer DB). */
+export const CANDLE_AGG_SQL = candleAggSql(true);
 
-interface AggCandleRow { t: string | number; o: string; h: string; l: string; c: string; v: string }
+interface AggCandleRow { t: string | number; o: string; h: string; l: string; c: string; v: string; a?: boolean | null }
 
 /** Aggregated rows -> UDF. Pure (exported for the equivalence test). Volume stays exact numeric text. */
 export function aggRowsToUdf(rows: readonly AggCandleRow[]): UdfResponse {
@@ -290,21 +338,22 @@ export async function queryCandlesAggregated(
   firstBucket: number,
   endExclusive: number,
   opts: { maxBars?: number; sql?: CandleSql; network?: string; lot?: CandleLotScale } = {},
-): Promise<{ udf: UdfResponse; truncated: boolean }> {
+): Promise<{ udf: UdfResponse; truncated: boolean; anchorDependent: boolean }> {
   const sql: CandleSql = opts.sql ?? (getSql() as unknown as CandleSql);
   const maxBars = opts.maxBars ?? CANDLE_MAX_BARS;
-  const rows = Array.from(
-    (await sql.unsafe(CANDLE_AGG_SQL, [
-      slabAddress,
-      opts.network ?? getServerNetwork(),
-      bucketSeconds,
-      firstBucket,
-      endExclusive,
-      maxBars,
-      ...lotParams(opts.lot),
-    ])) as ArrayLike<AggCandleRow>,
+  const params = [
+    slabAddress,
+    opts.network ?? getServerNetwork(),
+    bucketSeconds,
+    firstBucket,
+    endExclusive,
+    maxBars,
+    ...lotParams(opts.lot),
+  ];
+  const rows = await withPriceLotExp(async (withColumn) =>
+    Array.from((await sql.unsafe(candleAggSql(withColumn), params)) as ArrayLike<AggCandleRow>),
   );
-  return { udf: aggRowsToUdf(rows), truncated: rows.length >= maxBars };
+  return { udf: aggRowsToUdf(rows), truncated: rows.length >= maxBars, anchorDependent: rows.some((r) => r.a === true) };
 }
 
 /**
@@ -315,25 +364,37 @@ export async function queryCandlesAggregated(
  * scale of the bars it continues.
  */
 export async function queryLastTradePriceBefore(slabAddress: string, beforeSec: number, lot?: CandleLotScale): Promise<number | null> {
-  const sql = getSql();
+  return (await queryLastTradeSeed(slabAddress, beforeSec, lot)).price;
+}
+
+/** queryLastTradePriceBefore plus whether that price's scale came from the anchor (a legacy row on a lot market). */
+export async function queryLastTradeSeed(
+  slabAddress: string,
+  beforeSec: number,
+  lot?: CandleLotScale,
+  opts: { sql?: CandleSql; network?: string } = {},
+): Promise<{ price: number | null; anchorDependent: boolean }> {
+  const sql: CandleSql = opts.sql ?? (getSql() as unknown as CandleSql);
   const beforeIso = new Date(beforeSec * 1000).toISOString();
-  const [k, anchor] = lotParams(lot);
-  const rows = await sql<{ price: string | null }[]>`
-    SELECT (CASE WHEN ${k}::int > 0 AND ${anchor}::numeric > 0
-                  AND price > ${anchor}::numeric * power(10::numeric, ${k}::int / 2.0)
-                 THEN price / power(10::numeric, ${k}::int)
-                 ELSE price END)::text AS price
-    FROM trades
-    WHERE slab_address = ${slabAddress}
-      AND network = ${getServerNetwork()}
-      AND created_at < ${beforeIso}::timestamptz
-      AND price IS NOT NULL
-      AND price > 0
-    ORDER BY created_at DESC, leg_index DESC, id DESC
-    LIMIT 1
-  `;
+  const params = [slabAddress, opts.network ?? getServerNetwork(), beforeIso, ...lotParams(lot)];
+  const rows = await withPriceLotExp(async (withColumn) =>
+    Array.from(
+      (await sql.unsafe(
+        `SELECT (${LOT_NORMALIZED_PRICE_SQL("$4", "$5", withColumn)})::text AS price, ${ANCHOR_DEPENDENT_SQL("$4", "$5", withColumn)} AS a
+           FROM trades
+          WHERE slab_address = $1
+            AND network = $2
+            AND created_at < $3::timestamptz
+            AND price IS NOT NULL
+            AND price > 0
+          ORDER BY created_at DESC, leg_index DESC, id DESC
+          LIMIT 1`,
+        params,
+      )) as ArrayLike<{ price: string | null; a: boolean | null }>,
+    ),
+  );
   const p = Number(rows[0]?.price);
-  return Number.isFinite(p) && p > 0 ? p : null;
+  return Number.isFinite(p) && p > 0 ? { price: p, anchorDependent: rows[0]?.a === true } : { price: null, anchorDependent: false };
 }
 
 // ── OHLCV bucketing (ported from percolator-api/src/routes/candles.ts) ──────

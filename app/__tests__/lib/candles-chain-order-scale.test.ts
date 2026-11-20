@@ -16,6 +16,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
+import * as idb from "@/lib/indexer-db";
 import { aggRowsToUdf, candleWindow, queryCandlesAggregated, type CandleSql } from "@/lib/indexer-db";
 
 const PG = process.env.PERF_PG_URL;
@@ -39,7 +40,7 @@ describe.skipIf(!PG)("candle SQL vs chain order and lot scale (real Postgres)", 
     },
   };
 
-  type Row = { slab: string; sig: string; leg: number; size: string | null; price: string | null; at: string; id?: string; net?: string };
+  type Row = { slab: string; sig: string; leg: number; size: string | null; price: string | null; at: string; id?: string; net?: string; ple?: number | null };
   const D = "2026-11-01";
   // Ids chosen so the uuid order is the REVERSE of chain order: with `ORDER BY created_at, id` the tie is
   // decided the wrong way every time (in production the uuid is random: open right ~1 in n).
@@ -61,6 +62,12 @@ describe.skipIf(!PG)("candle SQL vs chain order and lot scale (real Postgres)", 
     { slab: "SYNzero", sig: "z-0", leg: 0, size: "1000", price: "0", at: `${D} 12:00:20` },
     { slab: "SYNzero", sig: "z-b", leg: 0, size: "-100", price: "6", at: `${D} 12:00:40` },
     { slab: "SYNzero", sig: "z-0only", leg: 0, size: "700", price: "0", at: `${D} 12:01:30` },
+    // lot_exp 1, price fell 5x (0.05 -> 0.01, more than the 10^(1/2) = 3.16x the midpoint rule can tell apart).
+    // Rows that recorded their unit (price_lot_exp) are exact; one legacy row (NULL) holds the per-LOT 0.5 = 0.05/token.
+    { slab: "SYNmove", sig: "m-1", leg: 0, size: "10", price: "0.05", at: `${D} 14:00:10`, ple: 0 },
+    { slab: "SYNmove", sig: "m-2", leg: 0, size: "10", price: "0.5", at: `${D} 14:01:10`, ple: null },
+    { slab: "SYNmove", sig: "m-3", leg: 0, size: "10", price: "0.01", at: `${D} 14:02:10`, ple: 0 },
+    { slab: "SYNmove", sig: "m-4", leg: 0, size: "10", price: "0.1", at: `${D} 14:03:10`, ple: 1 },
   ];
 
   beforeAll(async () => {
@@ -71,12 +78,12 @@ describe.skipIf(!PG)("candle SQL vs chain order and lot scale (real Postgres)", 
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(), slab_address TEXT NOT NULL, trader TEXT NOT NULL, side TEXT,
       size NUMERIC, price NUMERIC, tx_signature TEXT, asset_index SMALLINT NOT NULL DEFAULT 0,
       leg_index SMALLINT NOT NULL DEFAULT 0, is_liquidation BOOLEAN NOT NULL DEFAULT false,
-      network TEXT NOT NULL DEFAULT 'devnet', created_at TIMESTAMPTZ DEFAULT NOW())`);
+      network TEXT NOT NULL DEFAULT 'devnet', created_at TIMESTAMPTZ DEFAULT NOW(), price_lot_exp SMALLINT)`);
     for (const r of ROWS) {
       await sql.unsafe(
-        `INSERT INTO ${SCHEMA}.trades (id, slab_address, trader, size, price, tx_signature, leg_index, network, created_at)
-         VALUES (coalesce($1::uuid, gen_random_uuid()), $2, 't', $3::numeric, $4::numeric, $5, $6::smallint, $7, $8::timestamptz)`,
-        [r.id ?? null, r.slab, r.size, r.price, r.sig, r.leg, r.net ?? "devnet", `${r.at}+00`],
+        `INSERT INTO ${SCHEMA}.trades (id, slab_address, trader, size, price, tx_signature, leg_index, network, created_at, price_lot_exp)
+         VALUES (coalesce($1::uuid, gen_random_uuid()), $2, 't', $3::numeric, $4::numeric, $5, $6::smallint, $7, $8::timestamptz, $9::smallint)`,
+        [r.id ?? null, r.slab, r.size, r.price, r.sig, r.leg, r.net ?? "devnet", `${r.at}+00`, r.ple ?? null],
       );
     }
   });
@@ -113,6 +120,50 @@ describe.skipIf(!PG)("candle SQL vs chain order and lot scale (real Postgres)", 
     for (const lot of [undefined, { lotExp: 0, anchor: 0.053 }, { lotExp: 3, anchor: null }]) {
       const u = await chart("SYNlot", `${D}T13:00:00Z`, `${D}T13:02:59Z`, lot);
       expect(bar(u, `${D}T13:01:00Z`)).toMatchObject({ o: 51, h: 51, l: 0.052, c: 0.052 });
+    }
+  });
+
+  it("price_lot_exp, k = 1, a 5x move (> 3.16x): recorded rows are exact, only the legacy row uses the anchor", async () => {
+    // Today's mark is 0.01 (per token). The midpoint rule alone divided the per-token 0.05 to 0.005 (5x below 3.16x).
+    const u = await chart("SYNmove", `${D}T14:00:00Z`, `${D}T14:03:59Z`, { lotExp: 1, anchor: 0.01 });
+    expect([0, 1, 2, 3].map((m) => bar(u, `${D}T14:0${m}:00Z`)?.c)).toEqual([0.05, 0.05, 0.01, 0.01]);
+    // base: [0.05, 0.5, 0.01, 0.1] (no normalisation); midpoint rule only: [0.005, 0.05, 0.01, 0.01]
+  });
+
+  it("price_lot_exp: a window with a legacy row on a lot market is anchor-dependent; one with recorded rows only is not", async () => {
+    const win = (a: string, b: string) => candleWindow(T(a), T(b), 60);
+    const run = async (a: string, b: string, lot: { lotExp: number; anchor: number | null }) => {
+      const w = win(a, b);
+      return (await queryCandlesAggregated("SYNmove", 60, w.firstBucket, w.endExclusive, { sql: candleSql, network: "devnet", lot }) as { anchorDependent?: boolean }).anchorDependent;
+    };
+    expect(await run(`${D}T14:00:00Z`, `${D}T14:03:59Z`, { lotExp: 1, anchor: 0.01 })).toBe(true);
+    expect(await run(`${D}T14:02:00Z`, `${D}T14:03:59Z`, { lotExp: 1, anchor: 0.01 })).toBe(false);
+    expect(await run(`${D}T14:00:00Z`, `${D}T14:03:59Z`, { lotExp: 0, anchor: null })).toBe(false);
+  });
+
+  it("price_lot_exp: the fill seed (last trade before the window) uses the same rule and reports anchor dependence", async () => {
+    const seed = (idb as { queryLastTradeSeed?: (...a: unknown[]) => Promise<{ price: number | null; anchorDependent: boolean }> }).queryLastTradeSeed;
+    expect(seed).toBeTypeOf("function");
+    const lot = { lotExp: 1, anchor: 0.01 };
+    expect(await seed!("SYNmove", T(`${D}T14:01:00Z`), lot, { sql: candleSql, network: "devnet" })).toEqual({ price: 0.05, anchorDependent: false });
+    expect(await seed!("SYNmove", T(`${D}T14:02:00Z`), lot, { sql: candleSql, network: "devnet" })).toEqual({ price: 0.05, anchorDependent: true });
+    expect(await seed!("SYNmove", T(`${D}T14:04:00Z`), lot, { sql: candleSql, network: "devnet" })).toEqual({ price: 0.01, anchorDependent: false });
+  });
+
+  it("price_lot_exp: a database without the column (migration not applied) still answers, with the legacy rule", async () => {
+    const NOCOL = `${SCHEMA}_nocol`;
+    await sql.unsafe(`DROP SCHEMA IF EXISTS ${NOCOL} CASCADE`);
+    await sql.unsafe(`CREATE SCHEMA ${NOCOL}`);
+    await sql.unsafe(`CREATE TABLE ${NOCOL}.trades AS SELECT id, slab_address, size, price, leg_index, network, created_at FROM ${SCHEMA}.trades WHERE slab_address = 'SYNlot'`);
+    const noCol: CandleSql = { unsafe: async (q, p) => { await sql.unsafe(`SET search_path TO ${NOCOL}`); return sql.unsafe(q, p as never[]); } };
+    (idb as { __resetPriceLotExpProbe?: () => void }).__resetPriceLotExpProbe?.();
+    try {
+      const w = candleWindow(T(`${D}T13:00:00Z`), T(`${D}T13:02:59Z`), 60);
+      const r = await queryCandlesAggregated("SYNlot", 60, w.firstBucket, w.endExclusive, { sql: noCol, network: "devnet", lot: { lotExp: 3, anchor: 0.053 } });
+      expect(r.udf.c).toEqual([0.05, 0.052, 0.053]);
+    } finally {
+      (idb as { __resetPriceLotExpProbe?: () => void }).__resetPriceLotExpProbe?.();
+      await sql.unsafe(`DROP SCHEMA IF EXISTS ${NOCOL} CASCADE`);
     }
   });
 

@@ -63,4 +63,20 @@ describe.skipIf(!URL)("TRADE_FEED_SQL on Postgres", () => {
     expect(out.map((m) => m.price)).toEqual([20, 21, 22, 23, 24]);
     expect(out.every((m) => m.side === "short" && m.size === 2)).toBe(true);
   });
+
+  it("price_lot_exp: a recorded unit is put on tokens (priceLotExp 0); a legacy NULL row is sent raw with priceLotExp null", async () => {
+    const base = Date.now() - 5_000;
+    const out: TradeMessage[] = [];
+    let now = Date.now();
+    const f = createTradeFeed({ watched: () => [S2], emit: (m) => out.push(m), now: () => now, query: pgTradeQuery(sql as never, "devnet") });
+    const rows: Array<[number, number | null]> = [[0.5, 1], [0.07, 0], [0.8, null]];
+    for (const [i, [price, ple]] of rows.entries()) {
+      await sql`INSERT INTO trades (slab_address, trader, side, size, price, price_lot_exp, created_at)
+                VALUES (${S2}, 't', 'long', 1, ${price}, ${ple}, ${new Date(base + i * 100).toISOString()})`;
+      await f.poll();
+      now += 1000;
+    }
+    expect(out.map((m) => [m.price, m.priceLotExp])).toEqual([[0.05, 0], [0.07, 0], [0.8, null]]);
+    await sql`DELETE FROM trades WHERE slab_address = ${S2}`;
+  });
 });
