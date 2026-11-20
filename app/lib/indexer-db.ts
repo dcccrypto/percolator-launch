@@ -226,7 +226,9 @@ export function candleWindow(fromSec: number, toSec: number, bucketSeconds: numb
  * Unit scale (cause 4): on a lot market (lot_exp k > 0) rows written before the indexer knew k hold
  * the per-LOT price (10^k x the per-token price), newer rows the per-token price. A row priced above
  * the anchor x 10^(k/2) (the geometric midpoint between the two scales) is per lot and is divided by
- * 10^k, so every bar is per token. k = 0 or no anchor: prices are untouched. Sizes are engine Q for
+ * 10^k, so every bar is per token. k = 0 or no anchor: prices are untouched. The anchor is TODAY's mark,
+ * so a per-token row from when the price was over 10^(k/2) x today's (3.16x at k = 1) would be misread;
+ * a per-row scale column on trades is the exact fix. Sizes are engine Q for
  * every row (no mixing), so volume is the same raw sum.
  *
  * Prices and volume go out as numeric text: prices are parsed with Number(), volume stays exact text.
@@ -327,7 +329,7 @@ export async function queryLastTradePriceBefore(slabAddress: string, beforeSec: 
       AND created_at < ${beforeIso}::timestamptz
       AND price IS NOT NULL
       AND price > 0
-    ORDER BY created_at DESC, leg_index DESC
+    ORDER BY created_at DESC, leg_index DESC, id DESC
     LIMIT 1
   `;
   const p = Number(rows[0]?.price);

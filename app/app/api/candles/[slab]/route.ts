@@ -98,7 +98,8 @@ export async function GET(
       });
     }
     if (udf.s === "error") return NextResponse.json(udf, { headers: NO_STORE });
-    const closed = win.endExclusive + CLOSED_MARGIN_SEC <= nowSec;
+    // An unread lot scale (RPC blip) must not be cached as history: the next request normalises.
+    const closed = win.endExclusive + CLOSED_MARGIN_SEC <= nowSec && !lot.unknown;
     return NextResponse.json(udf, { headers: closed ? HISTORICAL_CACHE : LIVE_CACHE });
   } catch (err) {
     console.error("[candles] indexer DB query failed:", err);

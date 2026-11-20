@@ -1,12 +1,14 @@
 /**
  * Lot scale of one market for /api/candles (lib/indexer-db CandleLotScale): its lot_exp and a per-token anchor
  * price (the on-chain mark / 10^lot_exp). The candle SQL uses them to put rows written before the indexer knew
- * lot_exp (per-LOT prices) on the per-token scale of the newer rows. Any failure answers "no lots" (lotExp 0),
- * which leaves the candles exactly as they were before.
+ * lot_exp (per-LOT prices) on the per-token scale of the newer rows. A failed read answers "no lots" (lotExp 0,
+ * candles exactly as before) marked `unknown`: it is not cached here, and the route does not edge-cache it as
+ * history, so one RPC blip cannot pin unnormalised bars.
  */
 import { parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { readCurrentWrapperSlab } from "@/lib/current-wrapper-slab";
 import { lotExpOf } from "@/lib/v22/lot";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { markToTokenUsd } from "@/lib/v22/lot-view";
 import type { CandleLotScale } from "@/lib/indexer-db";
 
@@ -34,15 +36,20 @@ export function candleLotScaleOf(data: Uint8Array): CandleLotScale {
   }
 }
 
-export async function readCandleLotScale(slab: string, now = Date.now()): Promise<CandleLotScale> {
+const UNKNOWN: CandleLotScale & { unknown: true } = { lotExp: 0, anchor: null, unknown: true };
+
+export async function readCandleLotScale(slab: string, now = Date.now()): Promise<CandleLotScale & { unknown?: true }> {
+  if (!isDevnetV22Enabled()) return NO_LOTS; // flag off: lotExpOf is always 0, so no RPC on the candle path
   const hit = cache.get(slab);
   if (hit && now - hit.at < TTL_MS) return hit.scale;
-  let scale = NO_LOTS;
+  let scale: CandleLotScale;
   try {
     const read = await readCurrentWrapperSlab(slab);
     if (read.ok) scale = candleLotScaleOf(read.data);
+    else if (read.reason === "rpc") return UNKNOWN;
+    else scale = NO_LOTS; // not a current-wrapper market: no lots to normalise
   } catch {
-    scale = NO_LOTS;
+    return UNKNOWN;
   }
   if (cache.size >= MAX_ENTRIES) cache.delete(cache.keys().next().value as string);
   cache.set(slab, { at: now, scale });
