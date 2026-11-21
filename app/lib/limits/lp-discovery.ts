@@ -6,7 +6,9 @@
  * kept separate so the limits UI never perturbs the ticket's cap cache.
  *
  * P3: when the asset has a bound vault LP (`AssetVaultLpV18.vault_lp_portfolio`),
- * that key IS the LP — pass it as `knownLp` and no scan runs.
+ * that key IS the LP — pass it as `knownLp` and no scan runs (asset 0: checked against the
+ * market bytes, so a vault LP without an enabled matcher no longer scans on every poll).
+ * Any scan result, found or not, is cached per market (a miss only briefly).
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import { V17_PORTFOLIO_IDENTITY_TRAILER_LEN, decodePortfolioMatcherControl } from "@percolatorct/sdk";
@@ -14,9 +16,12 @@ import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { isPortfolioAccount } from "@/lib/portfolio-account";
 import { resolveMarketLp } from "@/lib/market-lp";
 import { decodeAssetVaultLp, isV18MarketHeader } from "@/lib/limits/decode";
+import { decodeAssetVaultLpP3 } from "@/lib/v22/records";
 
 const PORTFOLIO_MATCHER_CONFIG_LEN = 104;
 const TTL_MS = 300_000;
+/** A scan that found no LP: re-scan soon, so a newly enabled LP shows up within a minute. */
+const MISS_TTL_MS = 60_000;
 
 export interface LpAccounts {
   lpPortfolio: PublicKey;
@@ -34,12 +39,33 @@ export function matcherCtxOfPortfolio(data: Uint8Array): PublicKey | null {
   return new PublicKey(data.subarray(off + 32, off + 64));
 }
 
-const cache = new Map<string, { v: LpAccounts; ts: number }>();
+const cache = new Map<string, { v: LpAccounts | null; ts: number; ttl: number }>();
 
 export function invalidateLpAccounts(programId: PublicKey, slab: PublicKey): void {
   const prefix = `${programId.toBase58()}|${slab.toBase58()}|`;
   for (const key of cache.keys()) {
     if (key.startsWith(prefix)) cache.delete(key);
+  }
+}
+
+/**
+ * True when asset 0's vault LP is bound to `knownLp`, read with the same decoder as
+ * market-lp rule 4a: the canonical scan could then only re-find `knownLp`, so it is skipped.
+ * A failed read or an undecodable market is "not known", which keeps the scan path.
+ */
+async function asset0VaultBoundTo(
+  connection: Connection,
+  programId: PublicKey,
+  slab: PublicKey,
+  knownLp: PublicKey,
+): Promise<boolean> {
+  try {
+    const info = await connection.getAccountInfo(slab, "confirmed");
+    if (!info || !info.owner.equals(programId)) return false;
+    const r = decodeAssetVaultLpP3(new Uint8Array(info.data), 0);
+    return !!(r.bound && r.vaultLpPortfolio && new PublicKey(r.vaultLpPortfolio).equals(knownLp));
+  } catch {
+    return false;
   }
 }
 
@@ -120,7 +146,9 @@ export async function resolveLpAccounts(
 
   const key = `${programId.toBase58()}|${slab.toBase58()}|${assetIndex}|${knownLp?.toBase58() ?? ""}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.ts < TTL_MS) return hit.v;
+  if (hit && Date.now() - hit.ts < hit.ttl) return hit.v;
+
+  const skipScan = knownLp !== null && await asset0VaultBoundTo(connection, programId, slab, knownLp);
 
   const pinned = knownLp ?? (PLAYGROUND_SLAB_META[slab.toBase58()]?.lp_portfolio_address
     ? new PublicKey(PLAYGROUND_SLAB_META[slab.toBase58()].lp_portfolio_address as string)
@@ -131,9 +159,9 @@ export async function resolveLpAccounts(
   let canonicalError: unknown = null;
 
   try {
-    canonical = await resolveMarketLp(
-      connection, programId, slab, pinned,
-    );
+    canonical = skipScan
+      ? await resolveMarketLp(connection, programId, slab, pinned, { scan: false })
+      : await resolveMarketLp(connection, programId, slab, pinned);
   } catch (error) {
     canonicalError = error;
   }
@@ -143,7 +171,7 @@ export async function resolveLpAccounts(
       lpPortfolio: canonical.pubkey,
       matcherCtx: canonical.matcherCtx,
     };
-    cache.set(key, { v: found, ts: Date.now() });
+    cache.set(key, { v: found, ts: Date.now(), ttl: TTL_MS });
     return found;
   }
 
@@ -160,6 +188,9 @@ export async function resolveLpAccounts(
   }
 
   if (canonicalError !== null) throw canonicalError;
+  // A completed scan that found no LP. (The no-scan path is not cached: it costs no scan,
+  // and its fallback must observe a revoked binding on the next read.)
+  if (!skipScan) cache.set(key, { v: null, ts: Date.now(), ttl: MISS_TTL_MS });
   return null;
 
 }
