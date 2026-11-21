@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as mod from '@/hooks/useEarnStats';
+import { isMockMode } from '@/lib/mock-mode';
 
 // Mock modules before importing the hook
 vi.mock('@/lib/supabase', () => ({
@@ -15,18 +17,15 @@ describe('useEarnStats', () => {
   });
 
   it('exports required types', async () => {
-    const mod = await import('@/hooks/useEarnStats');
     expect(mod.useEarnStats).toBeDefined();
     expect(typeof mod.useEarnStats).toBe('function');
   });
 
   it('mock stats have correct structure', async () => {
     // In mock mode, the hook should generate mock data with correct shape
-    const { isMockMode } = await import('@/lib/mock-mode');
     (isMockMode as ReturnType<typeof vi.fn>).mockReturnValue(true);
 
     // We can't easily test hooks outside React, but we can verify the module structure
-    const mod = await import('@/hooks/useEarnStats');
     expect(mod).toBeDefined();
   });
 });

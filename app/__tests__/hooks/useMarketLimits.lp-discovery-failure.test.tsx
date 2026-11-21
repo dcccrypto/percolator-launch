@@ -7,6 +7,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as C from "@/lib/limits/constants";
+import { useMarketLimits } from "@/hooks/useMarketLimits";
 
 const layouts = JSON.parse(readFileSync(join(__dirname, "../fixtures/limits/rust-layouts.json"), "utf8")) as { vaultLpStateHex: string };
 const hex = (h: string) => Uint8Array.from(h.match(/../g)!.map((x) => parseInt(x, 16)));
@@ -42,7 +43,6 @@ vi.mock("@/components/providers/SlabProvider", async () => {
 
 describe("useMarketLimits with a failing LP discovery", () => {
   it("still reads the vault-LP state and the registry share count", async () => {
-    const { useMarketLimits } = await import("@/hooks/useMarketLimits");
     const { result } = renderHook(() => useMarketLimits("AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr"));
     await waitFor(() => expect(result.current.vaultState).not.toBeNull());
     expect(result.current.registryShares).toBe(1_000n);

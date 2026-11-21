@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
+import { useDevnetFaucet } from "@/hooks/useDevnetFaucet";
 
 const WALLET = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 const OTHER = new PublicKey("4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T");
@@ -76,7 +77,6 @@ describe("Fund Your Account stays up after funding until the user closes it", ()
     rpc.lamports = 2_500_000_000; // 2.5 SOL
     rpc.usdcAtoms = "0";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ funded: true }), { status: 200 })));
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result } = renderHook(() => useDevnetFaucet());
     await waitFor(() => expect(result.current.shouldShow).toBe(true));
 
@@ -98,7 +98,6 @@ describe("Fund Your Account stays up after funding until the user closes it", ()
     rpc.lamports = 0;
     rpc.usdcAtoms = "2000000000";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ signature: "sol-sig" }), { status: 200 })));
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result } = renderHook(() => useDevnetFaucet());
     await waitFor(() => expect(result.current.shouldShow).toBe(true));
     rpc.lamports = 2_000_000_000; // the server's 2 SOL lands
@@ -110,7 +109,6 @@ describe("Fund Your Account stays up after funding until the user closes it", ()
   it("CONTROL: a wallet that was already funded never sees the modal", async () => {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "2000000000";
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.refreshBalances(); });
     expect(result.current.usdcBalance).toBe(2000);
@@ -121,7 +119,6 @@ describe("Fund Your Account stays up after funding until the user closes it", ()
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "10000000000";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ funded: true }), { status: 200 })));
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     const { result, rerender } = renderHook(() => useDevnetFaucet());
     await act(async () => { await result.current.airdropUsdc(); });
     expect(result.current.shouldShow).toBe(true);

@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Connection, Keypair, PublicKey, SystemInstruction, SystemProgram, Transaction } from "@solana/web3.js";
 import { NextRequest } from "next/server";
+import { POST } from "@/app/api/mobile/create-market/route";
 import { IX_TAG } from "@percolatorct/sdk";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { assetSlotsForSlabLen } from "@/lib/create-market-args";
@@ -35,7 +36,6 @@ afterEach(() => {
 });
 
 async function post(extra: Record<string, unknown> = {}) {
-  const { POST } = await import("@/app/api/mobile/create-market/route");
   const res = await POST(
     new NextRequest("http://localhost/api/mobile/create-market", {
       method: "POST",

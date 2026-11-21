@@ -4,7 +4,9 @@
  * really missing, never on a transient error whose text says "network".
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { isMissingColumnError } from "@/lib/supabase-missing-column";
+import { GET } from "@/app/api/trader/[wallet]/stats/route";
 
 describe("isMissingColumnError", () => {
   it("matches Postgres undefined_column naming the column", () => {
@@ -67,8 +69,6 @@ describe("GH#2408: /api/trader/:wallet/stats network fallback", () => {
   });
 
   async function call() {
-    const { GET } = await import("@/app/api/trader/[wallet]/stats/route");
-    const { NextRequest } = await import("next/server");
     const req = new NextRequest(`http://localhost/api/trader/${WALLET}/stats`, {
       headers: { "x-forwarded-for": `9.9.9.${Math.floor(Math.random() * 200) + 1}` },
     });

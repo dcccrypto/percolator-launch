@@ -8,6 +8,7 @@ import { portfolioState, resetPortfolioState } from "./helpers/portfolio-mock";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
+import { useDevnetFaucet } from "@/hooks/useDevnetFaucet";
 
 const WALLET = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 const OTHER = new PublicKey("4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T");
@@ -77,7 +78,6 @@ describe("Fund Your Account never opens over an open position", () => {
   async function mount() {
     rpc.lamports = 2_500_000_000;
     rpc.usdcAtoms = "25000000"; // 25 USDC: low
-    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
     return renderHook(() => useDevnetFaucet());
   }
 

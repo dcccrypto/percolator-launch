@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as mod from "@/hooks/useAutoDeposit";
 
 // Mock all the dependencies before importing
 vi.mock("@/hooks/useWalletCompat", () => ({
@@ -57,14 +58,12 @@ describe("useAutoDeposit", () => {
   });
 
   it("should export a function", async () => {
-    const mod = await import("@/hooks/useAutoDeposit");
     expect(typeof mod.useAutoDeposit).toBe("function");
   });
 
   it("should not deposit on mainnet", async () => {
     process.env.NEXT_PUBLIC_SOLANA_NETWORK = "mainnet-beta";
     // The hook should be a no-op on mainnet
-    const mod = await import("@/hooks/useAutoDeposit");
     expect(mod.useAutoDeposit).toBeDefined();
   });
 });
