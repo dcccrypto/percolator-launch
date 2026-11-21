@@ -346,8 +346,9 @@ export const VAULT_LP_MAX_JUNIOR_FLOOR_BPS = 10_000;
 
 // ── P3 auto-pin (FINAL feat/p3-vault-owned-lp@07a1d0eb) ───────────────────────────────────────
 /** `constants::CANONICAL_VAULT_LP_MATCHER_PROGRAM` (devnet build): tag 94 accepts ONLY this at
- *  [8] (else VaultLpMatcherNotApproved 81) and pins it; there is no mainnet arm yet (fails closed). */
-export const CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET = "EDKKgRaVHna6FCxiY1kgMzegD9rpaN1nwJNSzAzeBUBX";
+ *  [8] (else VaultLpMatcherNotApproved 81) and pins it; there is no mainnet arm yet (fails closed).
+ *  Kept in lockstep with DEVNET_PROGRAM_IDS.matcher (v2.2 11-06 set). */
+export const CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET = "DfTxJUT5BbERs1tR33dP82kaUJ1NLymRxXErXAYXcDam";
 /** The matcher ctx tag 94 initialises: pre-created by the client, owner = the matcher program,
  *  zeroed; the wizard's existing size (the wrapper's own floor is 64 B). */
 export const VAULT_LP_MATCHER_CTX_LEN = 320;

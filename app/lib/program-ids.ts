@@ -1,16 +1,16 @@
 /**
  * THE single source of truth for on-chain program IDs.
  *
- * Repointing the app to a new deployment is ONE edit: DEVNET_PROGRAM_IDS below. The
- * 2026-10 relaunch is ALL-FRESH (wrapper, matcher, nft and stake all new devnet addresses,
- * @percolatorct/sdk 8.0.0); the old GnwdeQr world (matcher 4seJWjv3…, stake GCHhcgw…,
- * nft CNGBPZR…) is abandoned. Everything
- * else — config.ts (`programId`, `programsBySlabTier`, the known-program
- * allowlist), the markets static fallback, the warmup route, the NFT/stake
- * helpers, the error map's program routing — reads from here.
- * `__tests__/lib/program-ids.test.ts` fails if the SDK's own default devnet
- * wrapper id and this file disagree, so an SDK bump without the repoint (or
- * the reverse) cannot ship silently.
+ * Repointing the app to a new deployment is ONE edit: DEVNET_PROGRAM_IDS below.
+ * Current pin is the v2.2 fresh-address set deployed 2026-11-06 (ops ledger
+ * deployments.md). The 2026-10 relaunch IDs (ETDLAdiA… / EDKKgRaV… / EMYT15LZ…
+ * / VmpVUArR…) and the earlier GnwdeQr world are no longer the playground
+ * default. Everything else — config.ts (`programId`, `programsBySlabTier`, the
+ * known-program allowlist), the markets static fallback, the warmup route, the
+ * NFT/stake helpers, the error map's program routing — reads from here.
+ * Published @percolatorct/sdk@8.0.0 still defaults to an older devnet set;
+ * keep launch pins authoritative here until that SDK is published with the
+ * 11-06 IDs (companion PR on percolator-sdk).
  *
  * Env overrides (devnet builds only, and only with
  * NEXT_PUBLIC_ALLOW_PROGRAM_ID_OVERRIDE=1; a mainnet build ignores them):
@@ -34,11 +34,13 @@ export interface ProgramIdSet {
 
 /** Deployed devnet programs (deployments.md). The wrapper line is the repoint. */
 export const DEVNET_PROGRAM_IDS: Readonly<ProgramIdSet> = Object.freeze({
-  // ALL-FRESH relaunch (2026-10, wrapper 7c906e45 / SDK 8.0.0; 592286b4, the 2026-09-30 in-place upgrade, is its ancestor): every program at a new address.
-  wrapper: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB",
-  matcher: "EDKKgRaVHna6FCxiY1kgMzegD9rpaN1nwJNSzAzeBUBX",
-  nft: "EMYT15LZWaP7Mmmm245kQPbrTyVjG16yZiU9kfNTF3GZ",
-  stake: "VmpVUArRnVkrjaPXQ2qaqCQa3ZrZFgsz7rjeALitF5w",
+  // v2.2 fresh-address set, deployed 2026-11-06. Verified executable on devnet
+  // 2026-11-21 via getAccountInfo / solana program show. Collateral mint
+  // DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC is already the default in config.ts.
+  wrapper: "5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe",
+  matcher: "DfTxJUT5BbERs1tR33dP82kaUJ1NLymRxXErXAYXcDam",
+  nft: "DWUNq2iYh6Sdgdv3qv7aWJNJGhoK25FqyQrqDUrDD9zs",
+  stake: "A6DVNubvzMMETQinK6bipekkaTTrkUu2RMw2kBoJrdkE",
 });
 
 export const MAINNET_PROGRAM_IDS: Readonly<Omit<ProgramIdSet, "nft">> = Object.freeze({

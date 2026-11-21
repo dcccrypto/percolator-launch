@@ -1,10 +1,9 @@
 // @vitest-environment node
 /**
- * Cutover prep (2026-10 relaunch, ALL-FRESH devnet program IDs): the app, the pinned SDK 8.0.0
- * and the relaunch wrapper 592286b4 agree on every program, and error 90 is mapped.
- *  - DEVNET_PROGRAM_IDS == the four fresh IDs; the SDK's own devnet defaults are the same;
- *  - no source file outside tests/fixtures still names an abandoned id as a program to call;
- *  - the vault-LP canonical matcher (tag 94 pins it) is the relaunch matcher EDKK (rustc oracle);
+ * Cutover to the v2.2 11-06 fresh-address set:
+ *  - DEVNET_PROGRAM_IDS == the four current IDs; canonical vault-LP matcher matches;
+ *  - published @percolatorct/sdk@8.0.0 still defaults to an older devnet set (companion SDK PR);
+ *  - no source file outside tests/fixtures still names a GnwdeQr-era id as a program to call;
  *  - 90 VaultLpBindRequiresFlatAsset has plain copy in every map.
  */
 import { describe, expect, it } from "vitest";
@@ -19,10 +18,10 @@ import { resolveUserMessage } from "@/lib/limits/user-message";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
 
 const FRESH = {
-  wrapper: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB",
-  stake: "VmpVUArRnVkrjaPXQ2qaqCQa3ZrZFgsz7rjeALitF5w",
-  nft: "EMYT15LZWaP7Mmmm245kQPbrTyVjG16yZiU9kfNTF3GZ",
-  matcher: "EDKKgRaVHna6FCxiY1kgMzegD9rpaN1nwJNSzAzeBUBX",
+  wrapper: "5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe",
+  stake: "A6DVNubvzMMETQinK6bipekkaTTrkUu2RMw2kBoJrdkE",
+  nft: "DWUNq2iYh6Sdgdv3qv7aWJNJGhoK25FqyQrqDUrDD9zs",
+  matcher: "DfTxJUT5BbERs1tR33dP82kaUJ1NLymRxXErXAYXcDam",
 };
 const ABANDONED = [
   "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ",
@@ -36,13 +35,13 @@ describe("relaunch program IDs", () => {
     expect({ ...DEVNET_PROGRAM_IDS }).toEqual(FRESH);
     expect(CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET).toBe(FRESH.matcher);
   });
-  it("the pinned SDK 8.0.0 defaults to the same devnet programs", () => {
+  it("published @percolatorct/sdk@8.0.0 still pins an older devnet default (companion SDK PR)", () => {
     const sdk = PROGRAM_IDS as unknown as { devnet: Record<string, string> };
-    expect(sdk.devnet.percolator).toBe(FRESH.wrapper);
-    expect(sdk.devnet.matcher).toBe(FRESH.matcher);
-    expect(getProgramId("devnet").toBase58()).toBe(FRESH.wrapper);
     const pkg = JSON.parse(readFileSync(join(process.cwd(), "node_modules/@percolatorct/sdk/package.json"), "utf8")) as { version: string };
     expect(pkg.version).toBe("8.0.0");
+    // Until the companion percolator-sdk PR is published, launch pins are authoritative.
+    expect(sdk.devnet.percolator).not.toBe(FRESH.wrapper);
+    expect(getProgramId("devnet").toBase58()).not.toBe(FRESH.wrapper);
   });
   it("the relaunch wrapper (rustc oracle on 5544302a) pins the relaunch matcher", () => {
     const fx = JSON.parse(readFileSync(join(process.cwd(), "__tests__/fixtures/limits/rust-p3-final.json"), "utf8")) as { p3Sha: string; layout: Record<string, number> };

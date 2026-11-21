@@ -9,12 +9,17 @@ describe("program-ids: the single repoint point", () => {
     vi.resetModules();
   });
 
-  it("agrees with the installed SDK's default devnet ids (fails on an SDK bump without the repoint, or vice versa)", () => {
-    expect(DEVNET_PROGRAM_IDS.wrapper).toBe(PROGRAM_IDS.devnet.percolator);
-    expect(DEVNET_PROGRAM_IDS.matcher).toBe(PROGRAM_IDS.devnet.matcher);
-    expect(DEVNET_PROGRAM_IDS.nft).toBe(PROGRAM_IDS_V17.nft);
-    expect(DEVNET_PROGRAM_IDS.stake).toBe(PROGRAM_IDS_V17.vault);
+  it("pins the v2.2 11-06 devnet set; mainnet IDs still match the installed SDK", () => {
+    // Devnet defaults in published @percolatorct/sdk@8.0.0 are still the older
+    // set; launch is the authority until the companion SDK PR is published.
+    expect(DEVNET_PROGRAM_IDS).toEqual({
+      wrapper: "5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe",
+      matcher: "DfTxJUT5BbERs1tR33dP82kaUJ1NLymRxXErXAYXcDam",
+      nft: "DWUNq2iYh6Sdgdv3qv7aWJNJGhoK25FqyQrqDUrDD9zs",
+      stake: "A6DVNubvzMMETQinK6bipekkaTTrkUu2RMw2kBoJrdkE",
+    });
     expect(MAINNET_PROGRAM_IDS.wrapper).toBe(PROGRAM_IDS.mainnet.percolator);
+    expect(MAINNET_PROGRAM_IDS.matcher).toBe(PROGRAM_IDS.mainnet.matcher);
   });
 
   it("config reads program-ids: programId, every slab tier, and the allowlist move together", async () => {
