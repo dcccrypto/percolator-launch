@@ -127,11 +127,11 @@ function casRetryDelayMs(attempt: number): number {
 }
 
 /** Every versioned snapshot, newest first (the Blob list API: authoritative, not the CDN). */
-async function listVersions(): Promise<VersionRef[]> {
+async function listVersions(signal?: AbortSignal): Promise<VersionRef[]> {
   const out: VersionRef[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 20; page += 1) {
-    const res = await list({ prefix: REGISTERED_MARKETS_VERSION_PREFIX, limit: 1000, ...(cursor ? { cursor } : {}) });
+    const res = await list({ prefix: REGISTERED_MARKETS_VERSION_PREFIX, limit: 1000, ...(cursor ? { cursor } : {}), abortSignal: signal });
     for (const b of res.blobs) {
       const seq = parseRegisteredMarketsVersion(b.pathname);
       if (seq !== null) out.push({ seq, url: b.url, pathname: b.pathname });
@@ -142,8 +142,8 @@ async function listVersions(): Promise<VersionRef[]> {
   return out.sort((a, b) => b.seq - a.seq);
 }
 
-async function fetchMarkets(url: string): Promise<RegisteredMarket[] | null> {
-  const resp = await fetch(url, { cache: 'no-store' });
+async function fetchMarkets(url: string, signal?: AbortSignal): Promise<RegisteredMarket[] | null> {
+  const resp = await fetch(url, { cache: 'no-store', signal });
   if (!resp.ok) {
     console.warn(`[playground-registered-markets] blob fetch ${resp.status} — read failed`);
     return null;
@@ -167,21 +167,21 @@ async function fetchMarkets(url: string): Promise<RegisteredMarket[] | null> {
  * The newest snapshot. With no versioned snapshot yet, the legacy single blob seeds the registry
  * (seq 0); the first write then creates v1 from it.
  */
-async function readSnapshot(): Promise<RegisteredMarketsSnapshot> {
+async function readSnapshot(signal?: AbortSignal): Promise<RegisteredMarketsSnapshot> {
   try {
-    const versions = await listVersions();
+    const versions = await listVersions(signal);
     if (versions.length > 0) {
-      const markets = await fetchMarkets(versions[0].url);
+      const markets = await fetchMarkets(versions[0].url, signal);
       if (markets !== null) return { markets, seq: versions[0].seq, ok: true };
       // The newest snapshot can't be read this moment: serve the previous one to readers, but
       // report it as not-ok so a writer never merges onto an older seq (fail closed).
-      const prev = versions[1] ? await fetchMarkets(versions[1].url) : null;
+      const prev = versions[1] ? await fetchMarkets(versions[1].url, signal) : null;
       return { markets: prev ?? [], seq: 0, ok: false };
     }
-    const { blobs } = await list({ prefix: REGISTERED_MARKETS_BLOB_PATHNAME, limit: 1 });
+    const { blobs } = await list({ prefix: REGISTERED_MARKETS_BLOB_PATHNAME, limit: 1, abortSignal: signal });
     const legacy = blobs.find((b) => b.pathname === REGISTERED_MARKETS_BLOB_PATHNAME);
     if (!legacy) return { markets: [], seq: 0, ok: true };
-    const markets = await fetchMarkets(legacy.url);
+    const markets = await fetchMarkets(legacy.url, signal);
     return markets === null ? { markets: [], seq: 0, ok: false } : { markets, seq: 0, ok: true };
   } catch (err) {
     console.warn('[playground-registered-markets] read failed:', err instanceof Error ? err.message : String(err));
@@ -200,9 +200,9 @@ async function readSnapshot(): Promise<RegisteredMarketsSnapshot> {
  * the whole route. It is deliberately NOT safe for a read-modify-write
  * (see `upsertRegisteredMarket`, which aborts on a failed read).
  */
-export async function readRegisteredMarkets(): Promise<RegisteredMarket[]> {
+export async function readRegisteredMarkets(signal?: AbortSignal): Promise<RegisteredMarket[]> {
   // Lenient: on a failed newest read this is the previous snapshot (or []), never a throw.
-  const { markets } = await readSnapshot();
+  const { markets } = await readSnapshot(signal);
   return markets;
 }
 

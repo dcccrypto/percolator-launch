@@ -28,9 +28,13 @@ export interface RegisteredPool {
 }
 
 const TTL_MS = 60_000;
+const REGISTERED_MINT_QUERY_TIMEOUT_MS = 1_500;
 const MAX_ENTRIES = 500;
 const bySlab = new Map<string, { v: RegisteredPool | null; at: number }>();
 const byMint = new Map<string, { v: RegisteredPool | null; at: number }>();
+/** Single-flight is process-local; bound distinct cold mint lookups. */
+const MAX_IN_FLIGHT_MINT_LOOKUPS = 64;
+const mintLookupInFlight = new Map<string, Promise<RegisteredPool | null>>();
 
 function remember<K>(m: Map<K, { v: RegisteredPool | null; at: number }>, k: K, v: RegisteredPool | null): RegisteredPool | null {
   if (m.size >= MAX_ENTRIES) m.delete(m.keys().next().value as K);
@@ -59,7 +63,7 @@ function supabaseConfigured(): boolean {
 
 async function dexTypeFor(slab: string): Promise<string | null> {
   try {
-    return (await readRegisteredMarkets()).find((m) => m.slabAddress === slab)?.dexType ?? null;
+    return (await readRegisteredMarkets(AbortSignal.timeout(1_500))).find((m) => m.slabAddress === slab)?.dexType ?? null;
   } catch {
     return null;
   }
@@ -104,6 +108,33 @@ export async function registeredPoolForMint(mint: string): Promise<RegisteredPoo
   const hit = byMint.get(mint);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.v;
   if (!supabaseConfigured()) return null;
+
+  const pending = mintLookupInFlight.get(mint);
+  if (pending) return pending;
+
+  if (mintLookupInFlight.size >= MAX_IN_FLIGHT_MINT_LOOKUPS) {
+    throw new RegisteredPoolLookupError(
+      new Error("registered mint lookups are busy")
+    );
+  }
+
+  const task = queryRegisteredPoolForMint(mint);
+  mintLookupInFlight.set(mint, task);
+
+  const cleanup = () => {
+    if (mintLookupInFlight.get(mint) === task) {
+      mintLookupInFlight.delete(mint);
+    }
+  };
+
+  // Release the slot on both success and failure.
+  void task.then(cleanup, cleanup);
+  return task;
+}
+
+async function queryRegisteredPoolForMint(
+  mint: string
+): Promise<RegisteredPool | null> {
   let data: unknown;
   try {
     const res = await getServiceClient()
@@ -113,6 +144,7 @@ export async function registeredPoolForMint(mint: string): Promise<RegisteredPoo
       .eq("network", getServerNetwork())
       .eq("keeper_status", "active")
       .order("created_at", { ascending: false })
+      .abortSignal(AbortSignal.timeout(REGISTERED_MINT_QUERY_TIMEOUT_MS))
       .limit(1);
     if (res.error) throw res.error;
     data = res.data;
