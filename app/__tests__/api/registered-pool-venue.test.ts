@@ -23,7 +23,7 @@ vi.mock("@/lib/supabase", () => {
   const q: Record<string, unknown> = {};
   const chain = () => q;
   Object.assign(q, {
-    select: chain, eq: chain, order: chain,
+    select: chain, eq: chain, order: chain, abortSignal: chain,
     maybeSingle: async () => {
       h.calls += 1;
       if (h.failNext > 0) { h.failNext -= 1; return { data: null, error: { message: "timeout" } }; }
@@ -45,7 +45,7 @@ vi.mock("@/lib/dex-pool-owner", () => ({
   isOfferable: () => true,
   MAX_CLASSIFY_POOLS: 5,
 }));
-vi.mock("@/lib/jupiter-price", () => ({ fetchJupiterUsdPrice: async () => 0.0045 }));
+vi.mock("@/lib/jupiter-price", () => ({ fetchJupiterUsdPrice: async () => 0.0085 }));
 vi.mock("@/lib/gecko-fetch", () => ({
   getGeckoConfig: () => ({ base: "https://gt" }),
   geckoFetch: async (url: string) => {
@@ -70,8 +70,8 @@ beforeEach(() => {
   h.calls = 0;
   globalThis.fetch = vi.fn(async () =>
     new Response(JSON.stringify({ pairs: [
-      { chainId: "solana", dexId: "meteora", pairAddress: BEST, priceUsd: "0.0050", liquidity: { usd: 900_000 }, baseToken: { symbol: "SI" } },
-      { chainId: "solana", dexId: "meteora", pairAddress: REGISTERED, priceUsd: "0.0045", liquidity: { usd: 100_000 }, baseToken: { symbol: "SI" } },
+      { chainId: "solana", dexId: "meteora", pairAddress: BEST, priceUsd: "0.0050", liquidity: { usd: 900_000 }, baseToken: { symbol: "SI", address: MINT } },
+      { chainId: "solana", dexId: "meteora", pairAddress: REGISTERED, priceUsd: "0.0045", liquidity: { usd: 100_000 }, baseToken: { symbol: "SI", address: MINT } },
     ] }), { status: 200 }),
   ) as typeof fetch;
 });
@@ -120,5 +120,117 @@ describe("registered market => registered pool", () => {
     expect(await registeredPoolForMint(MINT)).toBeNull();
     expect(h.calls).toBe(0);
     expect((await chart(`&slab=${SLAB}`)).poolAddress).toBe(BEST);
+  });
+});
+
+describe("V22 registered-pool negative-cache transition", () => {
+  it("DIAGNOSTIC: an unregistered lookup stays stale until its 60s TTL expires", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    try {
+      const start = Date.now();
+      vi.setSystemTime(start);
+
+      __clearRegisteredPoolCache();
+      h.calls = 0;
+      h.row = null;
+
+      // First lookup: market does not exist.
+      expect(await registeredPoolForMint(MINT)).toBeNull();
+      expect(h.calls).toBe(1);
+
+      // Simulate a successful market registration in the DB.
+      h.row = {
+        slab_address: SLAB,
+        dex_pool_address: REGISTERED,
+        mainnet_ca: MINT,
+      };
+
+      // Before TTL expiry: negative cache still wins.
+      expect(await registeredPoolForMint(MINT)).toBeNull();
+      expect(h.calls).toBe(1);
+
+      // After TTL expiry: a fresh DB lookup finds the market.
+      vi.setSystemTime(start + 60_001);
+
+      expect((await registeredPoolForMint(MINT))?.pool)
+        .toBe(REGISTERED);
+
+      expect(h.calls).toBe(2);
+
+      console.log("REGISTRY_NEGATIVE_CACHE_TTL=60000");
+      console.log("REGISTRY_RECOVERY_AFTER_TTL=PASS");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("V22 resolver and real registry cache transition", () => {
+  it("INTEGRATION: registered venue replaces stale unregistered cache after registry TTL", async () => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    try {
+      __clearRegisteredPoolCache();
+
+      // Initially no registered market exists.
+      h.row = null;
+      h.calls = 0;
+
+      const resolve = async () => {
+        const res = await resolveGET(
+          new NextRequest(`http://x/api/oracle/resolve/${MINT}`),
+          { params: Promise.resolve({ ca: MINT }) },
+        );
+
+        return {
+          status: res.status,
+          body: await res.json() as {
+            dexPoolAddress?: string | null;
+            price?: number;
+            cached?: boolean;
+          },
+        };
+      };
+
+      const before = await resolve();
+
+      expect(before.status).toBe(200);
+      expect(before.body.dexPoolAddress).toBe(BEST);
+      expect(before.body.price).toBe(0.005);
+
+      const firstDbCalls = h.calls;
+      expect(firstDbCalls).toBe(1);
+
+      // Registration becomes visible in database.
+      h.row = {
+        slab_address: SLAB,
+        dex_pool_address: REGISTERED,
+        mainnet_ca: MINT,
+      };
+
+      // Negative registry cache remains active.
+      const immediate = await resolve();
+
+      expect(immediate.body.dexPoolAddress).toBe(BEST);
+      expect(h.calls).toBe(firstDbCalls);
+
+      // Advance only the registry clock.
+      now += 60_001;
+
+      const after = await resolve();
+
+      expect(after.status).toBe(200);
+      expect(after.body.dexPoolAddress).toBe(REGISTERED);
+      expect(after.body.price).toBe(0.0045);
+      expect(h.calls).toBe(firstDbCalls + 1);
+
+      console.log("REAL_REGISTRY_CACHE_TRANSITION=PASS");
+      console.log("REGISTERED_VENUE_REVALIDATED=PASS");
+    } finally {
+      clock.mockRestore();
+      __clearRegisteredPoolCache();
+    }
   });
 });
