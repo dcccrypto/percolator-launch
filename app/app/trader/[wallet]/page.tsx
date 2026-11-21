@@ -13,7 +13,7 @@ import type { PortfolioPosition } from "@/hooks/usePortfolio";
 import { TradeStatsPanel } from "@/components/trade/TradeStatsPanel";
 import { PnlHistoryCard } from "@/components/dashboard/pnl-history/PnlHistoryCard";
 import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
-import { describeEntryPrice } from "@/lib/entry-price-display";
+import { describeEntryPrice, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import { formatPnl, formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { explorerAccountUrl } from "@/lib/config";
@@ -290,8 +290,12 @@ function PositionCard({
         {cell("Liq. Price", liqDisplay.text, liqDisplay.kind === "unknown" ? "text-[var(--text-secondary)]" : "text-[var(--text)]", liqDisplay.title)}
         {cell(
           "Unrealized",
-          pos.pnlKnown ? `${formatPnl(pnl, decimals)}${collateralSymbol ? ` ${collateralSymbol}` : ""}` : "—",
+          pos.pnlKnown
+            ? `${formatPnl(pnl, decimals)}${collateralSymbol ? ` ${collateralSymbol}` : ""}${pos.isEstimate ? ` ${ESTIMATE_LABEL}` : ""}`
+            : "—",
           pnlColor,
+          // Back-solved entry: the PnL is an estimate, labelled like the portfolio row.
+          pos.pnlKnown && pos.isEstimate ? DERIVED_ENTRY_TOOLTIP : undefined,
         )}
       </div>
     </div>

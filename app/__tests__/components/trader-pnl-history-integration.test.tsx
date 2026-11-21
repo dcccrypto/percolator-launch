@@ -129,4 +129,10 @@ describe("Trader Profile PnL History integration", () => {
       ).toBeEnabled();
     }
   });
+
+  it("labels an estimated unrealized PnL like the portfolio row", () => {
+    const unrealized = source.slice(source.indexOf('"Unrealized"'));
+    expect(unrealized).toMatch(/pos\.isEstimate \? ` \$\{ESTIMATE_LABEL\}`/);
+    expect(unrealized).toMatch(/pos\.pnlKnown && pos\.isEstimate \? DERIVED_ENTRY_TOOLTIP/);
+  });
 });
