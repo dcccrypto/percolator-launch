@@ -11,7 +11,7 @@ import { SimulationRefusal } from "@/lib/tx";
 import { resolveUserMessage, EARN_WITHDRAW_RETRY_BODY, EARN_DEPOSITS_PAUSED_BODY } from "@/lib/limits/user-message";
 import * as detect from "@/lib/program-upgrade-detect";
 
-const W = "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB";
+const W = "5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe";
 const refusal = (code: number, programId: string | null = W) => {
   const r = new SimulationRefusal({ InstructionError: [0, { Custom: code }] }, [`Program ${W} failed: custom program error: 0x${code.toString(16)}`]);
   Object.defineProperty(r, "code", { value: code });

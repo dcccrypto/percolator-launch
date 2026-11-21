@@ -199,7 +199,7 @@ describe("P3 final head: layout (rustc offset_of!) and errors (by name)", () => 
     expect(BigInt(L["pin.maxInventoryUsd"])).toBe(C.PIN.maxInventoryUsd);
     expect(BigInt(L["pin.liquidityUsd"])).toBe(C.PIN.liquidityUsd);
     // the oracle compares the program's constant to this exact string
-    expect(C.CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET).toBe("EDKKgRaVHna6FCxiY1kgMzegD9rpaN1nwJNSzAzeBUBX");
+    expect(C.CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET).toBe("DfTxJUT5BbERs1tR33dP82kaUJ1NLymRxXErXAYXcDam");
     expect(L.canonicalMatcherIsDevnetEDKK).toBe(1);
   });
   it("the program's read_asset_vault_lp reads each asset's record at the app's offset (and not 1 off)", () => {
