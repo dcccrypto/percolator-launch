@@ -25,7 +25,8 @@
  * RPC budget per lookup: 4 getProgramAccounts (tiny slices), ceil(n/100) getMultipleAccounts for market ids and for market
  * bytes, and per market that has been silent for longer than the launch wait (healthy markets cost nothing): one
  * getSignaturesForAddress and one getTransaction per transaction at that slot, at most MAX_HISTORY_LOOKUPS markets, newest
- * silence first, MAX_PARALLEL at a time. Results are cached for the session (history of a past slot never changes).
+ * silence first, MAX_PARALLEL at a time. Results are cached per connection for the session (history of a past slot never changes),
+ * except an inconclusive short read, which is retried after HISTORY_UNKNOWN_TTL_MS; identical concurrent reads share one RPC call.
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import bs58 from "bs58";
@@ -148,11 +149,43 @@ export interface SlabHistory {
   neverPushed: boolean | null;
 }
 
-const historyCache = new Map<string, SlabHistory>();
+/** An empty or short signature page whose history stayed inconclusive may just be RPC lag on a fresh slab: retried after this. */
+export const HISTORY_UNKNOWN_TTL_MS = 60_000;
+
+interface CachedHistory {
+  result: SlabHistory;
+  /** Date.now() past which the entry is dropped; null keeps it for the session. */
+  expiresAt: number | null;
+}
+
+// Keyed by connection so two RPC endpoints (devnet / a network switch) never share history.
+let historyCache = new WeakMap<object, Map<string, CachedHistory>>();
+let historyInFlight = new WeakMap<object, Map<string, Promise<SlabHistory>>>();
+
+const historyKey = (programId: PublicKey, slab: PublicKey, lastGood: bigint, oracleMode: number): string =>
+  `${programId.toBase58()}:${slab.toBase58()}:${lastGood}:${oracleMode}`;
+
+function bucketOf<V>(m: WeakMap<object, Map<string, V>>, connection: object): Map<string, V> {
+  let b = m.get(connection);
+  if (!b) m.set(connection, (b = new Map<string, V>()));
+  return b;
+}
+
+function cachedHistory(connection: object, key: string): SlabHistory | null {
+  const bucket = historyCache.get(connection);
+  const entry = bucket?.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt !== null && Date.now() >= entry.expiresAt) {
+    bucket!.delete(key);
+    return null;
+  }
+  return entry.result;
+}
 
 /** Test seam. */
 export function __clearHistoryCache(): void {
-  historyCache.clear();
+  historyCache = new WeakMap();
+  historyInFlight = new WeakMap();
 }
 
 interface SigInfo {
@@ -208,12 +241,26 @@ export async function readNeverPushed(
 
 /**
  * History facts for a slab. An RPC failure is unknown and NOT cached (the next scan retries); a full signature page is an old busy
- * market (certainly not freshly created): creation unknown, cached.
+ * market (certainly not freshly created): creation unknown, cached. An empty or short page that stays inconclusive is cached for
+ * HISTORY_UNKNOWN_TTL_MS only. Concurrent identical reads on one connection share a single in-flight read.
  */
 export async function readSlabHistory(connection: Pick<Connection, "getSignaturesForAddress" | "getTransaction">, programId: PublicKey, slab: PublicKey, lastGood: bigint, oracleMode = 0): Promise<SlabHistory> {
-  const key = `${slab.toBase58()}:${lastGood}`;
-  const hit = historyCache.get(key);
+  const key = historyKey(programId, slab, lastGood, oracleMode);
+  const hit = cachedHistory(connection, key);
   if (hit) return hit;
+  const pending = bucketOf(historyInFlight, connection);
+  const inFlight = pending.get(key);
+  if (inFlight) return inFlight;
+  const task = readSlabHistoryUncached(connection, programId, slab, lastGood, oracleMode, key);
+  pending.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (pending.get(key) === task) pending.delete(key);
+  }
+}
+
+async function readSlabHistoryUncached(connection: Pick<Connection, "getSignaturesForAddress" | "getTransaction">, programId: PublicKey, slab: PublicKey, lastGood: bigint, oracleMode: number, key: string): Promise<SlabHistory> {
   try {
     const sigs = await connection.getSignaturesForAddress(slab, { limit: SIGNATURE_PAGE }, "confirmed");
     let result: SlabHistory;
@@ -224,7 +271,8 @@ export async function readSlabHistory(connection: Pick<Connection, "getSignature
       const creationSlot = ok.length > 0 ? BigInt(ok.reduce((m, s) => (s.slot < m ? s.slot : m), ok[0].slot)) : null;
       result = { creationSlot, neverPushed: await readNeverPushed(connection, programId, slab, lastGood, ok, oracleMode, creationSlot) };
     }
-    historyCache.set(key, result);
+    const ttl = sigs.length < SIGNATURE_PAGE && result.neverPushed === null ? HISTORY_UNKNOWN_TTL_MS : null;
+    bucketOf(historyCache, connection).set(key, { result, expiresAt: ttl === null ? null : Date.now() + ttl });
     return result;
   } catch {
     return { creationSlot: null, neverPushed: null };
@@ -271,8 +319,9 @@ export async function lookupCreatorMarkets(connection: Conn, programId: PublicKe
   const silent = rows
     .filter((r) => clusterSlot - r.lastGoodOracleSlot > LAUNCH_WAIT_SLOTS)
     .sort((a, b) => (a.lastGoodOracleSlot < b.lastGoodOracleSlot ? 1 : a.lastGoodOracleSlot > b.lastGoodOracleSlot ? -1 : 0));
-  const cached = (r: { slab: PublicKey; lastGoodOracleSlot: bigint }): boolean => historyCache.has(`${r.slab.toBase58()}:${r.lastGoodOracleSlot}`);
-  const toRead = [...silent.filter(cached), ...silent.filter((r) => !cached(r)).slice(0, MAX_HISTORY_LOOKUPS)];
+  // Decided once per row: an entry expiring between two checks must not put a row in both lists (or neither).
+  const isCached = new Map(silent.map((r) => [r, cachedHistory(connection, historyKey(programId, r.slab, r.lastGoodOracleSlot, oracleModeOf(r.raw))) !== null]));
+  const toRead = [...silent.filter((r) => isCached.get(r)), ...silent.filter((r) => !isCached.get(r)).slice(0, MAX_HISTORY_LOOKUPS)];
   const histories = new Map<string, SlabHistory>();
   await mapBounded(toRead, MAX_PARALLEL, async (r) => {
     histories.set(r.slab.toBase58(), await readSlabHistory(connection, programId, r.slab, r.lastGoodOracleSlot, oracleModeOf(r.raw)));
