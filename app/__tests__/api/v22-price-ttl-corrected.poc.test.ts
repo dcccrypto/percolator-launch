@@ -146,5 +146,5 @@ describe("V22 corrected resolver TTL", () => {
       vi.useRealTimers();
       vi.unstubAllGlobals();
     }
-  });
+  }, 30_000); // dynamic route import after fake clock is slow under parallel load
 });

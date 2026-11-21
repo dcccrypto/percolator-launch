@@ -284,7 +284,7 @@ export async function GET(
       // Not cached: a transient RPC failure must not pin "no pool" for the TTL.
       return NextResponse.json(
         { error: "Couldn't verify this token's DEX pools right now. Try again in a moment." },
-        { status: 503, headers: { "Retry-After": "5" } },
+        { status: 503, headers: { "Cache-Control": "no-store", "Retry-After": "5" } },
       );
     }
     const pick = candidates.find((c) => isOfferable(classes[c]));
