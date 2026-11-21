@@ -246,13 +246,19 @@ async function fetchCtxs(connection: Connection, rows: PortfolioRow[]): Promise<
  * Resolve the market's LP on-chain. `knownLp` (a curated address) is tried first with a
  * cheap fetch; it must still pass every rule. Falls back to the full market scan.
  * Throws only on RPC failure of the scan; null = no qualifying LP.
+ *
+ * `opts.scan === false` (with a `knownLp`): the caller has seen asset 0's vault bound to
+ * `knownLp`, so by rule 4a the scan could only re-find that same portfolio. Only the cheap
+ * fetch runs; its RPC failure is thrown instead of falling through to a scan.
  */
 export async function resolveMarketLp(
   connection: Connection,
   programId: PublicKey,
   market: PublicKey,
   knownLp?: PublicKey | null,
+  opts?: { scan?: boolean },
 ): Promise<MarketLp | null> {
+  const noScan = opts?.scan === false && !!knownLp;
   const marketInfo = await connection.getAccountInfo(market, "confirmed");
   if (!marketInfo) return null;
   const marketData = new Uint8Array(marketInfo.data);
@@ -265,10 +271,12 @@ export async function resolveMarketLp(
         const lp = selectMarketLp({ programId, market, marketData, portfolios: rows, ctxs: await fetchCtxs(connection, rows), complete: false });
         if (lp) return lp;
       }
-    } catch {
+    } catch (error) {
+      if (noScan) throw error;
       /* fall through to the scan */
     }
   }
+  if (noScan) return null;
 
   const accounts = await connection.getProgramAccounts(programId, { filters: marketPortfolioFilters(market) });
   const rows = accounts.map(({ pubkey, account }) => ({ pubkey, data: new Uint8Array(account.data) }));
