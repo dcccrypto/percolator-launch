@@ -109,9 +109,12 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
   /** Set on a definitive 404: this deployment has no indexer — skip the call for the session. */
   let candlesUnavailable = v22HasNoIndexer(); // v2.2 preview: no indexer (lib/v22/indexer.ts)
   /**
-   * v2.2 lot markets: the indexer stores per-LOT marks and trades in LOTS (wrapper doc v22-wave-a-wire.md:46: "candles in
-   * per-token price" is the app's job), and the app's mark store is per lot too. The chart shows per TOKEN, so every
-   * price from those sources is divided by 10^lot_exp and every size multiplied by it (lib/v22/lot.ts). 0 = no lots.
+   * v2.2 lot markets: the chart shows per TOKEN. History prices from /api/candles are already per token
+   * (lib/candle-lot-scale.ts); only volume (raw engine size, lots) is multiplied by 10^lot_exp. Live trades on the
+   * price-WS `trades:<slab>` channel are per token when the row recorded its unit (trades.price_lot_exp, sent as
+   * priceLotExp 0); a row of unknown unit is classified like /api/candles' legacy rows (liveTradePrice). Size is
+   * converted. Mark ticks come from the price store, which keeps per-LOT prices, and are divided
+   * by 10^lot_exp (lib/v22/lot.ts). 0 = no lots.
    */
   const lotBySlab = new Map<string, number>();
   const lotOf = (slab: string): number => lotBySlab.get(slab) ?? 0;
@@ -130,6 +133,17 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
     }
   }
   const px = (v: number, k: number): number => (k === 0 ? v : v / 10 ** k);
+  /**
+   * A live trade's per-token price on a lot market (k > 0). A feed row that recorded its unit (`priceLotExp`
+   * 0: trades.price_lot_exp was set and the price put on tokens) is exact. A row whose unit is unknown (a legacy
+   * row, or a feed that does not send the unit) gets the same midpoint rule as /api/candles, anchored on the
+   * forming bar's close (per token, from history): above it x 10^(k/2) it is per LOT and is divided by 10^k.
+   */
+  const liveTradePrice = (t: { price: number; priceLotExp?: number | null }, k: number, ref: ProviderBar | null): number => {
+    if (typeof t.priceLotExp === "number") return t.priceLotExp === 0 ? t.price : t.price / 10 ** t.priceLotExp;
+    if (ref && ref.close > 0 && t.price > ref.close * 10 ** (k / 2)) return t.price / 10 ** k;
+    return t.price;
+  };
   const qty = (v: number, k: number): number => (k === 0 ? v : v * 10 ** k);
 
   async function fetchWindow(slab: string, res: ProviderResolution, fromSec: number, toSec: number): Promise<ProviderBar[]> {
@@ -149,7 +163,9 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
     if (!r.ok) throw new Error(`candles HTTP ${r.status}`);
     const k = lotOf(slab);
     const bars = parseUdf(await r.json());
-    return k === 0 ? bars : bars.map((b) => ({ ...b, open: px(b.open, k), high: px(b.high, k), low: px(b.low, k), close: px(b.close, k), volume: qty(b.volume, k) }));
+    // /api/candles already answers PER-TOKEN prices on a lot market (lib/candle-lot-scale.ts), so only the
+    // volume (raw size sum, in lots) is converted here; dividing the prices again drew bars 10^k too low.
+    return k === 0 ? bars : bars.map((b) => ({ ...b, volume: qty(b.volume, k) }));
   }
 
   return {
@@ -232,7 +248,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
           return;
         }
         const k = lotOf(slab);
-        const bar = applyTrade(last, k === 0 ? t : { ...t, price: px(t.price, k), size: qty(t.size, k) }, resolution);
+        const bar = applyTrade(last, k === 0 ? t : { ...t, price: liveTradePrice(t, k, last), size: qty(t.size, k) }, resolution);
         if (bar) {
           last = bar;
           handlers.onBar(bar);

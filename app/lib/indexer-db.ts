@@ -177,6 +177,68 @@ export async function queryTradesForCandles(
 // (one row per traded bucket). bucketCandles() stays as the reference implementation: the
 // aggregation is tested against it on the same rows (__tests__/lib/candles-sql-aggregate.test.ts).
 
+/**
+ * Per-row price on ONE scale (per token). `kParam` / `anchorParam` are SQL placeholders for lot_exp and the
+ * per-token anchor.
+ *
+ * `trades.price_lot_exp` (indexer migration 20261120210000) says which unit a row's price is in: per
+ * 10^price_lot_exp tokens, 0 = per token. When it is set it is the truth, and the row is divided by exactly that.
+ * Only a legacy row (NULL: written before the indexer recorded it) is classified by the midpoint rule: on a lot
+ * market, a price above anchor x 10^(k/2) is per LOT. `withColumn` false = a database without the column (all rows
+ * legacy, the rule as before).
+ */
+const LOT_NORMALIZED_PRICE_SQL = (kParam: string, anchorParam: string, withColumn = true) => {
+  const legacy = `CASE WHEN ${kParam}::int > 0 AND ${anchorParam}::numeric > 0
+              AND price > ${anchorParam}::numeric * power(10::numeric, ${kParam}::int / 2.0)
+            THEN price / power(10::numeric, ${kParam}::int)
+            ELSE price END`;
+  return withColumn
+    ? `CASE WHEN price_lot_exp IS NOT NULL THEN price / power(10::numeric, price_lot_exp::int) ELSE ${legacy} END`
+    : legacy;
+};
+
+/**
+ * 1 when this row's scale came from the anchor (today's mark): a legacy row (no price_lot_exp) on a lot market with an
+ * anchor. A window holding one can change when the mark moves, so it is not edge-cached as history.
+ */
+const ANCHOR_DEPENDENT_SQL = (kParam: string, anchorParam: string, withColumn = true) =>
+  `(${kParam}::int > 0 AND ${anchorParam}::numeric > 0${withColumn ? " AND price_lot_exp IS NULL" : ""})`;
+
+/** True for "column price_lot_exp does not exist" (42703): the indexer migration is not applied on this database. */
+function isMissingPriceLotExp(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  return !!e && e.code === "42703" && /price_lot_exp/.test(e.message ?? "");
+}
+/** Set on a 42703 for price_lot_exp; re-probed after 5 min so an applied migration is picked up without a restart. */
+let priceLotExpMissingAt: number | null = null;
+const PRICE_LOT_EXP_REPROBE_MS = 5 * 60_000;
+function priceLotExpColumnAssumed(now = Date.now()): boolean {
+  return priceLotExpMissingAt === null || now - priceLotExpMissingAt >= PRICE_LOT_EXP_REPROBE_MS;
+}
+/** Test hook. */
+export function __resetPriceLotExpProbe(): void {
+  priceLotExpMissingAt = null;
+}
+/** Run `build(true)`; on a missing price_lot_exp column, remember it and run `build(false)` instead. */
+async function withPriceLotExp<T>(run: (withColumn: boolean) => Promise<T>): Promise<T> {
+  if (!priceLotExpColumnAssumed()) return run(false);
+  try {
+    return await run(true);
+  } catch (err) {
+    if (!isMissingPriceLotExp(err)) throw err;
+    priceLotExpMissingAt = Date.now();
+    return run(false);
+  }
+}
+
+/** Lot scale of a market for the candle queries: lot_exp and a per-token anchor price (null = unknown). */
+export interface CandleLotScale { lotExp: number; anchor: number | null }
+const lotParams = (s?: CandleLotScale): [number, string | null] => {
+  const k = s && Number.isInteger(s.lotExp) && s.lotExp > 0 && s.lotExp <= 15 ? s.lotExp : 0;
+  const a = s?.anchor != null && Number.isFinite(s.anchor) && s.anchor > 0 ? String(s.anchor) : null;
+  return [k, a];
+};
+
 /** Most bars one aggregated query returns; the NEWEST are kept (like the old row ceiling). */
 export const CANDLE_MAX_BARS = 10_000;
 
@@ -193,36 +255,59 @@ export function candleWindow(fromSec: number, toSec: number, bucketSeconds: numb
 
 /**
  * Params: $1 slab, $2 network, $3 bucket seconds, $4 first bucket (unix s, inclusive),
- * $5 window end (unix s, exclusive), $6 max bars.
+ * $5 window end (unix s, exclusive), $6 max bars, $7 lot_exp (0 = no lots), $8 per-token anchor
+ * price (NULL = unknown).
  *
- * Mirrors bucketCandles exactly: a row counts only with a positive, finite price and a finite (or
- * NULL) size; bucket = floor(epoch seconds) floored to the bucket; open/close = first/last price by
- * (created_at, id); v = sum(|size|). Prices and volume go out as numeric text so the JS side parses
- * them with the same Number() the raw path used.
+ * Mirrors bucketCandles: a row counts only with a positive, finite price and a finite (or NULL)
+ * size; bucket = floor(epoch seconds) floored to the bucket; v = sum(|size|). A price-0 row still
+ * counts for nothing, volume included (unchanged policy).
+ *
+ * Open/close follow chain order as far as `trades` records it: (created_at, leg_index, id). One
+ * webhook INSERT stamps every fill with the same created_at, so without leg_index the legs of one
+ * tx were ordered by a random uuid (J-20261120 candles-vs-trades, cause 2). Trades has no slot or
+ * tx-index column yet; when it gets one it belongs between created_at and leg_index.
+ *
+ * Unit scale (cause 4): every bar is per token. A row with `price_lot_exp` set is divided by
+ * 10^price_lot_exp, exactly (the indexer records the unit it wrote). A legacy row (NULL: on a lot market,
+ * rows written before the indexer knew lot_exp k hold the per-LOT price, 10^k x per token) falls back to
+ * the midpoint rule: above anchor x 10^(k/2) it is per lot and is divided by 10^k. k = 0 or no anchor:
+ * legacy prices are untouched. Only legacy rows can be misread after a move of more than 10^(k/2) from
+ * today's mark, and a bucket holding one reports `a` (anchor-dependent) so it is not cached as history.
+ * Sizes are engine Q for every row (no mixing), so volume is the same raw sum.
+ *
+ * Prices and volume go out as numeric text: prices are parsed with Number(), volume stays exact text.
  */
-export const CANDLE_AGG_SQL = `
-SELECT t, o, h, l, c, v FROM (
+export const candleAggSql = (withColumn = true) => `
+SELECT t, o, h, l, c, v, a FROM (
   SELECT (floor(extract(epoch FROM created_at))::bigint / $3::bigint) * $3::bigint AS t,
-         ((array_agg(price ORDER BY created_at, id))[1])::text AS o,
-         max(price)::text AS h,
-         min(price)::text AS l,
-         ((array_agg(price ORDER BY created_at DESC, id DESC))[1])::text AS c,
-         coalesce(sum(abs(size)), 0)::text AS v
-    FROM trades
-   WHERE slab_address = $1
-     AND network = $2
-     AND created_at >= to_timestamp($4::bigint)
-     AND created_at <  to_timestamp($5::bigint)
-     AND price IS NOT NULL AND price > 0 AND price < 'Infinity'::numeric
-     AND (size IS NULL OR abs(size) < 'Infinity'::numeric)
+         ((array_agg(p ORDER BY created_at, leg_index, id))[1])::text AS o,
+         max(p)::text AS h,
+         min(p)::text AS l,
+         ((array_agg(p ORDER BY created_at DESC, leg_index DESC, id DESC))[1])::text AS c,
+         coalesce(sum(abs(size)), 0)::text AS v,
+         bool_or(g) AS a
+    FROM (
+      SELECT created_at, leg_index, id, size,
+             ${LOT_NORMALIZED_PRICE_SQL("$7", "$8", withColumn)} AS p,
+             ${ANCHOR_DEPENDENT_SQL("$7", "$8", withColumn)} AS g
+        FROM trades
+       WHERE slab_address = $1
+         AND network = $2
+         AND created_at >= to_timestamp($4::bigint)
+         AND created_at <  to_timestamp($5::bigint)
+         AND price IS NOT NULL AND price > 0 AND price < 'Infinity'::numeric
+         AND (size IS NULL OR abs(size) < 'Infinity'::numeric)
+    ) r
    GROUP BY 1
    ORDER BY 1 DESC
    LIMIT $6
 ) b ORDER BY t`;
+/** The query against a database that has trades.price_lot_exp (every current indexer DB). */
+export const CANDLE_AGG_SQL = candleAggSql(true);
 
-interface AggCandleRow { t: string | number; o: string; h: string; l: string; c: string; v: string }
+interface AggCandleRow { t: string | number; o: string; h: string; l: string; c: string; v: string; a?: boolean | null }
 
-/** Aggregated rows -> UDF. Pure (exported for the equivalence test). */
+/** Aggregated rows -> UDF. Pure (exported for the equivalence test). Volume stays exact numeric text. */
 export function aggRowsToUdf(rows: readonly AggCandleRow[]): UdfResponse {
   if (rows.length === 0) return emptyUdf("no_data");
   const out: UdfResponse = { s: "ok", t: [], o: [], h: [], l: [], c: [], v: [] };
@@ -232,7 +317,8 @@ export function aggRowsToUdf(rows: readonly AggCandleRow[]): UdfResponse {
     out.h.push(Number(r.h));
     out.l.push(Number(r.l));
     out.c.push(Number(r.c));
-    out.v.push(Number(r.v));
+    // Not Number(): v is a sum of i128 engine sizes and can pass 2^53 (cause 5).
+    out.v.push(String(r.v));
   }
   return out;
 }
@@ -251,44 +337,64 @@ export async function queryCandlesAggregated(
   bucketSeconds: number,
   firstBucket: number,
   endExclusive: number,
-  opts: { maxBars?: number; sql?: CandleSql; network?: string } = {},
-): Promise<{ udf: UdfResponse; truncated: boolean }> {
+  opts: { maxBars?: number; sql?: CandleSql; network?: string; lot?: CandleLotScale } = {},
+): Promise<{ udf: UdfResponse; truncated: boolean; anchorDependent: boolean }> {
   const sql: CandleSql = opts.sql ?? (getSql() as unknown as CandleSql);
   const maxBars = opts.maxBars ?? CANDLE_MAX_BARS;
-  const rows = Array.from(
-    (await sql.unsafe(CANDLE_AGG_SQL, [
-      slabAddress,
-      opts.network ?? getServerNetwork(),
-      bucketSeconds,
-      firstBucket,
-      endExclusive,
-      maxBars,
-    ])) as ArrayLike<AggCandleRow>,
+  const params = [
+    slabAddress,
+    opts.network ?? getServerNetwork(),
+    bucketSeconds,
+    firstBucket,
+    endExclusive,
+    maxBars,
+    ...lotParams(opts.lot),
+  ];
+  const rows = await withPriceLotExp(async (withColumn) =>
+    Array.from((await sql.unsafe(candleAggSql(withColumn), params)) as ArrayLike<AggCandleRow>),
   );
-  return { udf: aggRowsToUdf(rows), truncated: rows.length >= maxBars };
+  return { udf: aggRowsToUdf(rows), truncated: rows.length >= maxBars, anchorDependent: rows.some((r) => r.a === true) };
 }
 
 /**
  * The price of the last trade strictly before `beforeSec`, or null when there is none. Seeds
  * `fillCandleGaps` so a history page that starts between trades opens on the price that was in
  * force, not on a gap. Uses the same (slab_address, network, created_at DESC) index as above.
+ * Same tie order (leg_index) and the same lot normalisation as CANDLE_AGG_SQL, so the seed is on the
+ * scale of the bars it continues.
  */
-export async function queryLastTradePriceBefore(slabAddress: string, beforeSec: number): Promise<number | null> {
-  const sql = getSql();
+export async function queryLastTradePriceBefore(slabAddress: string, beforeSec: number, lot?: CandleLotScale): Promise<number | null> {
+  return (await queryLastTradeSeed(slabAddress, beforeSec, lot)).price;
+}
+
+/** queryLastTradePriceBefore plus whether that price's scale came from the anchor (a legacy row on a lot market). */
+export async function queryLastTradeSeed(
+  slabAddress: string,
+  beforeSec: number,
+  lot?: CandleLotScale,
+  opts: { sql?: CandleSql; network?: string } = {},
+): Promise<{ price: number | null; anchorDependent: boolean }> {
+  const sql: CandleSql = opts.sql ?? (getSql() as unknown as CandleSql);
   const beforeIso = new Date(beforeSec * 1000).toISOString();
-  const rows = await sql<{ price: string | null }[]>`
-    SELECT price::text AS price
-    FROM trades
-    WHERE slab_address = ${slabAddress}
-      AND network = ${getServerNetwork()}
-      AND created_at < ${beforeIso}::timestamptz
-      AND price IS NOT NULL
-      AND price > 0
-    ORDER BY created_at DESC
-    LIMIT 1
-  `;
+  const params = [slabAddress, opts.network ?? getServerNetwork(), beforeIso, ...lotParams(lot)];
+  const rows = await withPriceLotExp(async (withColumn) =>
+    Array.from(
+      (await sql.unsafe(
+        `SELECT (${LOT_NORMALIZED_PRICE_SQL("$4", "$5", withColumn)})::text AS price, ${ANCHOR_DEPENDENT_SQL("$4", "$5", withColumn)} AS a
+           FROM trades
+          WHERE slab_address = $1
+            AND network = $2
+            AND created_at < $3::timestamptz
+            AND price IS NOT NULL
+            AND price > 0
+          ORDER BY created_at DESC, leg_index DESC, id DESC
+          LIMIT 1`,
+        params,
+      )) as ArrayLike<{ price: string | null; a: boolean | null }>,
+    ),
+  );
   const p = Number(rows[0]?.price);
-  return Number.isFinite(p) && p > 0 ? p : null;
+  return Number.isFinite(p) && p > 0 ? { price: p, anchorDependent: rows[0]?.a === true } : { price: null, anchorDependent: false };
 }
 
 // ── OHLCV bucketing (ported from percolator-api/src/routes/candles.ts) ──────
@@ -300,7 +406,8 @@ export interface UdfResponse {
   h: number[];
   l: number[];
   c: number[];
-  v: number[];
+  /** Volume as exact decimal text (a sum of i128 engine sizes can pass 2^53; Number() would round it). */
+  v: string[];
   errmsg?: string;
 }
 
@@ -357,7 +464,7 @@ export function bucketCandles(
     out.h.push(b.h);
     out.l.push(b.l);
     out.c.push(b.c);
-    out.v.push(b.v);
+    out.v.push(String(b.v));
   }
   return out;
 }
@@ -407,7 +514,7 @@ export function fillCandleGaps(
       out.t.push(t); out.o.push(udf.o[i]); out.h.push(udf.h[i]); out.l.push(udf.l[i]); out.c.push(udf.c[i]); out.v.push(udf.v[i]);
       prev = udf.c[i];
     } else if (prev !== null) {
-      out.t.push(t); out.o.push(prev); out.h.push(prev); out.l.push(prev); out.c.push(prev); out.v.push(0);
+      out.t.push(t); out.o.push(prev); out.h.push(prev); out.l.push(prev); out.c.push(prev); out.v.push("0");
     }
   }
   return out.t.length > 0 ? out : udf;

@@ -34,7 +34,10 @@ describe("#2513 indexer-db reads are network-scoped", () => {
 
   it("the positional-param query (CANDLE_AGG_SQL) binds the server network", () => {
     expect(src).toMatch(/AND network = \$2\n/);
-    expect(src).toMatch(/sql\.unsafe\(CANDLE_AGG_SQL, \[\s*slabAddress,\s*opts\.network \?\? getServerNetwork\(\),/);
+    // Both positional queries (the candle aggregate and the fill seed) take $2 from the server network.
+    const binds = src.match(/const params = \[\s*slabAddress,\s*opts\.network \?\? getServerNetwork\(\),/g) ?? [];
+    expect(binds.length).toBe(2);
+    expect(src).toMatch(/sql\.unsafe\(candleAggSql\(withColumn\), params\)/);
   });
 
   it("actually found query sites — the scan cannot pass vacuously", () => {

@@ -31,10 +31,10 @@ describe("candle window rounding", () => {
     const urls = new Set([7_201, 8_000, 10_799].map((now) => JSON.stringify(alignCandleWindow(now - 30 * 3_600, now, 3_600))));
     expect(urls.size).toBe(1);
   });
-  it("aggRowsToUdf parses numeric text with Number(), as the raw path did", () => {
+  it("aggRowsToUdf parses prices with Number(), as the raw path did; volume stays exact text", () => {
     expect(aggRowsToUdf([])).toEqual({ s: "no_data", t: [], o: [], h: [], l: [], c: [], v: [] });
     expect(aggRowsToUdf([{ t: "60", o: "1.500000", h: "2.25", l: "1", c: "2", v: "15" }])).toEqual({
-      s: "ok", t: [60], o: [1.5], h: [2.25], l: [1], c: [2], v: [15],
+      s: "ok", t: [60], o: [1.5], h: [2.25], l: [1], c: [2], v: ["15"],
     });
   });
 });

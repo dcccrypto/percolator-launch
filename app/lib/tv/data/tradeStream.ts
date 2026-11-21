@@ -10,6 +10,8 @@ export interface LiveTrade {
   size: number;
   /** Seconds since epoch. */
   tsSec: number;
+  /** 0 = `price` is per token (the feed knew the row's unit); null/absent = unit unknown (legacy row or an older feed). */
+  priceLotExp?: number | null;
 }
 
 export type TradeListener = (trade: LiveTrade) => void;
@@ -40,13 +42,15 @@ export function parseTradeMessage(raw: unknown, slab: string): LiveTrade | null 
     }
   }
   if (typeof msg !== "object" || msg === null) return null;
-  const m = msg as { type?: unknown; slab?: unknown; price?: unknown; size?: unknown; timestamp?: unknown };
+  const m = msg as { type?: unknown; slab?: unknown; price?: unknown; size?: unknown; timestamp?: unknown; priceLotExp?: unknown };
   if (m.type !== "trade" || m.slab !== slab) return null;
   const price = Number(m.price);
   const size = Math.abs(Number(m.size));
   if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(size)) return null;
   const tsMs = typeof m.timestamp === "number" && Number.isFinite(m.timestamp) ? m.timestamp : Date.now();
-  return { price, size, tsSec: Math.floor(tsMs / 1000) };
+  const out: LiveTrade = { price, size, tsSec: Math.floor(tsMs / 1000) };
+  if (typeof m.priceLotExp === "number" && Number.isInteger(m.priceLotExp) && m.priceLotExp >= 0 && m.priceLotExp <= 15) out.priceLotExp = m.priceLotExp;
+  return out;
 }
 
 const BACKOFF_BASE_MS = 1_000;
