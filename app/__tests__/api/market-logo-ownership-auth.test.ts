@@ -53,11 +53,14 @@ vi.mock("@sentry/nextjs", () => ({
 const { mockGetServiceClient, mockSingle } = vi.hoisted(() => {
   const mockSingle = vi.fn();
   const mockGetServiceClient = vi.fn(() => ({
-    from: () => ({ select: () => ({ eq: () => ({ single: mockSingle }) }) }),
+    from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ single: mockSingle }), single: mockSingle }) }) }),
   }));
   return { mockGetServiceClient, mockSingle };
 });
-vi.mock("@/lib/supabase", () => ({ getServiceClient: mockGetServiceClient }));
+vi.mock("@/lib/supabase", () => ({
+    getServiceClient: mockGetServiceClient,
+    getServerNetwork: () => "devnet",
+  }));
 
 const SLAB = "7RXTVmGcJMDqqTCFu5ADQRyLDvVZBi3r5U5WXzoULHJV";
 
@@ -100,7 +103,7 @@ describe("POST /api/markets/[slab]/logo — wallet ownership auth", () => {
     delete process.env.ADMIN_API_SECRET;
     // Default: the market exists and its registered creator is REGISTERED.
     mockGetServiceClient.mockImplementation(() => ({
-      from: () => ({ select: () => ({ eq: () => ({ single: mockSingle }) }) }),
+      from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ single: mockSingle }), single: mockSingle }) }) }),
     }));
     mockSingle.mockResolvedValue({
       data: { slab_address: SLAB, deployer: REGISTERED.publicKey.toBase58() },
