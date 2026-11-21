@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 
 const GH = "https://github.com/dcccrypto";
 
-/** Public, actively maintained repos only. Re-check before adding more. */
+/** Public repos the product uses. Re-check before adding more. */
 const REPOS = [
   {
     name: "percolator-sdk",
@@ -40,6 +40,18 @@ const REPOS = [
   {
     name: "percolator-oracle-keeper",
     desc: "Oracle keeper that pushes price feeds to devnet markets.",
+  },
+  {
+    name: "percolator-stake",
+    desc: "Insurance LP staking program (PDA admin, formally verified with Kani).",
+  },
+  {
+    name: "percolator-nft",
+    desc: "Token-2022 position NFTs — wrap and transfer an open perp position.",
+  },
+  {
+    name: "percolator-match",
+    desc: "Passive LP + vAMM matcher called via CPI (skew-aware inventory).",
   },
 ] as const;
 

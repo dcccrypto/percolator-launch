@@ -52,7 +52,7 @@ const WAITLIST_HOST_COMMUNITY: NavItem[] = [
   { href: "https://x.com/PercolatorTrade", label: "X", external: true },
   { href: "https://discord.gg/fJa4BDBxPN", label: "Discord", external: true },
   { href: "https://t.me/+fFHf5lGRAbk4OGEx", label: "Telegram", external: true },
-  { href: "/join", label: "Join Us" },
+  { href: "/join", label: "Work with us" },
   { href: "/report-bug", label: "Report Bug" },
 ];
 
