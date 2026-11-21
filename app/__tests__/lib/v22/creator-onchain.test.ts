@@ -14,6 +14,7 @@ import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { LAYOUT_V22 } from "@/lib/v22/sdk/layout";
 import { VAULT_LP_STATE_ACCOUNT_LEN } from "@/lib/limits/constants";
 import {
+  HISTORY_UNKNOWN_TTL_MS,
   MAX_HISTORY_LOOKUPS,
   __clearHistoryCache,
   findCreatorSlabKeys,
@@ -256,5 +257,47 @@ describe("lookupCreatorMarkets budget", () => {
     const unread = out.filter((o) => o.creationSlot === null).map((o) => Number(o.lastGoodOracleSlot));
     expect(unread.length).toBe(5);
     expect(Math.max(...unread)).toBeLessThan(100 + 5); // the 5 oldest were the ones skipped
+  });
+  it("expired unknown histories respect the per-lookup RPC budget", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    try {
+      const n = MAX_HISTORY_LOOKUPS + 5;
+      const t = setup(n, (i) => BigInt(100 + i), 1_000_000);
+      t.getSignaturesForAddress.mockResolvedValue([]); // inconclusive (empty) history for every market
+      await lookupCreatorMarkets(t.conn, PROGRAM, WALLET); // only MAX_HISTORY_LOOKUPS may read
+      expect(t.getSignaturesForAddress).toHaveBeenCalledTimes(MAX_HISTORY_LOOKUPS);
+      await lookupCreatorMarkets(t.conn, PROGRAM, WALLET); // cached ones are free, the other 5 are read
+      expect(t.getSignaturesForAddress).toHaveBeenCalledTimes(n);
+      await lookupCreatorMarkets(t.conn, PROGRAM, WALLET); // within the TTL: no RPC
+      expect(t.getSignaturesForAddress).toHaveBeenCalledTimes(n);
+      clock.mockReturnValue(1_000 + HISTORY_UNKNOWN_TTL_MS + 1); // every entry expires at once
+      await lookupCreatorMarkets(t.conn, PROGRAM, WALLET); // still at most MAX_HISTORY_LOOKUPS reads
+      expect(t.getSignaturesForAddress).toHaveBeenCalledTimes(n + MAX_HISTORY_LOOKUPS);
+      await lookupCreatorMarkets(t.conn, PROGRAM, WALLET);
+      expect(t.getSignaturesForAddress).toHaveBeenCalledTimes(n * 2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+});
+
+describe("readSlabHistory: an inconclusive short read is retried after the TTL", () => {
+  it("a transaction that was not readable yet is read again after HISTORY_UNKNOWN_TTL_MS", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    try {
+      const getSignaturesForAddress = vi.fn().mockResolvedValue([sig("launch", 42)]);
+      const getTransaction = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(txWith([0, 62]));
+      const conn = { getSignaturesForAddress, getTransaction } as never;
+      expect(await readSlabHistory(conn, PROGRAM, SLAB, 42n)).toEqual({ creationSlot: 42n, neverPushed: null });
+      clock.mockReturnValue(5_000);
+      expect((await readSlabHistory(conn, PROGRAM, SLAB, 42n)).neverPushed).toBeNull(); // cached within the TTL
+      expect(getTransaction).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(1_000 + HISTORY_UNKNOWN_TTL_MS + 1);
+      expect(await readSlabHistory(conn, PROGRAM, SLAB, 42n)).toEqual({ creationSlot: 42n, neverPushed: true });
+      expect(getSignaturesForAddress).toHaveBeenCalledTimes(2);
+      expect(getTransaction).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
   });
 });
