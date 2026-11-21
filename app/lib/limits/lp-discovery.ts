@@ -12,9 +12,9 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { V17_PORTFOLIO_IDENTITY_TRAILER_LEN, decodePortfolioMatcherControl } from "@percolatorct/sdk";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { isPortfolioAccount } from "@/lib/portfolio-account";
+import { resolveMarketLp } from "@/lib/market-lp";
+import { decodeAssetVaultLp, isV18MarketHeader } from "@/lib/limits/decode";
 
-const V17_PORTFOLIO_MAGIC = new Uint8Array([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-const PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF = 16;
 const PORTFOLIO_MATCHER_CONFIG_LEN = 104;
 const TTL_MS = 300_000;
 
@@ -37,7 +37,64 @@ export function matcherCtxOfPortfolio(data: Uint8Array): PublicKey | null {
 const cache = new Map<string, { v: LpAccounts; ts: number }>();
 
 export function invalidateLpAccounts(programId: PublicKey, slab: PublicKey): void {
-  cache.delete(`${programId.toBase58()}|${slab.toBase58()}`);
+  const prefix = `${programId.toBase58()}|${slab.toBase58()}|`;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) cache.delete(key);
+  }
+}
+
+/**
+ * Read-only fallback for a vault LP explicitly bound on-chain.
+ * Never supplies an unverified matcher context.
+ */
+async function verifiedBoundVaultRead(
+  connection: Connection,
+  programId: PublicKey,
+  slab: PublicKey,
+  knownLp: PublicKey,
+  assetIndex: number,
+): Promise<LpAccounts | null> {
+  const marketInfo = await connection.getAccountInfo(slab, "confirmed");
+
+  if (!marketInfo || !marketInfo.owner.equals(programId)) {
+    return null;
+  }
+
+  const marketData = new Uint8Array(marketInfo.data);
+  if (!isV18MarketHeader(marketData)) return null;
+
+  const binding = decodeAssetVaultLp(marketData, assetIndex);
+
+  if (
+    !binding?.bound ||
+    !new PublicKey(binding.vaultLpPortfolio).equals(knownLp)
+  ) {
+    return null;
+  }
+
+  const info = await connection.getAccountInfo(knownLp, "confirmed");
+
+  if (!info || !info.owner.equals(programId)) return null;
+
+  const data = new Uint8Array(info.data);
+
+  if (!isPortfolioAccount(data) || data.length < 80) {
+    return null;
+  }
+
+  // Immutable provenance must match this market and account.
+  if (!new PublicKey(data.subarray(16, 48)).equals(slab)) {
+    return null;
+  }
+
+  if (!new PublicKey(data.subarray(48, 80)).equals(knownLp)) {
+    return null;
+  }
+
+  return {
+    lpPortfolio: knownLp,
+    matcherCtx: null,
+  };
 }
 
 export async function resolveLpAccounts(
@@ -45,36 +102,66 @@ export async function resolveLpAccounts(
   programId: PublicKey,
   slab: PublicKey,
   knownLp: PublicKey | null = null,
+  assetIndex = 0,
 ): Promise<LpAccounts | null> {
-  const key = `${programId.toBase58()}|${slab.toBase58()}|${knownLp?.toBase58() ?? ""}`;
+  // CANONICAL_ASSET_ISOLATION_V1
+  // resolveMarketLp() currently selects the asset-0 trading LP.
+  // Never reuse it as a read-only vault LP for another asset.
+  if (!Number.isInteger(assetIndex) || assetIndex < 0) {
+    return null;
+  }
+
+  if (assetIndex !== 0) {
+    if (!knownLp) return null;
+    return verifiedBoundVaultRead(
+      connection, programId, slab, knownLp, assetIndex,
+    ).catch(() => null);
+  }
+
+  const key = `${programId.toBase58()}|${slab.toBase58()}|${assetIndex}|${knownLp?.toBase58() ?? ""}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.ts < TTL_MS) return hit.v;
 
   const pinned = knownLp ?? (PLAYGROUND_SLAB_META[slab.toBase58()]?.lp_portfolio_address
     ? new PublicKey(PLAYGROUND_SLAB_META[slab.toBase58()].lp_portfolio_address as string)
     : null);
-  let found: LpAccounts | null = null;
-  if (pinned) {
-    const info = await connection.getAccountInfo(pinned, "confirmed");
-    if (info) found = { lpPortfolio: pinned, matcherCtx: matcherCtxOfPortfolio(new Uint8Array(info.data)) };
+
+
+  let canonical: Awaited<ReturnType<typeof resolveMarketLp>> = null;
+  let canonicalError: unknown = null;
+
+  try {
+    canonical = await resolveMarketLp(
+      connection, programId, slab, pinned,
+    );
+  } catch (error) {
+    canonicalError = error;
   }
-  if (!found && !knownLp) {
-    const accounts = await connection.getProgramAccounts(programId, {
-      filters: [
-        { memcmp: { offset: 0, bytes: Buffer.from(V17_PORTFOLIO_MAGIC).toString("base64"), encoding: "base64" } },
-        { memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: slab.toBase58() } },
-      ],
-    });
-    for (const { pubkey, account } of accounts) {
-      const ctx = matcherCtxOfPortfolio(new Uint8Array(account.data));
-      if (ctx) {
-        found = { lpPortfolio: pubkey, matcherCtx: ctx };
-        break;
-      }
-    }
+
+  if (canonical) {
+    const found: LpAccounts = {
+      lpPortfolio: canonical.pubkey,
+      matcherCtx: canonical.matcherCtx,
+    };
+    cache.set(key, { v: found, ts: Date.now() });
+    return found;
   }
-  if (found) cache.set(key, { v: found, ts: Date.now() });
-  return found;
+
+  // Only an explicitly supplied, on-chain-bound vault LP
+  // may use this read-only fallback.
+  if (knownLp) {
+    const fallback = await verifiedBoundVaultRead(
+      connection, programId, slab, knownLp, assetIndex,
+    ).catch(() => null);
+
+    // Do not cache fallback: revocation must be observed
+    // on the next read.
+    if (fallback) return fallback;
+  }
+
+  if (canonicalError !== null) throw canonicalError;
+  return null;
+
 }
 
 /** `["vault_lp", market]` under the wrapper program (P3 VaultLpStateV18 PDA). */
