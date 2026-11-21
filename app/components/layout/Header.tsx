@@ -43,8 +43,18 @@ function filterForWaitlistHost(items: NavItem[], group: "trade" | "build" | "com
   if (!isWaitlistHost) return items;
   if (group === "trade") return [];
   if (group === "build") return items.filter((item) => WAITLIST_HOST_BUILD_KEEP.has(item.href));
-  return items; // community: keep everything
+  // community: the waitlist site has no leaderboard/agents (trading-app pages);
+  // show the real next steps — socials, team application, bug reports.
+  return WAITLIST_HOST_COMMUNITY;
 }
+
+const WAITLIST_HOST_COMMUNITY: NavItem[] = [
+  { href: "https://x.com/PercolatorTrade", label: "X", external: true },
+  { href: "https://discord.gg/fJa4BDBxPN", label: "Discord", external: true },
+  { href: "https://t.me/+fFHf5lGRAbk4OGEx", label: "Telegram", external: true },
+  { href: "/join", label: "Join Us" },
+  { href: "/report-bug", label: "Report Bug" },
+];
 
 const tradeLinks: NavItem[] = [
   { href: "/markets", label: "Markets" },
@@ -284,6 +294,7 @@ export const Header: FC = () => {
                     <Link
                       key={item.href}
                       href={item.href}
+                      {...(item.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                       onClick={() => setMobileOpen(false)}
                       className={[
                         "px-3 py-2 text-[13px] font-medium rounded-sm transition-all",
@@ -292,7 +303,7 @@ export const Header: FC = () => {
                           : "text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--bg-elevated)]",
                       ].join(" ")}
                     >
-                      {item.label}
+                      {item.label}{item.external ? " ↗" : ""}
                     </Link>
                   ))}
                 </div>

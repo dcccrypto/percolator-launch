@@ -7,6 +7,8 @@ import { usePathname } from "next/navigation";
 export interface NavItem {
   href: string;
   label: string;
+  /** Opens in a new tab (off-site link). */
+  external?: boolean;
 }
 
 interface NavDropdownProps {
@@ -115,6 +117,28 @@ export const NavDropdown: FC<NavDropdownProps> = ({ label, items }) => {
       >
         {items.map((item) => {
           const active = pathname === item.href;
+          const cls = [
+            "block px-4 py-2.5 text-sm transition-colors duration-150",
+            active
+              ? "text-[#22d3ee] bg-[rgba(34,211,238,0.08)]"
+              : "text-[#d1d5db] hover:text-[var(--text)] hover:bg-[var(--bg-surface)]",
+          ].join(" ");
+          if (item.external) {
+            return (
+              <a
+                key={item.href}
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                role="menuitem"
+                tabIndex={open ? 0 : -1}
+                onClick={() => setOpen(false)}
+                className={cls}
+              >
+                {item.label} ↗
+              </a>
+            );
+          }
           return (
             <Link
               key={item.href}
@@ -122,12 +146,7 @@ export const NavDropdown: FC<NavDropdownProps> = ({ label, items }) => {
               role="menuitem"
               tabIndex={open ? 0 : -1}
               onClick={() => setOpen(false)}
-              className={[
-                "block px-4 py-2.5 text-sm transition-colors duration-150",
-                active
-                  ? "text-[#22d3ee] bg-[rgba(34,211,238,0.08)]"
-                  : "text-[#d1d5db] hover:text-[var(--text)] hover:bg-[var(--bg-surface)]",
-              ].join(" ")}
+              className={cls}
             >
               {item.label}
             </Link>
