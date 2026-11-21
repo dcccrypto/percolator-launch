@@ -21,7 +21,6 @@
  */
 import { PublicKey, Transaction, VersionedTransaction, type AccountMeta, type Connection, type TransactionInstruction } from "@solana/web3.js";
 import { ACCOUNTS_PERMISSIONLESS_CRANK_BASE, buildAccountMetas, buildIx, encodePermissionlessCrank } from "@percolatorct/sdk";
-import { defaultCrankObservations } from "@/lib/v18-wire";
 import { computeBudgetPrefix, parseCustomInstructionError, REPAIR_CU, type SimResult } from "@/lib/self-heal";
 import { isSelfHealEnabled } from "@/lib/self-heal";
 import { P3_ERR } from "./constants";
@@ -56,12 +55,15 @@ export function buildVaultLpCrankIx(
   oracleTail: readonly AccountMeta[] = [],
   assetIndex = 0,
 ): TransactionInstruction {
+  // The hint must CLAIM the oracle accounts it carries: the program rejects a crank whose tail
+  // is not fully consumed by the hints (InvalidInstruction), so a Pyth tail with a 0-account
+  // hint (defaultCrankObservations) made every Pyth-market repair crank fail.
   const keys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [cranker, market, vaultLp]);
   for (const k of oracleTail) keys.push(k);
   return buildIx({
     programId,
     keys,
-    data: encodePermissionlessCrank({ nowSlot: 0n, observations: defaultCrankObservations(assetIndex) }),
+    data: encodePermissionlessCrank({ nowSlot: 0n, observations: [{ assetIndex, oracleAccounts: oracleTail.length }] }),
   });
 }
 
