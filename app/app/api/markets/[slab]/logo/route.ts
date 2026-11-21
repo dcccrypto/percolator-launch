@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import * as Sentry from "@sentry/nextjs";
-import { getServiceClient } from "@/lib/supabase";
+import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { validateSlabParam } from "@/lib/route-validators";
 import { detectRasterImage } from "@/lib/raster-image-bytes";
 
@@ -138,6 +138,7 @@ export async function GET(
       .from("markets")
       .select("logo_url")
       .eq("slab_address", validSlab)
+      .eq("network", getServerNetwork())
       .single();
 
     if (error) {
@@ -184,6 +185,7 @@ export async function POST(
     .from("markets")
     .select("slab_address, deployer")
     .eq("slab_address", validSlab)
+      .eq("network", getServerNetwork())
     .single();
   if (marketError || !market) {
     return NextResponse.json({ error: "Market not found" }, { status: 404 });
@@ -293,7 +295,7 @@ export async function POST(
       );
     }
 
-    const filePath = `market-logos/${validSlab}.${detected.ext}`;
+    const filePath = `market-logos/${getServerNetwork()}/${validSlab}.${detected.ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from("logos")
@@ -307,14 +309,26 @@ export async function POST(
     const { data: urlData } = supabase.storage.from("logos").getPublicUrl(filePath);
     const publicUrl = urlData.publicUrl;
 
-    const { error: updateError } = await supabase
+    const { error: updateError, count: updatedCount } = await supabase
       .from("markets")
-      .update({ logo_url: publicUrl })
-      .eq("slab_address", validSlab);
+      .update({ logo_url: publicUrl }, { count: "exact" })
+      .eq("slab_address", validSlab)
+      .eq("network", getServerNetwork());
 
     if (updateError) {
       console.error("DB update error:", updateError);
       return NextResponse.json({ error: "Failed to save logo URL. Please try again." }, { status: 500 });
+    }
+
+    if (updatedCount !== 1) {
+      return NextResponse.json(
+        {
+          error: updatedCount === 0
+            ? "Market record not updated on active network"
+            : "Unable to verify market logo update",
+        },
+        { status: updatedCount === 0 ? 409 : 500 }
+      );
     }
 
     uploadTimestamps.set(validSlab, Date.now());
