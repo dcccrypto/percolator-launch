@@ -7,6 +7,8 @@ import dynamic from "next/dynamic";
 import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { isMockMode } from "@/lib/mock-mode";
+import { PnlHistoryCard } from "@/components/dashboard/pnl-history/PnlHistoryCard";
+import { isPortfolioPnlHistoryEnabled } from "@/lib/portfolio-pnl-history-flag";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
@@ -207,6 +209,50 @@ const FundingRates = dynamic(
 // Mobile tab type
 type MobileTab = "overview" | "positions" | "history" | "watchlist";
 
+
+function PortfolioPnLHistorySwitcher() {
+  const [view, setView] = useState<"live" | "history">("live");
+
+  // Preserve the existing live PnL when history is disabled.
+  if (!isPortfolioPnlHistoryEnabled()) {
+    return <PnlChart />;
+  }
+
+  return (
+    <div className="min-w-0">
+      <div
+        className="mb-2 flex items-center justify-end gap-2"
+        role="group"
+        aria-label="Portfolio PnL view"
+      >
+        {(["live", "history"] as const).map((option) => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={view === option}
+            onClick={() => setView(option)}
+            className={[
+              "rounded-sm border px-2 py-1 text-[10px] font-medium",
+              "transition-colors",
+              view === option
+                ? "border-[var(--accent)] text-[var(--accent)]"
+                : "border-[var(--border)] text-[var(--text-secondary)]",
+            ].join(" ")}
+          >
+            {option === "live" ? "Live PnL" : "History"}
+          </button>
+        ))}
+      </div>
+
+      {view === "live" ? (
+        <PnlChart />
+      ) : (
+        <PnlHistoryCard />
+      )}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   useEffect(() => { document.title = "Dashboard — Percolator"; }, []);
 
@@ -300,8 +346,8 @@ export default function DashboardPage() {
           {/* Row 1: PnL Chart + Position Summary */}
           <ScrollReveal delay={0.1}>
             <div className="mb-4 grid gap-4 lg:grid-cols-5">
-              <div className="lg:col-span-3" style={{ minHeight: 380, maxHeight: 500 }}>
-                <PnlChart />
+              <div className="lg:col-span-3" style={{ minHeight: 380 }}>
+                <PortfolioPnLHistorySwitcher />
               </div>
               <div className="lg:col-span-2" style={{ minHeight: 380, maxHeight: 500 }}>
                 <PositionSummary />
@@ -373,7 +419,7 @@ export default function DashboardPage() {
               <ProtocolStatsBar />
               <StatsBar />
               <div style={{ minHeight: 300 }}>
-                <PnlChart />
+                <PortfolioPnLHistorySwitcher />
               </div>
             </div>
           )}
