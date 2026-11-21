@@ -14,7 +14,8 @@ import { TradeStatsPanel } from "@/components/trade/TradeStatsPanel";
 import { PnlHistoryCard } from "@/components/dashboard/pnl-history/PnlHistoryCard";
 import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
 import { describeEntryPrice } from "@/lib/entry-price-display";
-import { formatPnl, formatTokenAmount, formatUsdPriceE6, LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
+import { formatPnl, formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
+import { describeLiqPrice } from "@/lib/liq-price-display";
 import { explorerAccountUrl } from "@/lib/config";
 import { computePositionLeverage, describePositionLeverage } from "@/lib/position-leverage";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
@@ -226,9 +227,22 @@ function PositionCard({
   const size = pos.effectiveSize ?? pos.account.positionSize;
   const isLong = size > 0n;
   const abs = size < 0n ? -size : size;
-  const entry = describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource });
-  const liq = pos.liquidationPriceE6;
-  const liqText = liq > 0n && liq !== LIQ_PRICE_UNLIQUIDATABLE ? formatUsdPriceE6(liq) : "—";
+  // The shared entry display: the gated "—" for an unresolved entry, never the mark (#2671).
+  const entryDisplay = describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource });
+  // The shared liquidation display, with the same inputs as the portfolio row, so a covered
+  // position and an unknown one cannot both read as "—" (#2412).
+  const liqDisplay = describeLiqPrice({
+    liqPriceE6: pos.liquidationPriceE6,
+    positionSize: pos.account?.positionSize ?? 0n,
+    capital: pos.account?.capital ?? 0n,
+    entryPriceE6: pos.effectiveEntryPrice,
+    effectiveSize: pos.adlKnown ? pos.effectiveSize : null,
+    markPriceE6: pos.oraclePriceE6,
+    maintenanceMarginBps: pos.maintenanceMarginBps,
+    hasResolvedEntry: entryDisplay.known,
+    formatPrice: formatUsdPriceE6,
+    unknownText: "—",
+  });
   const pnl = pos.unrealizedPnl;
   const pnlColor = !pos.pnlKnown || pnl === 0n ? "text-[var(--text-secondary)]" : pnl > 0n ? "text-[var(--long)]" : "text-[var(--short)]";
   // Same current-leverage figure as the portfolio page: notional at the mark / (capital + pnl).
@@ -271,9 +285,9 @@ function PositionCard({
       <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2">
         {cell("Size", formatTokenAmount(abs, decimals))}
         {cell("Lev", lev.text, lev.known ? "text-[var(--text)]" : "text-[var(--text-secondary)]", lev.title)}
-        {cell("Entry", entry.text, entry.known ? "text-[var(--text)]" : "text-[var(--text-secondary)]", entry.title)}
-        {cell("Mark", formatUsdPriceE6(pos.oraclePriceE6))}
-        {cell("Liq. Price", liqText)}
+        {cell("Entry", <>{entryDisplay.text}</>, entryDisplay.known ? "text-[var(--text)]" : "text-[var(--text-secondary)]", entryDisplay.title)}
+        {cell("Mark", pos.oraclePriceE6 > 0n ? formatUsdPriceE6(pos.oraclePriceE6) : "—")}
+        {cell("Liq. Price", liqDisplay.text, liqDisplay.kind === "unknown" ? "text-[var(--text-secondary)]" : "text-[var(--text)]", liqDisplay.title)}
         {cell(
           "Unrealized",
           pos.pnlKnown ? `${formatPnl(pnl, decimals)}${collateralSymbol ? ` ${collateralSymbol}` : ""}` : "—",

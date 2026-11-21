@@ -86,10 +86,12 @@ describe("the entry-price surface list is discovered, not hand-maintained", () =
         "components/trade/PositionsDock.tsx",
         "components/trade/PositionPanel.tsx",
         "components/trade/OtherMarketPositions.tsx",
+        "app/trader/[wallet]/page.tsx",
       ]),
     );
     // Pinned exactly: adding a surface must fail here and get a reviewed edit.
-    expect(names.length).toBe(9); // + components/trade/perp/PerpChart.tsx (exempt above)
+    // 10: + components/trade/perp/PerpChart.tsx (exempt above), + the public trader profile (#3479).
+    expect(names.length).toBe(10);
   });
 
   it("every exemption still names a discovered surface, with a real reason", () => {
