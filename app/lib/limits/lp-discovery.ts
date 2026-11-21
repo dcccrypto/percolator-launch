@@ -8,7 +8,7 @@
  * P3: when the asset has a bound vault LP (`AssetVaultLpV18.vault_lp_portfolio`),
  * that key IS the LP — pass it as `knownLp` and no scan runs (asset 0: checked against the
  * market bytes, so a vault LP without an enabled matcher no longer scans on every poll).
- * Any scan result, found or not, is cached per market (a miss only briefly).
+ * A found LP is cached per market; a completed scan that found no LP (no known LP) only briefly.
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import { V17_PORTFOLIO_IDENTITY_TRAILER_LEN, decodePortfolioMatcherControl } from "@percolatorct/sdk";
@@ -26,6 +26,16 @@ const MISS_TTL_MS = 60_000;
 export interface LpAccounts {
   lpPortfolio: PublicKey;
   matcherCtx: PublicKey | null;
+  /**
+   * The canonical resolve FAILED and only the verified bound-vault fallback answered: the matcher
+   * is unknown, not absent, so a caller keeps its last good matcher instead of clearing it.
+   */
+  degraded?: boolean;
+}
+
+export interface ResolveLpOptions {
+  /** A fail-closed pre-sign read: never serve a cached "no LP" (a found LP may still come from cache). */
+  fresh?: boolean;
 }
 
 /** Matcher ctx from an ENABLED portfolio matcher config, else null. */
@@ -129,6 +139,7 @@ export async function resolveLpAccounts(
   slab: PublicKey,
   knownLp: PublicKey | null = null,
   assetIndex = 0,
+  opts: ResolveLpOptions = {},
 ): Promise<LpAccounts | null> {
   // CANONICAL_ASSET_ISOLATION_V1
   // resolveMarketLp() currently selects the asset-0 trading LP.
@@ -146,7 +157,7 @@ export async function resolveLpAccounts(
 
   const key = `${programId.toBase58()}|${slab.toBase58()}|${assetIndex}|${knownLp?.toBase58() ?? ""}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.ts < hit.ttl) return hit.v;
+  if (hit && Date.now() - hit.ts < hit.ttl && (hit.v || !opts.fresh)) return hit.v;
 
   const skipScan = knownLp !== null && await asset0VaultBoundTo(connection, programId, slab, knownLp);
 
@@ -184,13 +195,14 @@ export async function resolveLpAccounts(
 
     // Do not cache fallback: revocation must be observed
     // on the next read.
-    if (fallback) return fallback;
+    if (fallback) return canonicalError !== null ? { ...fallback, degraded: true } : fallback;
   }
 
   if (canonicalError !== null) throw canonicalError;
-  // A completed scan that found no LP. (The no-scan path is not cached: it costs no scan,
-  // and its fallback must observe a revoked binding on the next read.)
-  if (!skipScan) cache.set(key, { v: null, ts: Date.now(), ttl: MISS_TTL_MS });
+  // A completed scan that found no LP. Only cached without a known LP: callers pass `knownLp`
+  // only when they saw it bound, so a miss with one means a failed or racing binding/fallback
+  // read, which must be retried, not remembered.
+  if (!knownLp) cache.set(key, { v: null, ts: Date.now(), ttl: MISS_TTL_MS });
   return null;
 
 }

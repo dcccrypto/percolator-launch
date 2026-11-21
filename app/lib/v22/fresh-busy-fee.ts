@@ -55,7 +55,7 @@ export async function readFreshBusyFeeBps(
     if (!engine) return null;
     const vaultLp = decodeAssetVaultLp(raw, assetIndex);
     const known = vaultLp?.bound ? new Pk(vaultLp.vaultLpPortfolio) : null;
-    const lpAccts = await resolveLpAccounts(connection as Connection, programId, market, known, assetIndex);
+    const lpAccts = await resolveLpAccounts(connection as Connection, programId, market, known, assetIndex, { fresh: true });
     if (!lpAccts) return null;
     const keys: PublicKey[] = [lpAccts.lpPortfolio];
     let guardPda: PublicKey | null = null;

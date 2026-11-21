@@ -217,4 +217,46 @@ describe("useMarketLimits matcher transition", () => {
 
     unmount();
   });
+
+  it("POSITIVE: keeps the matcher when a failed canonical read falls back (degraded)", async () => {
+    mocks.resolveLpAccounts
+      .mockResolvedValueOnce({
+        lpPortfolio: lp,
+        matcherCtx: ctx,
+      })
+      .mockResolvedValue({
+        lpPortfolio: lp,
+        matcherCtx: null,
+        degraded: true,
+      });
+
+    const { useMarketLimits } =
+      await import("@/hooks/useMarketLimits");
+
+    const { result, unmount } = renderHook(() =>
+      useMarketLimits(market.toBase58()),
+    );
+
+    await waitFor(() => {
+      expect(result.current.matcher).not.toBeNull();
+      expect(result.current.matcherSyncLive).toBe(true);
+    });
+
+    await act(async () => {
+      mocks.tick?.();
+    });
+
+    await waitFor(() =>
+      expect(mocks.resolveLpAccounts).toHaveBeenCalledTimes(2),
+    );
+    // Let the degraded read's state update land before asserting.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+
+    expect(result.current.matcher).not.toBeNull();
+    expect(result.current.matcherSyncLive).toBe(true);
+
+    unmount();
+  });
 });

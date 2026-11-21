@@ -451,7 +451,8 @@ export function useMarketLimits(
         // The ctx is owned by the LP's matcher program; unknown / failed detection = not live.
         const matcherSyncLive = ctxInfo ? await matcherLpSyncLive(connection, programPk, ctxInfo.owner).catch(() => false) : false;
         if (!alive) return;
-        const explicitNoMatcher = lpAccts?.matcherCtx === null;
+        // A degraded answer (canonical resolve failed, bound-vault fallback only) does not prove "no matcher".
+        const explicitNoMatcher = lpAccts?.matcherCtx === null && !lpAccts.degraded;
         const vaultState = vaultInfo ? decodeVaultLpState(new Uint8Array(vaultInfo.data)) : null;
         const registryShares = registryInfo ? decodeLpVaultRegistryShares(new Uint8Array(registryInfo.data)) : null;
         const guardAccount = guardPda ? decodeMarketLevGuard(guardInfo, programPk, slabPk, assetIndex) : null;
