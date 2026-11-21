@@ -29,6 +29,7 @@ export interface RegisteredPool {
 
 const TTL_MS = 60_000;
 const REGISTERED_MINT_QUERY_TIMEOUT_MS = 1_500;
+const REGISTERED_MARKETS_READ_TIMEOUT_MS = 1_500;
 const MAX_ENTRIES = 500;
 const bySlab = new Map<string, { v: RegisteredPool | null; at: number }>();
 const byMint = new Map<string, { v: RegisteredPool | null; at: number }>();
@@ -63,7 +64,7 @@ function supabaseConfigured(): boolean {
 
 async function dexTypeFor(slab: string): Promise<string | null> {
   try {
-    return (await readRegisteredMarkets(AbortSignal.timeout(1_500))).find((m) => m.slabAddress === slab)?.dexType ?? null;
+    return (await readRegisteredMarkets(AbortSignal.timeout(REGISTERED_MARKETS_READ_TIMEOUT_MS))).find((m) => m.slabAddress === slab)?.dexType ?? null;
   } catch {
     return null;
   }

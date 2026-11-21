@@ -226,7 +226,7 @@ export async function GET(
         { error: "Oracle resolver is busy. Retry shortly." },
         {
           status: 503,
-          headers: { "Retry-After": "1" },
+          headers: { "Cache-Control": "no-store", "Retry-After": "1" },
         },
       );
     }
