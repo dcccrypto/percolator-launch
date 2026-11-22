@@ -3,7 +3,7 @@
  * not HTTP requests — a batch of N entries consumes N units — and an oversized
  * batch is refused before it is charged.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 type PostFn = (req: NextRequest) => Promise<Response>;
@@ -26,6 +26,13 @@ describe("S3-C4 /api/rpc counts batched calls", () => {
   const savedLimit = process.env.RPC_RATE_LIMIT_PER_WINDOW;
   const savedUrl = process.env.UPSTASH_REDIS_REST_URL;
   let POST: PostFn;
+
+  // Warm the transform cache once with its own generous timeout: the cold import of the
+  // route graph can exceed the default 10s hook timeout on a loaded machine. The per-test
+  // re-import below (needed so the route re-reads the env) is then a cache hit.
+  beforeAll(async () => {
+    await import("../../../app/api/rpc/route");
+  }, 120_000);
 
   beforeEach(async () => {
     vi.resetModules();
