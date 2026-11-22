@@ -9,6 +9,7 @@ import { join } from "node:path";
 import {
   cooldownPhrase,
   fmtCountdown,
+  capMaxNowToPosition,
   maxNowAtoms,
   previewWithdrawAtoms,
   sharesForUsdc,
@@ -84,6 +85,13 @@ describe("max_now: what the vault can pay out before open trades close", () => {
     expect(maxNowAtoms(base, 500_000_000n, true)).toBe(600_000_000n);
     expect(maxNowAtoms({ ...base, illiquid: false }, 500_000_000n, false)).toBeNull();
     expect(maxNowAtoms(null, 1n, false)).toBeNull();
+  });
+  it("is never more than the user's own position value (backingCover 1,000 vs a 10 position)", () => {
+    const v = { ...base, backingCover: 1_000_000_000n, seniorClaimEff: 1_000_000_000n, vaultValue: 1_000_000_000n };
+    expect(maxNowAtoms(v, 0n, false, 10_000_000n)).toBe(10_000_000n);
+    expect(maxNowAtoms(v, 0n, false, 2_000_000_000n)).toBe(1_000_000_000n); // a bigger position doesn't raise it
+    expect(capMaxNowToPosition(1_000_000_000n, 10_000_000n)).toBe(10_000_000n);
+    expect(capMaxNowToPosition(null, 10_000_000n)).toBeNull();
   });
 });
 
