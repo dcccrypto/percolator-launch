@@ -40,7 +40,31 @@ re-copy the fixture if `main` ever changes the format, and bump both sides to `:
 | `PLAYGROUND_ACCESS_SECRET` | ≥ 32 chars, **identical** to the value on percolator.trade. Unset/short with the gate on = everyone locked out (fail closed). |
 | `PLAYGROUND_COHORT_CUTOFF` | optional, default `1000`. Checked at `/enter` and on every request, so lowering it takes effect immediately. |
 | `PLAYGROUND_TEAM_BYPASS_SECRET` | ≥ 32 chars, playground only. Enables the team door below. Unset = no team door. |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | already set for rate limiting; also makes handoffs single-use across instances. |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Required for new waitlist handoffs when the gate is enabled. Missing or unavailable Redis rejects handoffs; Redis also supports rate limiting. |
+
+## Redis outage and replay protection
+
+When `PLAYGROUND_GATE_ENABLED=true`, new waitlist handoff
+exchanges require a working shared Redis replay store.
+
+- Redis SET NX provides cross-instance single-use protection.
+- If Redis is unavailable or its configuration is missing,
+  new waitlist handoffs are rejected.
+- Rejected handoffs redirect to `/locked` without issuing
+  a `pg_access` session cookie.
+- Existing valid session cookies remain usable.
+- The team bypass continues to use its separate authentication.
+- When the gate is disabled, the per-instance memory fallback
+  remains available for compatibility.
+
+This is a deliberate security-versus-availability trade-off.
+A Redis outage temporarily prevents new waitlist users from
+entering while the gate is enforced.
+
+Before enabling the gate, verify Redis configuration and
+availability. Operators should restore Redis availability
+rather than disable the access gate as a routine workaround.
+
 
 ## Team door
 
